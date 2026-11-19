@@ -1,5 +1,7 @@
 import { WORLD_H, WORLD_W } from './game/map.ts';
-import { ENEMY_DEFS, ESCAPE_TIME, HORSE_REACH, LOOT_REACH, PLAYER_R, heatLevel, quotaMet } from './game/sim.ts';
+import {
+  DOOR_REACH, ENEMY_DEFS, ENTER_TIME, ESCAPE_TIME, HORSE_REACH, LOOT_REACH, PLAYER_R, bankDoor, heatLevel, quotaMet,
+} from './game/sim.ts';
 import type { Bomb, Decal, Enemy, Loot, Particle, Pickup, Rect, Vec, World } from './game/types.ts';
 import type { Stick } from './input.ts';
 import {
@@ -766,6 +768,23 @@ function drawProgress(ctx: Ctx, world: World): void {
     ctx.arc(l.x, l.y - 8, 30, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, l.progress / l.time));
     ctx.stroke();
   }
+  // 은행 문 앞: 서 있으면 안으로 들어간다는 표시
+  const door = world.bankVisited ? null : bankDoor(world);
+  if (door) {
+    ctx.strokeStyle = C.gold;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([6, 5]);
+    ctx.beginPath();
+    ctx.ellipse(door.x, door.y, DOOR_REACH, DOOR_REACH * 0.6, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (world.enterProgress > 0) {
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.ellipse(door.x, door.y, DOOR_REACH, DOOR_REACH * 0.6, 0, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, world.enterProgress / ENTER_TIME));
+      ctx.stroke();
+    }
+  }
   if (world.escapeProgress > 0) {
     ctx.strokeStyle = C.sage;
     ctx.lineWidth = 7;
@@ -849,8 +868,30 @@ function drawArrows(ctx: Ctx, view: View, world: World, time: number): void {
     ctx.restore();
   };
   for (const l of world.loots) if (!l.taken) arrow(l, C.gold, l.kind === 'safe' ? 12 : 8);
+  const door = world.bankVisited ? null : bankDoor(world);
+  if (door) arrow(door, C.gold, 14);
   for (const e of world.enemies) if (e.kind === 'sheriff') arrow(e, C.blood, 12);
   if (quotaMet(world)) arrow(world.horse, C.sage, 13 + Math.sin(time * 6) * 2);
+}
+
+/** 1인칭 장면 위에 덧그리는 것: 이동 스틱과 피격 때의 붉은 번쩍임. 나머지는 비워 3D 화면이 비치게 한다. */
+export function drawOverlay(ctx: Ctx, view: View, sticks: Stick[], hurt: number, lowHp: boolean, time: number): void {
+  ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+  ctx.clearRect(0, 0, view.w, view.h);
+  const r = Math.hypot(view.w, view.h) / 2;
+  if (lowHp) {
+    const pulse = 0.5 + Math.sin(time * 6) * 0.5;
+    const danger = ctx.createRadialGradient(view.w / 2, view.h / 2, r * 0.5, view.w / 2, view.h / 2, r);
+    danger.addColorStop(0, 'rgba(179, 38, 30, 0)');
+    danger.addColorStop(1, 'rgba(179, 38, 30, ' + (0.25 + pulse * 0.2) + ')');
+    ctx.fillStyle = danger;
+    ctx.fillRect(0, 0, view.w, view.h);
+  }
+  if (hurt > 0) {
+    ctx.fillStyle = 'rgba(179, 38, 30, ' + hurt * 0.9 + ')';
+    ctx.fillRect(0, 0, view.w, view.h);
+  }
+  drawSticks(ctx, sticks);
 }
 
 function drawSticks(ctx: Ctx, sticks: Stick[]): void {

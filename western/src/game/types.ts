@@ -262,7 +262,8 @@ export interface Player {
   dust: number;
 }
 
-export type WorldPhase = 'play' | 'escaped' | 'dead';
+/** inside: 건물 안에 들어가 있어 바깥 세상이 멈춘 상태. */
+export type WorldPhase = 'play' | 'inside' | 'escaped' | 'dead';
 
 export interface World {
   rng: number;
@@ -299,6 +300,10 @@ export interface World {
   /** 아직 고르지 않은 능력 선택 횟수. */
   pendingPerks: number;
   escapeProgress: number;
+  /** 은행 문 앞에 서 있은 시간. 다 차면 안으로 들어간다. */
+  enterProgress: number;
+  /** 은행에는 한 작전에 한 번만 들어갈 수 있다. */
+  bankVisited: boolean;
   shake: number;
   /** 타격 순간 화면을 잠깐 멈추는 시간. */
   hitStop: number;

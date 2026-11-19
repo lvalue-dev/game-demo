@@ -1,6 +1,7 @@
 import { rand, randRange, shuffle } from './rng.ts';
 import type { BuildingStyle, Bush, Decor, Loot, Material, ObstacleKind, Rect, Vec } from './types.ts';
 
+// 은행의 금고는 건물 안에 있다. 문 앞에 서면 안으로 들어가 1인칭으로 턴다.
 // 배경: 1881년 애리조나 준주, 소노라 사막 저지대의 작은 마을 "먼지골".
 // 큰길 하나를 사이에 두고 가게가 마주 선, 그 시절 개척 마을의 전형적인 배치다.
 
@@ -144,7 +145,6 @@ const DECOR: Decor[] = [
 
 /** 금고가 놓이는 자리. 뒤쪽 작전일수록 더 많이 열린다. */
 const SAFES: { x: number; y: number; value: number; fromJob: number }[] = [
-  { x: 800, y: 492, value: 40, fromJob: 0 },
   { x: 1160, y: 492, value: 25, fromJob: 0 },
   { x: 400, y: 504, value: 30, fromJob: 1 },
   { x: 1440, y: 660, value: 40, fromJob: 2 },

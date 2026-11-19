@@ -131,11 +131,11 @@ p, h1, dl, dd { margin: 0; }
 
 .banner {
   position: absolute;
-  left: 50%;
+  left: 16px;
+  right: 16px;
   top: 22%;
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: calc(100% - 32px);
+  width: fit-content;
+  margin-inline: auto;
   padding: 6px 12px;
   background: var(--ink);
   color: var(--paper);
@@ -165,6 +165,42 @@ p, h1, dl, dd { margin: 0; }
 .pad-bomb { right: 194px; background: rgb(179 38 30 / 0.7); color: var(--paper); }
 .pad-bomb.is-waiting { background: rgb(243 227 191 / 0.35); color: var(--ink-soft); border-style: dashed; }
 .stage.is-rotated .pad { bottom: 26px; }
+
+/* 1인칭 장면: 3D 화면은 아래에 깔고, 그 위의 캔버스는 스틱과 번쩍임만 그린다. */
+.game3d { cursor: none; background: #1c1410; }
+.crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border: 2px solid rgb(243 227 191 / 0.9);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgb(42 26 16 / 0.7);
+  pointer-events: none;
+}
+.crosshair::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: var(--blood);
+}
+.pad-fire {
+  right: max(26px, env(safe-area-inset-right, 0px));
+  bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+  width: 84px;
+  height: 84px;
+  background: rgb(179 38 30 / 0.75);
+  color: var(--paper);
+  font-size: var(--step-0);
+}
+.stage.is-rotated .pad-fire { bottom: 40px; right: 44px; }
 
 /* ---------- 안내판 ---------- */
 .panel {

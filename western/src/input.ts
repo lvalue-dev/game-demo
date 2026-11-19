@@ -34,6 +34,11 @@ export interface Controls {
   usesTouch(): boolean;
   /** 화면이 바뀔 때 눌려 있던 입력을 모두 놓는다. */
   reset(): void;
+  /** 1인칭 장면: 오른쪽 화면을 끌거나 마우스를 움직이면 쏘는 대신 시점이 돈다. */
+  setLookMode(on: boolean): void;
+  /** 지난번 읽은 뒤로 시점을 돌린 양(화면 픽셀). 읽으면 0으로 돌아간다. */
+  takeLook(): Vec;
+  mouseDown(): boolean;
 }
 
 export function attachControls(
@@ -53,6 +58,10 @@ export function attachControls(
   let move = { dx: 0, dy: 0, active: false };
   let aimStick = { dx: 0, dy: 0, active: false };
   let aimPoint: { x: number; y: number } | null = null;
+  let lookMode = false;
+  let look = { x: 0, y: 0 };
+  /** 시점을 돌리는 손가락의 직전 위치. */
+  const lastTouch = new Map<number, Vec>();
 
   const moveCenter = (): Vec => ({ x: STICK_INSET_X, y: canvas.clientHeight - STICK_INSET_Y });
   const aimCenter = (): Vec => ({ x: canvas.clientWidth - STICK_INSET_X, y: canvas.clientHeight - STICK_INSET_Y });
@@ -88,6 +97,7 @@ export function attachControls(
         : Math.hypot(x - ac.x, y - ac.y) <= grab ? { kind: 'aimStick' }
         : { kind: 'aimPoint' };
       roles.set(t.identifier, role);
+      lastTouch.set(t.identifier, { x, y });
     }
 
     // 지금 화면에 닿아 있는 손가락만으로 상태를 새로 만든다. 놓친 이벤트가 있어도 입력이 남지 않는다.
@@ -101,10 +111,22 @@ export function attachControls(
       live.add(t.identifier);
       const { x, y } = toLocal(t.clientX, t.clientY);
       if (role.kind === 'move') move = { ...stickValue(moveCenter(), x, y), active: true };
-      else if (role.kind === 'aimStick') aimStick = { ...stickValue(aimCenter(), x, y), active: true };
+      else if (lookMode) {
+        // 1인칭에서는 오른쪽 화면을 끈 만큼 시점이 돈다.
+        const prev = lastTouch.get(t.identifier);
+        if (prev) {
+          look.x += x - prev.x;
+          look.y += y - prev.y;
+        }
+        lastTouch.set(t.identifier, { x, y });
+      } else if (role.kind === 'aimStick') aimStick = { ...stickValue(aimCenter(), x, y), active: true };
       else aimPoint = { x, y };
     }
-    for (const id of roles.keys()) if (!live.has(id)) roles.delete(id);
+    for (const id of roles.keys()) {
+      if (live.has(id)) continue;
+      roles.delete(id);
+      lastTouch.delete(id);
+    }
   }
 
   for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel'] as const) {
@@ -135,6 +157,10 @@ export function attachControls(
   canvas.addEventListener('pointermove', (e) => {
     if (e.pointerType === 'touch') return;
     mouse = { x: e.offsetX, y: e.offsetY, down: mouse?.down ?? false };
+    if (lookMode) {
+      look.x += e.movementX;
+      look.y += e.movementY;
+    }
   });
   const release = (e: PointerEvent): void => {
     if (e.pointerType === 'touch') return;
@@ -156,6 +182,8 @@ export function attachControls(
   function reset(): void {
     keys.clear();
     roles.clear();
+    lastTouch.clear();
+    look = { x: 0, y: 0 };
     move = { dx: 0, dy: 0, active: false };
     aimStick = { dx: 0, dy: 0, active: false };
     aimPoint = null;
@@ -207,13 +235,28 @@ export function attachControls(
       if (!touch) return [];
       const mc = moveCenter();
       const ac = aimCenter();
+      const moveStick: Stick = {
+        side: 'move', originX: mc.x, originY: mc.y, dx: move.dx, dy: move.dy, radius: STICK_RADIUS, active: move.active,
+      };
+      // 1인칭에서는 조준 스틱 대신 화면을 끌어 시점을 돌린다.
+      if (lookMode) return [moveStick];
       return [
-        { side: 'move', originX: mc.x, originY: mc.y, dx: move.dx, dy: move.dy, radius: STICK_RADIUS, active: move.active },
+        moveStick,
         { side: 'aim', originX: ac.x, originY: ac.y, dx: aimStick.dx, dy: aimStick.dy, radius: STICK_RADIUS, active: aimStick.active },
       ];
     },
     usesTouch: () => touch,
     reset,
+    setLookMode(on) {
+      lookMode = on;
+      look = { x: 0, y: 0 };
+    },
+    takeLook() {
+      const taken = look;
+      look = { x: 0, y: 0 };
+      return taken;
+    },
+    mouseDown: () => !touch && !!mouse?.down,
   };
 }
 

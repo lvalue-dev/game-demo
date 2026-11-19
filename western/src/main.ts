@@ -2,13 +2,18 @@ import { isMuted, playEvents, setMuted, unlock } from './audio.ts';
 import { JOBS } from './game/map.ts';
 import { buy, canBuy, choosePerk, finishJob, newRun, nextJob, perkChoices, perkDef, startJob } from './game/run.ts';
 import type { Run } from './game/run.ts';
-import { MAX_HEAT, NO_INPUT, heatLevel, quotaMet, step, xpForLevel } from './game/sim.ts';
-import type { Vec, World } from './game/types.ts';
+import { MAX_HEAT, NO_INPUT, heatLevel, leaveBuilding, quotaMet, step, xpForLevel } from './game/sim.ts';
+import type { GameEvent, Vec, World } from './game/types.ts';
 import { attachControls } from './input.ts';
-import { draw, makeView, screenToWorld, snapCamera, updateCamera } from './render.ts';
+import { createBank, stepInterior } from './interior/level.ts';
+import type { Interior } from './interior/level.ts';
+import { createView3D } from './interior/view3d.ts';
+import type { View3D } from './interior/view3d.ts';
+import { draw, drawOverlay, makeView, screenToWorld, snapCamera, updateCamera } from './render.ts';
 import type { Insets, View } from './render.ts';
 
-type Screen = 'title' | 'play' | 'perk' | 'shop' | 'dead' | 'won';
+/** inside: 건물 안. 화면이 1인칭 3D로 바뀐다. */
+type Screen = 'title' | 'play' | 'inside' | 'perk' | 'shop' | 'dead' | 'won';
 
 const LANDSCAPE_KEY = 'mungigol-landscape';
 
@@ -23,6 +28,16 @@ const dashButton = $('dash');
 const bombButton = $('bomb');
 const muteButton = $('mute');
 const rotateButton = $('rotate');
+const canvas3d = $<HTMLCanvasElement>('game3d');
+const crosshair = $('crosshair');
+const fireButton = $('fire');
+
+/** 지금 들어가 있는 건물 안의 상태. 밖에 있으면 null. */
+let interior: Interior | null = null;
+let view3d: View3D | null = null;
+let fireHeld = false;
+/** 사격 버튼을 누른 채 끈 만큼의 시점 이동. */
+let fireDrag: { last: Vec | null; x: number; y: number } = { last: null, x: 0, y: 0 };
 
 /** 세로로 선 폰에서 화면을 옆으로 돌려 가로로 쓰는 중인가. */
 let rotated = false;
@@ -99,6 +114,80 @@ function layout(): void {
   view = makeView(w, h, dpr, insets);
   view.camX = prev.camX;
   view.camY = prev.camY;
+  view3d?.resize(w, h, dpr);
+}
+
+// ---------- 건물 안(1인칭) ----------
+
+function enterBank(): void {
+  interior = createBank(run.job, run.stats, world.player.hp, world.player.ammo, randomSeed());
+  view3d ??= createView3D(canvas3d);
+  view3d.build(interior);
+  setScreen('inside');
+  layout();
+  say('은행 안이다. 금고는 안쪽 오른편 방에 있다. 문으로 나가면 마을로 돌아간다.', 5);
+}
+
+function leaveBank(): void {
+  const s = interior!;
+  leaveBuilding(world, {
+    loot: s.loot, hp: s.player.hp, ammo: s.player.ammo, xp: s.xp, kills: s.kills, alerted: s.alerted, seconds: s.time,
+  });
+  interior = null;
+  if (document.pointerLockElement) document.exitPointerLock();
+  hudKey = '';
+  seen.alarmed = world.alarmed;
+  snapCamera(view, world);
+  setScreen('play');
+  if (world.phase !== 'play') return;
+  say(s.loot > 0 ? '은행에서 $' + s.loot + ' 챙겨 나왔다. 밖이 시끄럽다.' : '빈손으로 나왔다.', 3.5);
+}
+
+function stepInside(dt: number, now: number): void {
+  const s = interior!;
+  const moved = controls.read(world.player, (sx, sy) => screenToWorld(view, sx, sy), []);
+  const look = controls.takeLook();
+  const touch = controls.usesTouch();
+  const turn = touch ? 0.0058 : 0.0026;
+  stepInterior(s, {
+    moveX: moved.moveX,
+    moveZ: -moved.moveY,
+    lookX: (look.x + fireDrag.x) * turn,
+    lookY: -(look.y + fireDrag.y) * turn,
+    fire: fireHeld || controls.mouseDown(),
+    reload: moved.reload,
+    assist: touch,
+  }, dt);
+  fireDrag.x = fireDrag.y = 0;
+
+  view3d!.react(s);
+  const sounds: GameEvent[] = [];
+  for (const e of s.events) if (e.type === 'sound') sounds.push(e.name);
+  playEvents(sounds);
+  s.events.length = 0;
+  view3d!.render(s, dt);
+  drawOverlay(ctx, view, controls.sticks(), s.player.hurtFlash, s.player.hp <= 2, now / 1000);
+  updateHudInside(s);
+  if (!banner.hidden && now > bannerUntil) banner.hidden = true;
+  if (s.done) leaveBank();
+}
+
+function updateHudInside(s: Interior): void {
+  const p = s.player;
+  const key = ['in', p.hp, s.loot, p.ammo, p.reload > 0, Math.floor(s.safe.progress * 10), s.safe.taken].join('/');
+  if (key === hudKey) return;
+  hudKey = key;
+  const total = world.loot + s.loot;
+  hudHp.innerHTML = hearts(p.hp, s.stats.maxHp);
+  hudLoot.textContent = '$' + total;
+  hudQuota.textContent = ' / ' + world.quota;
+  hudFill.style.width = Math.min(100, (total / world.quota) * 100) + '%';
+  hud.classList.toggle('is-ready', total >= world.quota);
+  hudLevel.textContent = s.safe.taken ? '금고 털림' : s.safe.progress > 0 ? '금고 ' + Math.round((s.safe.progress / s.safe.time) * 100) + '%' : '금고 안쪽';
+  hudXp.style.width = Math.min(100, (s.safe.progress / s.safe.time) * 100) + '%';
+  hudBomb.textContent = p.reload > 0 ? '재장전' : '탄 ' + p.ammo + '/' + s.stats.maxAmmo;
+  hudBomb.classList.toggle('is-ready', p.reload === 0);
+  fireButton.textContent = p.reload > 0 ? '장전' : '사격 ' + p.ammo;
 }
 
 function say(text: string, seconds = 2.6): void {
@@ -122,12 +211,20 @@ function setScreen(next: Screen): void {
   screen = next;
   controls.reset();
   const playing = next === 'play';
+  const inside = next === 'inside';
   const touch = controls.usesTouch();
-  hud.hidden = !(playing || next === 'perk');
-  panel.hidden = playing;
+  hud.hidden = !(playing || inside || next === 'perk');
+  panel.hidden = playing || inside;
   dashButton.hidden = !(playing && touch);
   bombButton.hidden = !(playing && touch);
-  if (!playing) {
+  // 1인칭 장면에서는 3D 화면, 조준점, 사격 버튼이 나온다.
+  canvas3d.hidden = !inside;
+  crosshair.hidden = !inside;
+  fireButton.hidden = !(inside && touch);
+  stage.classList.toggle('is-inside', inside);
+  controls.setLookMode(inside);
+  fireHeld = false;
+  if (!playing && !inside) {
     banner.hidden = true;
     renderPanel();
   }
@@ -162,6 +259,7 @@ function titlePanel(): string {
         <div><dt>폰</dt><dd>왼쪽 스틱으로 이동한다. 쏘고 싶은 곳을 화면에서 누르거나, 오른쪽 스틱을 밀면 그 방향으로 쏜다.</dd></div>
         <div><dt>PC</dt><dd>WASD 이동, 마우스 조준과 사격, 스페이스 구르기, 오른쪽 클릭이나 E로 다이너마이트, R 재장전.</dd></div>
         <div><dt>요령</dt><dd>적은 가는 방향을 앞질러 쏜다. 붉은 선이 굵어지는 순간 방향을 틀거나 굴러라. 다이너마이트는 금고도 터뜨린다.</dd></div>
+        <div><dt>은행</dt><dd>은행 문 앞에 서면 안으로 들어간다. 안에서는 1인칭이다. 화면을 끌거나 마우스를 움직여 위아래까지 겨누고, 금고 앞에서 금고를 바라보면 턴다.</dd></div>
       </dl>
       ${buttons}
     </div>`;
@@ -282,6 +380,36 @@ muteButton.addEventListener('click', () => {
 });
 rotateButton.addEventListener('click', () => setLandscape(!wantLandscape));
 
+// 사격 버튼: 누르고 있는 동안 쏘고, 누른 채 끌면 시점도 돈다.
+function fireTouch(e: TouchEvent): void {
+  e.preventDefault();
+  const t = e.targetTouches[0];
+  fireHeld = !!t;
+  if (!t) {
+    fireDrag.last = null;
+    return;
+  }
+  const at = toLocal(t.clientX, t.clientY);
+  if (fireDrag.last) {
+    fireDrag.x += at.x - fireDrag.last.x;
+    fireDrag.y += at.y - fireDrag.last.y;
+  }
+  fireDrag.last = at;
+}
+for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel'] as const) {
+  fireButton.addEventListener(type, fireTouch, { passive: false });
+}
+// PC에서는 화면을 누르면 마우스를 붙잡아 시점을 자유롭게 돌린다. 붙잡지 못하는 환경에서는 그냥 움직여 돌린다.
+canvas.addEventListener('click', () => {
+  if (screen !== 'inside' || controls.usesTouch() || document.pointerLockElement) return;
+  try {
+    const locking = canvas.requestPointerLock() as unknown as Promise<void> | undefined;
+    locking?.catch?.(() => undefined);
+  } catch {
+    // 마우스를 붙잡지 못해도 게임은 계속된다.
+  }
+});
+
 // ---------- 플레이 중 화면 위 정보 ----------
 
 const hudHp = $('hud-hp');
@@ -333,6 +461,12 @@ function frame(now: number): void {
   const dt = Math.min(1 / 30, (now - last) / 1000);
   last = now;
 
+  if (screen === 'inside' && interior) {
+    stepInside(dt, now);
+    requestAnimationFrame(frame);
+    return;
+  }
+
   if (screen === 'play') {
     const input = controls.read(world.player, (sx, sy) => screenToWorld(view, sx, sy), world.enemies);
     step(world, input, dt);
@@ -346,6 +480,8 @@ function frame(now: number): void {
     } else if (world.phase === 'dead') {
       deadDelay += dt;
       if (deadDelay > 1.1) setScreen('dead');
+    } else if (world.phase === 'inside') {
+      enterBank();
     } else if (world.pendingPerks > 0) {
       choices = perkChoices(run, world);
       if (choices.length === 0) world.pendingPerks = 0;
@@ -363,7 +499,8 @@ function frame(now: number): void {
 }
 
 // 자동 점검 스크립트가 진행 상태를 들여다보고 바꿀 수 있게 열어 둔 창구.
-(window as unknown as { __game: () => { world: World; run: Run; rotated: boolean } }).__game = () => ({ world, run, rotated });
+(window as unknown as { __game: () => { world: World; run: Run; rotated: boolean; interior: Interior | null } }).__game =
+  () => ({ world, run, rotated, interior });
 
 window.addEventListener('resize', layout);
 window.addEventListener('orientationchange', layout);

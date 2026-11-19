@@ -11,6 +11,8 @@ export const HORSE_REACH = 54;
 export const ESCAPE_TIME = 1;
 export const MAX_HEAT = 5;
 export const BOMB_MAX_THROW = 320;
+export const DOOR_REACH = 24;
+export const ENTER_TIME = 0.7;
 
 const PLAYER_BULLET_SPEED = 1100;
 const PLAYER_BULLET_LIFE = 0.5;
@@ -112,6 +114,8 @@ export function createWorld(
     level: progress.level,
     pendingPerks: 0,
     escapeProgress: 0,
+    enterProgress: 0,
+    bankVisited: false,
     shake: 0,
     hitStop: 0,
     kills: 0,
@@ -232,7 +236,7 @@ function floatText(w: World, x: number, y: number, text: string, color: string):
   w.texts.push({ x, y, text, life: 1.1, maxLife: 1.1, color });
 }
 
-function raiseAlarm(w: World): void {
+export function raiseAlarm(w: World): void {
   if (w.alarmed) return;
   w.alarmed = true;
   w.heat = Math.max(w.heat, 1);
@@ -255,6 +259,39 @@ function addXp(w: World, amount: number): void {
     w.pendingPerks += 1;
     emit(w, 'levelup');
   }
+}
+
+/** 은행 문 앞의 자리. 여기 서 있으면 안으로 들어간다. */
+export function bankDoor(w: World): Vec | null {
+  const bank = w.obstacles.find((o) => o.kind === 'building' && o.style?.trade === 'bank');
+  return bank ? { x: bank.x + bank.w / 2, y: bank.y + bank.h + 14 } : null;
+}
+
+/** 건물 안에서 있었던 일을 바깥 세상에 반영하고 문 앞으로 돌아온다. */
+export function leaveBuilding(
+  w: World, result: { loot: number; hp: number; ammo: number; xp: number; kills: number; alerted: boolean; seconds: number },
+): void {
+  w.phase = result.hp > 0 ? 'play' : 'dead';
+  w.bankVisited = true;
+  w.enterProgress = 0;
+  w.loot += result.loot;
+  w.kills += result.kills;
+  w.player.hp = Math.max(0, result.hp);
+  w.player.ammo = result.ammo;
+  w.player.invuln = 1;
+  const door = bankDoor(w);
+  if (door) {
+    w.player.x = door.x;
+    w.player.y = door.y + 22;
+    w.player.aimDir = Math.PI / 2;
+  }
+  addXp(w, result.xp);
+  if (result.hp <= 0) emit(w, 'dead');
+  if (!result.alerted) return;
+  // 안에서 총소리가 났으면 그동안 밖에는 추격대가 모였다.
+  raiseAlarm(w);
+  addHeat(w, result.seconds / HEAT_SECONDS + (result.loot > 0 ? 1 : 0));
+  w.spawnTimer = 0;
 }
 
 function takeLoot(w: World, l: Loot): void {
@@ -804,6 +841,15 @@ function updateLoot(w: World, dt: number): void {
     if (l.kind === 'safe') raiseAlarm(w);
     l.progress += dt * w.stats.crackSpeed;
     if (l.progress >= l.time) takeLoot(w, l);
+  }
+
+  // 은행 문 앞에 잠깐 서 있으면 안으로 들어간다.
+  const door = w.bankVisited ? null : bankDoor(w);
+  if (door && dist(door, p) <= DOOR_REACH) {
+    w.enterProgress += dt;
+    if (w.enterProgress >= ENTER_TIME) w.phase = 'inside';
+  } else {
+    w.enterProgress = 0;
   }
 
   if (quotaMet(w) && dist(w.horse, p) <= HORSE_REACH) {
