@@ -22,12 +22,13 @@ export interface Controls {
   usesTouch(): boolean;
 }
 
-export function attachControls(canvas: HTMLCanvasElement, dashButton: HTMLElement): Controls {
+export function attachControls(canvas: HTMLCanvasElement, dashButton: HTMLElement, bombButton: HTMLElement): Controls {
   const keys = new Set<string>();
   const sticks = new Map<number, Stick>();
   let mouse: { x: number; y: number; down: boolean } | null = null;
   let dashQueued = false;
   let reloadQueued = false;
+  let bombQueued = false;
   let touch = false;
 
   window.addEventListener('keydown', (e) => {
@@ -38,6 +39,7 @@ export function attachControls(canvas: HTMLCanvasElement, dashButton: HTMLElemen
       e.preventDefault();
     }
     if (e.code === 'KeyR') reloadQueued = true;
+    if (e.code === 'KeyE' || e.code === 'KeyQ') bombQueued = true;
   });
   window.addEventListener('keyup', (e) => keys.delete(e.code));
   window.addEventListener('blur', () => {
@@ -49,7 +51,8 @@ export function attachControls(canvas: HTMLCanvasElement, dashButton: HTMLElemen
   canvas.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     if (e.pointerType === 'mouse') {
-      mouse = { x: e.offsetX, y: e.offsetY, down: e.button === 0 };
+      if (e.button === 2) bombQueued = true;
+      mouse = { x: e.offsetX, y: e.offsetY, down: e.button === 0 || (mouse?.down ?? false) };
       return;
     }
     touch = true;
@@ -84,7 +87,7 @@ export function attachControls(canvas: HTMLCanvasElement, dashButton: HTMLElemen
   });
   const release = (e: PointerEvent): void => {
     if (e.pointerType === 'mouse') {
-      if (mouse) mouse.down = false;
+      if (mouse && e.button === 0) mouse.down = false;
       return;
     }
     sticks.delete(e.pointerId);
@@ -98,6 +101,11 @@ export function attachControls(canvas: HTMLCanvasElement, dashButton: HTMLElemen
     touch = true;
     dashQueued = true;
   });
+  bombButton.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    touch = true;
+    bombQueued = true;
+  });
 
   const held = (...codes: string[]): boolean => codes.some((c) => keys.has(c));
 
@@ -106,6 +114,7 @@ export function attachControls(canvas: HTMLCanvasElement, dashButton: HTMLElemen
       let moveX = (held('KeyD', 'ArrowRight') ? 1 : 0) - (held('KeyA', 'ArrowLeft') ? 1 : 0);
       let moveY = (held('KeyS', 'ArrowDown') ? 1 : 0) - (held('KeyW', 'ArrowUp') ? 1 : 0);
       let aim: number | null = null;
+      let aimDist: number | null = null;
       let fire = false;
 
       for (const s of sticks.values()) {
@@ -113,19 +122,25 @@ export function attachControls(canvas: HTMLCanvasElement, dashButton: HTMLElemen
           moveX = s.dx;
           moveY = s.dy;
         } else if (Math.hypot(s.dx, s.dy) > AIM_DEADZONE) {
-          aim = assist(Math.atan2(s.dy, s.dx), playerPos, enemies);
+          const target = assist(Math.atan2(s.dy, s.dx), playerPos, enemies);
+          aim = target.dir;
+          aimDist = target.dist;
           fire = true;
         }
       }
       if (aim === null && mouse && !touch) {
         const target = toWorld(mouse.x, mouse.y);
         aim = Math.atan2(target.y - playerPos.y, target.x - playerPos.x);
+        aimDist = Math.hypot(target.x - playerPos.x, target.y - playerPos.y);
         fire = mouse.down;
       }
 
-      const input: Input = { moveX, moveY, aim, fire, dash: dashQueued, reload: reloadQueued };
+      const input: Input = {
+        moveX, moveY, aim, aimDist, fire, dash: dashQueued, reload: reloadQueued, bomb: bombQueued,
+      };
       dashQueued = false;
       reloadQueued = false;
+      bombQueued = false;
       return input;
     },
     sticks: () => [...sticks.values()],
@@ -134,20 +149,21 @@ export function attachControls(canvas: HTMLCanvasElement, dashButton: HTMLElemen
 }
 
 /** 엄지로는 정밀 조준이 어려우므로, 조준 방향 가까이에 적이 있으면 그쪽으로 살짝 맞춰 준다. */
-function assist(dir: number, from: Vec, enemies: Vec[]): number {
+function assist(dir: number, from: Vec, enemies: Vec[]): { dir: number; dist: number | null } {
   const cone = 0.3;
   const range = 520;
-  let best = dir;
+  let best: { dir: number; dist: number | null } = { dir, dist: null };
   let bestDiff = cone;
   for (const e of enemies) {
     const dx = e.x - from.x;
     const dy = e.y - from.y;
-    if (Math.hypot(dx, dy) > range) continue;
+    const d = Math.hypot(dx, dy);
+    if (d > range) continue;
     const a = Math.atan2(dy, dx);
     const diff = Math.abs(Math.atan2(Math.sin(a - dir), Math.cos(a - dir)));
     if (diff < bestDiff) {
       bestDiff = diff;
-      best = a;
+      best = { dir: a, dist: d };
     }
   }
   return best;

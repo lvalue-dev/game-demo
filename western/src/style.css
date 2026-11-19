@@ -113,23 +113,52 @@ p, h1, dl, dd { margin: 0; }
   pointer-events: none;
 }
 
-.dash {
+.pad {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
   bottom: calc(18px + env(safe-area-inset-bottom, 0px));
-  width: 72px;
-  height: 72px;
+  width: 68px;
+  height: 68px;
   border: 3px solid var(--ink);
   border-radius: 50%;
   background: rgb(243 227 191 / 0.85);
   color: var(--ink);
-  font: 700 var(--step-0) var(--font-body);
+  font: 700 var(--step--1) var(--font-body);
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
 }
-.dash:active { background: var(--gold-bright); }
+.pad:active { background: var(--gold-bright); }
+.pad-dash { left: calc(50% + 6px); }
+.pad-bomb { right: calc(50% + 6px); background: rgb(179 38 30 / 0.85); color: var(--paper); }
+.pad-bomb.is-waiting { background: rgb(243 227 191 / 0.5); color: var(--ink-soft); border-style: dashed; }
+
+.hud-foot { gap: 10px; }
+.hud-xp { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.hud-xp .hud-label { white-space: nowrap; letter-spacing: 0; }
+.hud-bar-thin { flex: 1; height: 6px; border-width: 1.5px; }
+.hud-xp-fill { background: var(--ink); }
+.hud.is-ready .hud-xp-fill { background: var(--ink); }
+.hud-chip {
+  padding: 1px 6px;
+  border: 1.5px dashed var(--ink-soft);
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.hud-chip.is-ready { border-style: solid; border-color: var(--blood); color: var(--blood); }
+
+.mute {
+  align-self: flex-start;
+  padding: 3px 8px;
+  border: 1.5px solid var(--ink);
+  border-radius: 0;
+  background: rgb(243 227 191 / 0.9);
+  color: var(--ink);
+  font: 500 0.75rem var(--font-body);
+  pointer-events: auto;
+  cursor: pointer;
+}
 
 /* ---------- 안내판 ---------- */
 .panel {
@@ -143,6 +172,8 @@ p, h1, dl, dd { margin: 0; }
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   background: var(--veil);
 }
+.panel.is-light { background: rgb(42 26 16 / 0.28); }
+.offer-rank { font-size: var(--step--1); font-weight: 500; color: var(--ink-soft); }
 .poster {
   display: flex;
   flex-direction: column;
@@ -223,3 +254,16 @@ h1 {
 }
 .offer:disabled .offer-price { color: var(--ink-soft); }
 .next-job { padding-top: 10px; border-top: 2px solid var(--ink); font-size: var(--step--1); }
+
+/* 폰에서는 정보판이 화면을 덜 가리게 줄인다. */
+@media (max-width: 480px) {
+  .hud { padding-block: 8px; gap: 4px; }
+  .hud-plate { gap: 3px; padding: 6px 8px; max-width: none; }
+  .heart { width: 13px; height: 13px; }
+  .hud-stars { font-size: 1rem; }
+  .hud-money { font-size: 1.2rem; }
+  .hud-quota { font-size: 0.875rem; }
+  .hud-bar { height: 6px; }
+  .hud-note { font-size: 0.75rem; }
+  .hud-loot { gap: 2px; }
+}
