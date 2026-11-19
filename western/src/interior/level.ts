@@ -69,6 +69,8 @@ export interface Interior {
   bags: Bag[];
   player: {
     x: number; z: number; yaw: number; pitch: number;
+    /** 지금 움직이는 속도(m/s). 가속과 감속이 있어 걸음이 매끄럽다. */
+    vx: number; vz: number;
     hp: number; ammo: number; reload: number; fireCd: number; invuln: number; hurtFlash: number;
   };
   stats: Stats;
@@ -217,7 +219,7 @@ export function createBank(job: number, stats: Stats, hp: number, ammo: number, 
       { x: -4.2, y: 1.1, z: -1.8, value: Math.round(10 * mult), taken: false },
       { x: 6.3, y: 1.1, z: -1.8, value: Math.round(10 * mult), taken: false },
     ],
-    player: { x: 0, z: D - 1, yaw: 0, pitch: 0, hp, ammo, reload: 0, fireCd: 0, invuln: 0, hurtFlash: 0 },
+    player: { x: 0, z: D - 1, yaw: 0, pitch: 0, vx: 0, vz: 0, hp, ammo, reload: 0, fireCd: 0, invuln: 0, hurtFlash: 0 },
     stats,
     safe: { id: safe.id, x: 9.45, y: 0.75, z: -7.9, value: Math.round(40 * mult), time: 2.6, progress: 0, taken: false },
     loot: 0,
@@ -399,9 +401,16 @@ function movePlayer(s: Interior, input: Input3, dt: number): void {
   const speed = WALK_SPEED * (s.stats.speed / 215);
   const sin = Math.sin(p.yaw);
   const cos = Math.cos(p.yaw);
-  // 앞은 (-sin, -cos), 오른쪽은 (cos, -sin)
-  p.x += (-sin * mz + cos * mx) * speed * dt;
-  p.z += (-cos * mz - sin * mx) * speed * dt;
+  // 앞은 (-sin, -cos), 오른쪽은 (cos, -sin). 원하는 속도까지 서서히 붙고 서서히 멎는다.
+  const wantX = (-sin * mz + cos * mx) * speed;
+  const wantZ = (-cos * mz - sin * mx) * speed;
+  const grip = 1 - Math.exp(-(len > 0.05 ? 11 : 14) * dt);
+  p.vx += (wantX - p.vx) * grip;
+  p.vz += (wantZ - p.vz) * grip;
+  const fromX = p.x;
+  const fromZ = p.z;
+  p.x += p.vx * dt;
+  p.z += p.vz * dt;
   for (const b of s.blocks) {
     if (b.tag === 'floor' || b.tag === 'ceiling' || b.max[1] < 0.2 || b.min[1] > 1.7) continue;
     const cx = Math.max(b.min[0], Math.min(b.max[0], p.x));
@@ -412,6 +421,11 @@ function movePlayer(s: Interior, input: Input3, dt: number): void {
     if (d >= PLAYER_R || d < 1e-6) continue;
     p.x = cx + (dx / d) * PLAYER_R;
     p.z = cz + (dz / d) * PLAYER_R;
+  }
+  // 벽에 막힌 만큼은 속도도 잃는다.
+  if (dt > 0) {
+    p.vx = (p.x - fromX) / dt;
+    p.vz = (p.z - fromZ) / dt;
   }
 }
 
@@ -467,7 +481,10 @@ function updateGuards(s: Interior, dt: number): void {
       if (sees && Math.hypot(g.x - eye[0], g.z - eye[2]) < 8.5) alertAll(s);
       continue;
     }
-    g.yaw = Math.atan2(-(eye[0] - g.x), -(eye[2] - g.z));
+    // 고개를 홱 돌리지 않고 부드럽게 돌아본다.
+    const want = Math.atan2(-(eye[0] - g.x), -(eye[2] - g.z));
+    const turn = Math.atan2(Math.sin(want - g.yaw), Math.cos(want - g.yaw));
+    g.yaw += turn * (1 - Math.exp(-7 * dt));
     if (g.aim > 0) {
       g.aim -= dt;
       if (g.aim > 0) continue;

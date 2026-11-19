@@ -2,6 +2,7 @@
 // 충돌은 단순한 상자지만, 화면에서는 쓰임새에 맞게 꾸민다: 둥근 부품의 인물, 결이 있는 재질, 그림자.
 // 색은 바깥과 같은 재질표(kit.ts)에서 가져와 두 장면의 그림체가 이어지게 한다.
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { ENEMY_KITS, MATERIAL, PLAYER_KIT } from '../kit.ts';
 import { EYE, ROOM } from './level.ts';
 import type { Block, Guard, Interior, Mat3, V3 } from './level.ts';
@@ -29,17 +30,29 @@ interface Chip {
   gravity: number;
 }
 
+/** 관절 하나: 위쪽 마디(어깨, 엉덩이)와 아래쪽 마디(팔꿈치, 무릎). */
+interface Limb {
+  upper: THREE.Group;
+  lower: THREE.Group;
+}
+
 interface Rig {
   group: THREE.Group;
-  legL: THREE.Group;
-  legR: THREE.Group;
-  armL: THREE.Group;
-  armR: THREE.Group;
+  body: THREE.Group;
+  torso: THREE.Group;
+  legL: Limb;
+  legR: Limb;
+  armL: Limb;
+  armR: Limb;
   glint: THREE.Mesh;
   skin: THREE.MeshStandardMaterial[];
   fall: number;
   lastX: number;
   stride: number;
+  /** 걷는 정도와 겨누는 정도. 0과 1 사이를 부드럽게 오간다. */
+  move: number;
+  aim: number;
+  lean: number;
 }
 
 // ---------- 재질 ----------
@@ -128,8 +141,9 @@ const TEXTURES = {
   }),
 };
 
-function standard(color: string, map?: THREE.Texture, roughness = 0.85, metalness = 0): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color: map ? '#ffffff' : color, map, roughness, metalness });
+/** env는 주변이 비치는 정도. 쇠붙이는 높게, 나무와 천은 낮게 준다. */
+function standard(color: string, map?: THREE.Texture, roughness = 0.85, metalness = 0, env = 0.35): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({ color: map ? '#ffffff' : color, map, roughness, metalness, envMapIntensity: env });
 }
 
 function shadowed<T extends THREE.Object3D>(o: T, cast = true, receive = true): T {
@@ -178,14 +192,26 @@ export function createView3D(canvas: HTMLCanvasElement): View3D {
   let holes: THREE.Mesh[] = [];
   let blasts: { mesh: THREE.Mesh; life: number; radius: number }[] = [];
   let gun = new THREE.Group();
-  let drum = new THREE.Mesh();
+  let cylinder = new THREE.Group();
+  let hammer = new THREE.Group();
+  let thumb = new THREE.Group();
+  let trigger = new THREE.Mesh();
   let flash = new THREE.PointLight('#ffd27a', 0, 10);
-  let muzzle = new THREE.Mesh();
+  let muzzle = new THREE.Sprite();
   let blastLight = new THREE.PointLight('#ff9a3a', 0, 20);
-  let recoil = 0;
   let shake = 0;
   let walk = 0;
   let clock = 0;
+  let baseFov = 62;
+  /** 손에 든 총의 움직임. 값들이 목표를 뒤따라가며 반동과 관성을 만든다. */
+  const hold = {
+    kick: 0, kickV: 0, sway: 0, lift: 0, roll: 0, speed: 0, lastYaw: 0, lastPitch: 0, sinceShot: 9, turns: 0, hurt: 0,
+  };
+  // 쇠붙이에 비칠 주변 풍경
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const surroundings = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+  const ease = (t: number): number => t * t * (3 - 2 * t);
 
   const box = (w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -433,10 +459,13 @@ export function createView3D(canvas: HTMLCanvasElement): View3D {
     scene.add(face, rim, box(0.03, 0.26, 0.02, frame, -8, 5.31, -D + 0.1), box(0.2, 0.03, 0.02, frame, -7.91, 5.2, -D + 0.1));
   }
 
-  /** 경비원. 둥근 부품을 관절에 매달아 걷고 겨누게 한다. */
+  /** 경비원. 어깨·팔꿈치·엉덩이·무릎 관절이 있어 걷고 겨누는 자세가 이어진다. */
   function addGuard(g: Guard): void {
     const kit = ENEMY_KITS.deputy;
     const group = new THREE.Group();
+    group.rotation.order = 'YXZ';
+    const body = new THREE.Group();
+    group.add(body);
     const skinMats: THREE.MeshStandardMaterial[] = [];
     const mat = (color: string, rough = 0.85): THREE.MeshStandardMaterial => {
       const m = standard(color, undefined, rough);
@@ -454,103 +483,194 @@ export function createView3D(canvas: HTMLCanvasElement): View3D {
     const vest = mat(kit.torsoSide);
     const skin = mat(kit.skin, 0.7);
     const leather = mat('#2a1c14', 0.6);
-    // 다리: 엉덩이를 축으로 흔든다.
-    const leg = (x: number): THREE.Group => {
-      const pivot = new THREE.Group();
-      pivot.position.set(x, 0.88, 0);
-      capsule(0.095, 0.5, trousers, 0, -0.36, 0, pivot);
-      capsule(0.1, 0.12, leather, 0, -0.78, -0.03, pivot);
-      group.add(pivot);
-      return pivot;
+    // 다리: 엉덩이에서 허벅지가, 무릎에서 정강이가 꺾인다.
+    const leg = (x: number): Limb => {
+      const upper = new THREE.Group();
+      upper.position.set(x, 0.9, 0);
+      capsule(0.085, 0.28, trousers, 0, -0.2, 0, upper);
+      const lower = new THREE.Group();
+      lower.position.set(0, -0.42, 0);
+      capsule(0.072, 0.26, trousers, 0, -0.19, 0, lower);
+      const boot = capsule(0.07, 0.11, leather, 0, -0.42, -0.045, lower);
+      boot.rotation.x = Math.PI / 2;
+      upper.add(lower);
+      body.add(upper);
+      return { upper, lower };
     };
-    const legL = leg(-0.12);
-    const legR = leg(0.12);
-    // 몸통: 셔츠 위에 조끼, 허리띠와 총집
-    capsule(0.2, 0.34, shirt, 0, 1.14, 0, group);
-    capsule(0.215, 0.26, vest, 0, 1.12, 0.012, group).scale.set(1, 1, 0.92);
-    const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.07, 14), leather);
-    belt.position.y = 0.9;
-    group.add(belt);
-    capsule(0.05, 0.14, leather, 0.22, 0.82, 0, group);
-    // 가슴의 별 배지
-    const star = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.015, 5), standard(MATERIAL.gold.top, undefined, 0.3, 0.8));
+    const legL = leg(-0.11);
+    const legR = leg(0.11);
+    // 몸통: 허리를 축으로 기울어진다. 셔츠 위에 조끼, 허리띠와 총집.
+    const torso = new THREE.Group();
+    torso.position.y = 0.9;
+    body.add(torso);
+    capsule(0.19, 0.3, shirt, 0, 0.27, 0, torso);
+    capsule(0.205, 0.24, vest, 0, 0.25, 0.012, torso).scale.set(1, 1, 0.92);
+    const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.195, 0.195, 0.07, 14), leather);
+    belt.position.y = 0.02;
+    torso.add(belt);
+    capsule(0.05, 0.14, leather, 0.21, -0.07, 0, torso);
+    const star = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.015, 5), standard(MATERIAL.gold.top, undefined, 0.3, 0.8, 1));
     star.rotation.x = Math.PI / 2;
-    star.position.set(-0.1, 1.28, -0.2);
-    group.add(star);
-    // 목수건, 머리, 얼굴
-    const scarf = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, 0.1, 12), mat(MATERIAL.red.top));
-    scarf.position.y = 1.46;
-    group.add(scarf);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 12), skin);
-    head.position.y = 1.62;
-    head.scale.set(0.95, 1.08, 1);
-    group.add(head);
+    star.position.set(-0.1, 0.4, -0.195);
+    torso.add(star);
+    const scarf = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 0.09, 12), mat(MATERIAL.red.top));
+    scarf.position.y = 0.57;
+    torso.add(scarf);
+    // 머리, 얼굴, 모자
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.145, 18, 14), skin);
+    head.position.y = 0.73;
+    head.scale.set(0.94, 1.1, 1);
+    torso.add(head);
     const dark = standard('#1c1410');
-    group.add(box(0.035, 0.025, 0.02, dark, -0.055, 1.645, -0.14), box(0.035, 0.025, 0.02, dark, 0.055, 1.645, -0.14));
-    group.add(box(0.14, 0.035, 0.03, standard('#3a2618'), 0, 1.565, -0.145), box(0.035, 0.05, 0.04, skin, 0, 1.6, -0.155));
-    // 모자: 살짝 말린 넓은 챙, 위로 좁아지는 정수리, 띠
-    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.31, 0.03, 24), mat(kit.hat.brim, 0.9));
-    brim.position.y = 1.745;
-    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.135, 0.165, 0.17, 18), mat(kit.hat.crown, 0.9));
-    crown.position.y = 1.84;
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.168, 0.168, 0.035, 18), standard(kit.hat.band));
-    band.position.y = 1.775;
-    group.add(brim, crown, band);
-    // 팔: 어깨를 축으로 들어 올린다. 오른손에 권총.
-    const arm = (x: number): THREE.Group => {
-      const pivot = new THREE.Group();
-      pivot.position.set(x, 1.36, 0);
-      capsule(0.065, 0.24, shirt, 0, -0.16, 0, pivot);
-      capsule(0.055, 0.22, shirt, 0, -0.44, 0, pivot);
-      capsule(0.05, 0.04, skin, 0, -0.62, 0, pivot);
-      group.add(pivot);
-      return pivot;
+    torso.add(box(0.032, 0.022, 0.02, dark, -0.052, 0.755, -0.135), box(0.032, 0.022, 0.02, dark, 0.052, 0.755, -0.135));
+    torso.add(box(0.13, 0.032, 0.03, standard('#3a2618'), 0, 0.675, -0.14), box(0.032, 0.05, 0.04, skin, 0, 0.71, -0.15));
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.3, 0.028, 26), mat(kit.hat.brim, 0.9));
+    brim.position.y = 0.855;
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.16, 0.17, 20), mat(kit.hat.crown, 0.9));
+    crown.position.y = 0.95;
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.163, 0.163, 0.034, 20), standard(kit.hat.band));
+    band.position.y = 0.885;
+    torso.add(brim, crown, band);
+    // 팔: 어깨에서 위팔이, 팔꿈치에서 아래팔이 꺾인다.
+    const arm = (x: number): Limb => {
+      const upper = new THREE.Group();
+      upper.position.set(x, 0.47, 0);
+      capsule(0.06, 0.19, shirt, 0, -0.14, 0, upper);
+      const lower = new THREE.Group();
+      lower.position.set(0, -0.29, 0);
+      capsule(0.05, 0.19, shirt, 0, -0.13, 0, lower);
+      capsule(0.045, 0.03, skin, 0, -0.28, 0, lower);
+      upper.add(lower);
+      torso.add(upper);
+      return { upper, lower };
     };
-    const armL = arm(-0.27);
-    const armR = arm(0.27);
-    const steel = standard('#5a5e66', undefined, 0.42, 0.35);
-    const barrel = rod(0.018, 0.22, steel, 0, -0.66, -0.15, 8);
-    barrel.rotation.x = Math.PI / 2;
-    armR.add(barrel, box(0.04, 0.07, 0.1, steel, 0, -0.66, -0.02), box(0.035, 0.09, 0.04, standard(MATERIAL.wood.top), 0, -0.6, 0.02));
+    const armL = arm(-0.26);
+    const armR = arm(0.26);
+    // 오른손의 권총. 팔을 뻗으면 총열이 팔과 한 줄이 된다.
+    const steel = standard('#4a4e56', undefined, 0.35, 0.8, 1.1);
+    armR.lower.add(rod(0.016, 0.2, steel, 0, -0.43, -0.035, 10), box(0.04, 0.1, 0.07, steel, 0, -0.31, -0.03), box(0.034, 0.05, 0.09, standard(MATERIAL.wood.top), 0, -0.28, 0.02));
     // 쏘기 직전에 총구에서 붉게 빛나는 경고
     const glint = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), new THREE.MeshBasicMaterial({ color: '#ff3b2e' }));
-    glint.position.set(0, -0.66, -0.28);
-    armR.add(glint);
+    glint.position.set(0, -0.55, -0.035);
+    armR.lower.add(glint);
     scene.add(shadowed(group));
-    rigs.set(g.id, { group, legL, legR, armL, armR, glint, skin: skinMats, fall: 0, lastX: g.x, stride: 0 });
+    rigs.set(g.id, {
+      group, body, torso, legL, legR, armL, armR, glint, skin: skinMats, fall: 0, lastX: g.x, stride: g.id, move: 0, aim: 0, lean: 0,
+    });
   }
 
-  /** 손에 든 6연발 권총. */
+  /** 손에 쥔 싱글액션 6연발 리볼버와 오른손. 크기는 실물 비례를 따른다. */
   function buildGun(): void {
     gun = new THREE.Group();
-    // 반사할 주변이 없는 실내라 쇠를 너무 금속답게 하면 새까맣게 보인다.
-    const steel = standard('#6a6f78', undefined, 0.42, 0.35);
-    const grip = standard(MATERIAL.wood.top, undefined, 0.6);
-    const barrel = rod(0.014, 0.24, steel, 0, 0.022, -0.17, 12);
-    barrel.rotation.x = Math.PI / 2;
-    const under = rod(0.008, 0.16, steel, 0, 0, -0.13, 8);
-    under.rotation.x = Math.PI / 2;
-    drum = rod(0.03, 0.055, steel, 0, 0.012, -0.03, 12);
-    drum.rotation.x = Math.PI / 2;
-    gun.add(barrel, under, drum);
-    gun.add(box(0.024, 0.05, 0.1, steel, 0, 0.012, -0.03), box(0.012, 0.03, 0.018, steel, 0, 0.05, 0.02), box(0.008, 0.018, 0.008, steel, 0, 0.042, -0.285));
-    const handle = box(0.03, 0.11, 0.045, grip, 0, -0.055, 0.035);
-    handle.rotation.x = 0.4;
-    gun.add(handle);
-    // 손과 소매
-    const skin = standard(PLAYER_KIT.skin, undefined, 0.7);
-    const hand = new THREE.Mesh(new THREE.CapsuleGeometry(0.026, 0.04, 4, 8), skin);
-    hand.position.set(0, -0.045, 0.045);
-    hand.rotation.x = 0.5;
-    const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.04, 0.34, 4, 10), standard(PLAYER_KIT.torso));
-    sleeve.position.set(0.012, -0.1, 0.25);
-    sleeve.rotation.x = 1.2;
-    gun.add(hand, sleeve);
-    muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshBasicMaterial({ color: '#fff1b8' }));
-    muzzle.position.set(0, 0.022, -0.32);
+    const steel = standard('#7a828e', undefined, 0.3, 0.6, 1.2);
+    const dark = standard('#2a2d33', undefined, 0.5, 0.5, 0.8);
+    const walnut = standard('#5e3b22', undefined, 0.42, 0, 0.6);
+    const lay = (m: THREE.Mesh): THREE.Mesh => {
+      m.rotation.x = Math.PI / 2;
+      return m;
+    };
+    // 총열, 그 아래의 탄피 밀대, 가늠쇠
+    gun.add(lay(rod(0.0085, 0.14, steel, 0, 0.014, -0.118, 18)));
+    gun.add(lay(rod(0.0045, 0.095, steel, 0.0085, 0.004, -0.096, 8)));
+    gun.add(box(0.0026, 0.008, 0.012, steel, 0, 0.0265, -0.18));
+    // 몸통: 윗띠, 뒤판, 아래틀
+    gun.add(box(0.019, 0.007, 0.062, steel, 0, 0.0335, -0.013), box(0.02, 0.05, 0.02, steel, 0, 0.012, 0.027), box(0.019, 0.012, 0.058, steel, 0, -0.017, -0.013));
+    // 탄창: 홈이 팬 원통. 쏠 때마다 한 칸씩 돈다.
+    cylinder = new THREE.Group();
+    cylinder.position.set(0, 0.009, -0.014);
+    cylinder.add(lay(rod(0.0205, 0.042, steel, 0, 0, 0, 24)));
+    for (let i = 0; i < 6; i++) {
+      const a = (i * Math.PI) / 3;
+      const flute = box(0.009, 0.004, 0.026, dark, Math.cos(a) * 0.0195, Math.sin(a) * 0.0195, -0.004);
+      flute.rotation.z = a + Math.PI / 2;
+      cylinder.add(flute);
+    }
+    gun.add(cylinder);
+    // 공이치기: 뒤쪽 위의 축을 중심으로 젖혀진다.
+    hammer = new THREE.Group();
+    hammer.position.set(0, 0.026, 0.03);
+    hammer.add(box(0.007, 0.022, 0.008, steel, 0, 0.011, 0.004), box(0.009, 0.005, 0.013, steel, 0, 0.022, 0.011));
+    gun.add(hammer);
+    // 방아쇠울과 방아쇠
+    const guard = new THREE.Mesh(new THREE.TorusGeometry(0.014, 0.0024, 6, 14, Math.PI), steel);
+    guard.rotation.set(0, Math.PI / 2, Math.PI);
+    guard.position.set(0, -0.023, 0.004);
+    trigger = box(0.003, 0.013, 0.004, steel, 0, -0.028, 0.006);
+    gun.add(guard, trigger);
+
+    // 손잡이는 아래로 갈수록 뒤로 휜다. 손도 이 기울기를 따라 쥔다.
+    const grip = new THREE.Group();
+    grip.position.set(0, -0.022, 0.034);
+    grip.rotation.x = -0.36;
+    grip.add(box(0.019, 0.085, 0.03, steel, 0, -0.04, 0.006), box(0.027, 0.074, 0.024, walnut, 0, -0.042, 0.004), box(0.028, 0.012, 0.034, walnut, 0, -0.084, 0.008));
+    const skin = standard('#b47c56', undefined, 0.78, 0, 0.12);
+    const digit = (r: number, len: number, x: number, y: number, z: number, rx: number, rz: number, parent: THREE.Object3D = grip): THREE.Mesh => {
+      const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 4, 10), skin);
+      m.position.set(x, y, z);
+      m.rotation.set(rx, 0, rz);
+      parent.add(m);
+      return m;
+    };
+    // 손바닥과 손등: 손잡이 오른쪽과 뒤를 감싼다.
+    const palm = new THREE.Mesh(new THREE.SphereGeometry(0.03, 14, 12), skin);
+    palm.position.set(0.019, -0.042, 0.02);
+    palm.scale.set(0.58, 1.3, 1.05);
+    grip.add(palm);
+    digit(0.012, 0.022, 0.004, -0.006, 0.034, 0, Math.PI / 2);
+    // 가운뎃손가락부터 새끼손가락까지: 손잡이 앞을 가로질러 왼쪽으로 감아쥔다.
+    for (let i = 0; i < 3; i++) {
+      const y = -0.022 - i * 0.0185;
+      digit(0.0088 - i * 0.0006, 0.03, 0.001, y, -0.017, 0, Math.PI / 2);
+      digit(0.008 - i * 0.0006, 0.013, -0.018, y, -0.006, Math.PI / 2, 0);
+    }
+    // 검지: 몸통을 따라 뻗다가 방아쇠에 걸친다.
+    digit(0.0085, 0.028, 0.014, 0.0, -0.014, Math.PI / 2 + 0.36, 0);
+    digit(0.0078, 0.012, 0.004, -0.008, -0.035, 0.36, Math.PI / 2);
+    // 엄지: 왼쪽에서 올라와 공이치기를 당긴다.
+    thumb = new THREE.Group();
+    thumb.position.set(-0.013, 0.0, 0.03);
+    digit(0.0095, 0.03, 0, 0.012, -0.012, Math.PI / 2 - 0.5, 0, thumb);
+    grip.add(thumb);
+    // 손목, 팔뚝, 소매. 화면 오른쪽 아래에서 들어온다.
+    digit(0.024, 0.05, 0.024, -0.078, 0.045, -0.7, 0.2);
+    digit(0.03, 0.26, 0.05, -0.145, 0.18, -0.75, 0.22);
+    const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.04, 0.3, 4, 12), standard(PLAYER_KIT.torso, undefined, 0.9));
+    sleeve.position.set(0.075, -0.2, 0.3);
+    sleeve.rotation.set(-0.75, 0, 0.22);
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.03, 14), standard('#f6d67a', undefined, 0.8));
+    cuff.position.set(0.058, -0.158, 0.205);
+    cuff.rotation.set(-0.75, 0, 0.22);
+    grip.add(sleeve, cuff);
+    gun.add(grip);
+
+    // 총구 화염: 밝게 번지는 빛 한 장
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g2 = c.getContext('2d')!;
+    const glow = g2.createRadialGradient(64, 64, 0, 64, 64, 64);
+    glow.addColorStop(0, 'rgba(255, 250, 220, 1)');
+    glow.addColorStop(0.25, 'rgba(255, 210, 110, 0.9)');
+    glow.addColorStop(0.6, 'rgba(240, 120, 40, 0.35)');
+    glow.addColorStop(1, 'rgba(240, 120, 40, 0)');
+    g2.fillStyle = glow;
+    g2.fillRect(0, 0, 128, 128);
+    g2.strokeStyle = 'rgba(255, 240, 190, 0.9)';
+    g2.lineWidth = 5;
+    for (let i = 0; i < 6; i++) {
+      const a = (i * Math.PI) / 3 + 0.3;
+      g2.beginPath();
+      g2.moveTo(64, 64);
+      g2.lineTo(64 + Math.cos(a) * 58, 64 + Math.sin(a) * 58);
+      g2.stroke();
+    }
+    muzzle = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
+    }));
+    muzzle.position.set(0, 0.014, -0.21);
+    muzzle.scale.setScalar(0.17);
     muzzle.visible = false;
     flash = new THREE.PointLight('#ffd27a', 0, 10);
-    flash.position.set(0, 0.05, -0.4);
+    flash.position.set(0, 0.03, -0.3);
     gun.add(muzzle, flash);
     camera.add(gun);
   }
@@ -585,10 +705,12 @@ export function createView3D(canvas: HTMLCanvasElement): View3D {
       holes = [];
       blasts = [];
       shotMeshes = [];
-      recoil = shake = 0;
+      shake = 0;
+      Object.assign(hold, { kick: 0, kickV: 0, sway: 0, lift: 0, roll: 0, speed: 0, lastYaw: s.player.yaw, lastPitch: s.player.pitch, sinceShot: 9, turns: 0, hurt: 0 });
       camera.clear();
+      scene.environment = surroundings;
       scene.add(camera);
-      scene.add(new THREE.HemisphereLight('#ffeacc', '#3a2a1c', 0.75));
+      scene.add(new THREE.HemisphereLight('#ffeacc', '#3a2a1c', 0.5));
       // 위쪽 창에서 비스듬히 드는 빛. 가구와 사람의 그림자를 바닥에 드리운다.
       const sun = new THREE.DirectionalLight('#fff0d0', 1.5);
       sun.position.set(-6, 14, 9);
@@ -630,15 +752,20 @@ export function createView3D(canvas: HTMLCanvasElement): View3D {
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
       // 세로로 긴 화면에서는 좌우가 좁으므로 시야각을 넓힌다.
-      camera.fov = w >= h ? 62 : 84;
+      baseFov = w >= h ? 62 : 84;
+      camera.fov = baseFov;
       camera.updateProjectionMatrix();
     },
 
     react(s) {
       for (const e of s.events) {
         if (e.type === 'muzzle') {
-          recoil = 1;
-          drum.rotation.y += Math.PI / 3;
+          // 반동: 총이 튀어 오르고, 공이치기가 떨어지고, 총구에서 연기가 난다.
+          hold.kickV += 5.2;
+          hold.sinceShot = 0;
+          hold.turns += 1;
+          const at = muzzle.getWorldPosition(new THREE.Vector3());
+          spray([at.x, at.y, at.z], [0, 0.3, 0], ['#cfc8bc', '#9c958a'], 4, 0.35, 0.012, -0.9);
         } else if (e.type === 'impact') {
           const fast = e.material === 'metal' || e.material === 'powder' || e.material === 'glass';
           spray(e.pos, e.normal, CHIP[e.material], fast ? 9 : 7, fast ? 4.5 : 2.6, fast ? 0.03 : 0.055, fast ? 5 : 9);
@@ -683,54 +810,117 @@ export function createView3D(canvas: HTMLCanvasElement): View3D {
     render(s, dt) {
       const p = s.player;
       clock += dt;
-      const moving = Math.abs(p.x - camera.position.x) + Math.abs(p.z - camera.position.z) > 0.004;
-      if (moving) walk += dt * 10;
+      /** 목표값을 향해 부드럽게 다가간다. rate가 클수록 빨리 붙는다. */
+      const damp = (cur: number, target: number, rate: number): number => cur + (target - cur) * (1 - Math.exp(-rate * dt));
+      const step = Math.max(dt, 1e-4);
+
+      // 걸음: 속도에 비례해 발을 내딛고, 멈추면 흔들림도 서서히 잦아든다.
+      const speed = Math.hypot(p.vx, p.vz);
+      hold.speed = damp(hold.speed, Math.min(1, speed / 4.2), 9);
+      walk += dt * speed * 1.75;
+      // 옆걸음 때 몸이 기우는 쪽으로 화면도 살짝 기운다.
+      const side = p.vx * Math.cos(p.yaw) - p.vz * Math.sin(p.yaw);
+      hold.roll = damp(hold.roll, -side * 0.006, 8);
+      // 시점을 돌리는 빠르기. 총은 이만큼 늦게 따라온다.
+      const yawRate = Math.atan2(Math.sin(p.yaw - hold.lastYaw), Math.cos(p.yaw - hold.lastYaw)) / step;
+      const pitchRate = (p.pitch - hold.lastPitch) / step;
+      hold.lastYaw = p.yaw;
+      hold.lastPitch = p.pitch;
+      hold.sway = damp(hold.sway, clamp(yawRate * 0.02, -0.14, 0.14), 10);
+      hold.lift = damp(hold.lift, clamp(pitchRate * 0.02, -0.1, 0.1), 10);
+      // 반동은 스프링처럼 튀었다가 제자리로 돌아온다.
+      hold.kickV += (-260 * hold.kick - 20 * hold.kickV) * dt;
+      hold.kick += hold.kickV * dt;
+      hold.sinceShot += dt;
+      // 맞으면 고개가 휘청한다.
+      hold.hurt = damp(hold.hurt, p.hurtFlash > 0.2 ? 1 : 0, p.hurtFlash > 0.2 ? 30 : 6);
+
       shake = Math.max(0, shake - dt * 0.7);
       const jitter = (): number => (Math.random() - 0.5) * shake;
-      camera.position.set(p.x + jitter(), EYE + Math.sin(walk) * 0.03 + jitter(), p.z + jitter());
-      camera.rotation.y = p.yaw;
-      camera.rotation.x = p.pitch + recoil * 0.03;
+      camera.position.set(p.x + jitter(), EYE + Math.sin(walk * 2) * 0.02 * hold.speed + jitter(), p.z + jitter());
+      camera.rotation.set(p.pitch + hold.kick * 0.05 - hold.hurt * 0.04, p.yaw, hold.roll + hold.hurt * 0.05);
+      const fov = baseFov + hold.kick * 2.5;
+      if (Math.abs(camera.fov - fov) > 0.02) {
+        camera.fov = fov;
+        camera.updateProjectionMatrix();
+      }
 
-      // 손에 든 권총: 걸을 때의 흔들림, 반동, 재장전 동작
-      recoil = Math.max(0, recoil - dt * 7);
-      const reloading = p.reload > 0 ? Math.sin((1 - p.reload / s.stats.reloadTime) * Math.PI) : 0;
+      // 재장전: 총을 내려 기울이고, 한 발씩 넣는 동안 작게 흔들리다가, 다시 올린다.
+      const q = p.reload > 0 ? 1 - p.reload / s.stats.reloadTime : 0;
+      const down = p.reload > 0 ? ease(Math.min(1, q / 0.18)) * ease(Math.min(1, (1 - q) / 0.15)) : 0;
+      const tick = Math.sin(q * Math.PI * 12) * 0.006 * down;
+      const breath = Math.sin(clock * 1.5);
       gun.position.set(
-        0.16 + Math.cos(walk * 0.5) * 0.006,
-        -0.13 - reloading * 0.16 + Math.sin(walk) * 0.007,
-        -0.42 + recoil * 0.05,
+        0.135 + Math.cos(walk) * 0.009 * hold.speed + hold.sway * 0.04 - down * 0.05,
+        -0.135 - Math.abs(Math.sin(walk)) * 0.012 * hold.speed + breath * 0.0025 - hold.lift * 0.04 - down * 0.07 + hold.kick * 0.03 + tick,
+        -0.5 + hold.kick * 0.12 + hold.speed * 0.01,
       );
-      gun.rotation.set(recoil * 0.35 - reloading * 0.9, 0.03, reloading * 0.5);
-      muzzle.visible = recoil > 0.72;
-      flash.intensity = recoil > 0.72 ? 14 : 0;
+      gun.rotation.set(
+        hold.kick * 1.1 + hold.lift * 0.5 + breath * 0.004 + down * 0.75,
+        0.1 - hold.sway * 0.9 + down * 0.35,
+        hold.roll * 2.2 - hold.sway * 0.5 - down * 0.9,
+      );
+      // 싱글액션: 쏘면 공이치기가 떨어지고, 엄지가 다시 당기는 동안 탄창이 한 칸 돈다.
+      const cocked = ease(clamp((hold.sinceShot - 0.06) / 0.14, 0, 1));
+      hammer.rotation.x = 0.95 * cocked;
+      thumb.rotation.x = -0.45 * Math.sin(Math.PI * clamp((hold.sinceShot - 0.04) / 0.2, 0, 1));
+      const turned = p.reload > 0 ? Math.floor(q * 6) : hold.turns - 1 + cocked;
+      cylinder.rotation.z = turned * (Math.PI / 3);
+      trigger.rotation.x = 0.3 + (hold.sinceShot < 0.08 ? 0.35 : 0);
+      const firing = hold.sinceShot < 0.05;
+      muzzle.visible = firing;
+      if (firing) {
+        muzzle.material.rotation = hold.turns * 1.7;
+        muzzle.scale.setScalar(0.14 + ((hold.turns * 37) % 10) * 0.006);
+      }
+      flash.intensity = firing ? 14 : 0;
 
       for (const g of s.guards) {
         const rig = rigs.get(g.id);
         if (!rig) continue;
         if (g.dead) {
-          // 뒤로 쓰러진다.
-          rig.fall = Math.min(1, rig.fall + dt * 3);
-          rig.group.rotation.x = -rig.fall * (Math.PI / 2);
-          rig.group.position.set(g.x, g.y + rig.fall * 0.18, g.z);
-          rig.armL.rotation.x = rig.armR.rotation.x = -rig.fall * 0.6;
+          // 뒤로 넘어지며 팔이 벌어진다. 처음엔 빠르고 끝에서 느려진다.
+          rig.fall = Math.min(1, rig.fall + dt * 2.6);
+          const f = 1 - (1 - rig.fall) ** 3;
+          rig.group.rotation.x = f * (Math.PI / 2) * 0.97;
+          rig.group.position.set(g.x, g.y + f * 0.14, g.z);
+          rig.armL.upper.rotation.z = -f * 1.1;
+          rig.armR.upper.rotation.z = f * 1.1;
+          rig.armL.upper.rotation.x = rig.armR.upper.rotation.x = -f * 0.4;
+          rig.legL.lower.rotation.x = -f * 0.3;
           rig.glint.visible = false;
           continue;
         }
-        // 옆으로 걸을 때 다리를 번갈아 내딛는다.
-        const speed = Math.abs(g.x - rig.lastX) / Math.max(dt, 1e-4);
+        // 걷는 정도와 겨누는 정도를 부드럽게 바꾼다. 자세가 뚝뚝 끊기지 않는다.
+        const pace = Math.abs(g.x - rig.lastX) / step;
         rig.lastX = g.x;
-        if (speed > 0.2) rig.stride += dt * 9;
-        const swing = speed > 0.2 ? Math.sin(rig.stride) * 0.5 : 0;
-        rig.legL.rotation.x = swing;
-        rig.legR.rotation.x = -swing;
-        rig.group.position.set(g.x, g.y + Math.abs(Math.sin(rig.stride)) * 0.015, g.z);
+        rig.move = damp(rig.move, pace > 0.2 ? 1 : 0, 8);
+        rig.aim = damp(rig.aim, g.aim > 0 ? 1 : g.alerted ? 0.3 : 0, 12);
+        rig.lean = damp(rig.lean, g.hitFlash > 0 ? 0.3 : 0, g.hitFlash > 0 ? 40 : 6);
+        rig.stride += dt * 8.5 * rig.move;
+        const swing = Math.sin(rig.stride) * 0.5 * rig.move;
+        const idle = Math.sin(clock * 1.6 + g.id) * 0.04;
+        // 다리: 허벅지를 번갈아 내밀고, 뒤로 가는 다리는 무릎을 접는다.
+        rig.legL.upper.rotation.x = swing;
+        rig.legR.upper.rotation.x = -swing;
+        rig.legL.lower.rotation.x = -Math.max(0, -Math.sin(rig.stride)) * 0.8 * rig.move;
+        rig.legR.lower.rotation.x = -Math.max(0, Math.sin(rig.stride)) * 0.8 * rig.move;
+        rig.body.position.y = Math.abs(Math.sin(rig.stride)) * 0.022 * rig.move;
+        rig.body.rotation.z = Math.sin(rig.stride) * 0.03 * rig.move;
+        rig.group.position.set(g.x, g.y, g.z);
         rig.group.rotation.set(0, g.yaw, 0);
-        const aiming = g.aim > 0;
-        // 겨눌 때는 권총 든 팔을 앞으로 뻗고, 평소에는 내려 두고 숨 쉬듯 흔든다.
-        const idle = Math.sin(clock * 1.6 + g.id) * 0.05;
-        rig.armR.rotation.x = aiming ? Math.PI / 2 : 0.12 + idle - swing * 0.6;
-        rig.armL.rotation.x = aiming ? 0.5 : idle + swing * 0.6;
-        rig.glint.visible = aiming;
-        rig.glint.scale.setScalar(aiming ? 0.5 + (1 - g.aim / 0.55) * 1.8 : 1);
+        // 몸통: 맞으면 뒤로 젖혀지고, 겨눌 때는 살짝 숙인다.
+        rig.torso.rotation.x = rig.lean - rig.aim * 0.06 + idle * 0.3;
+        // 팔: 평소에는 걸음에 맞춰 흔들고, 겨눌 때는 두 손으로 총을 받쳐 앞으로 뻗는다.
+        const a = rig.aim;
+        rig.armR.upper.rotation.x = (0.1 + idle - swing * 0.6) * (1 - a) + 1.5 * a;
+        rig.armR.lower.rotation.x = 0.25 * (1 - a) + 0.08 * a;
+        rig.armL.upper.rotation.x = (0.05 + idle + swing * 0.6) * (1 - a) + 1.3 * a;
+        rig.armL.upper.rotation.z = 0.5 * a;
+        rig.armL.lower.rotation.x = 0.2 * (1 - a) + 0.45 * a;
+        rig.armR.upper.rotation.z = -0.12 * a;
+        rig.glint.visible = g.aim > 0;
+        rig.glint.scale.setScalar(g.aim > 0 ? 0.5 + (1 - g.aim / 0.55) * 1.8 : 1);
         for (const m of rig.skin) m.emissive.set(g.hitFlash > 0 ? '#aa4433' : '#000000');
       }
 
