@@ -166,9 +166,9 @@ function stepInside(dt: number, now: number): void {
   playEvents(sounds);
   s.events.length = 0;
   view3d!.render(s, dt);
-  drawOverlay(ctx, view, controls.sticks(), s.player.hurtFlash, s.player.hp <= 2, now / 1000);
+  const message = now < bannerUntil ? banner.textContent ?? '' : '';
+  drawOverlay(ctx, view, controls.sticks(), s.player.hurtFlash, s.player.hp <= 2, now / 1000, message);
   updateHudInside(s);
-  if (!banner.hidden && now > bannerUntil) banner.hidden = true;
   if (s.done) leaveBank();
 }
 
@@ -192,7 +192,8 @@ function updateHudInside(s: Interior): void {
 
 function say(text: string, seconds = 2.6): void {
   banner.textContent = text;
-  banner.hidden = false;
+  // 1인칭 장면에서는 안내 문구를 3D 화면 위의 캔버스에 직접 쓴다.
+  banner.hidden = screen === 'inside';
   bannerUntil = performance.now() + seconds * 1000;
 }
 

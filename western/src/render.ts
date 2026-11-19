@@ -875,7 +875,9 @@ function drawArrows(ctx: Ctx, view: View, world: World, time: number): void {
 }
 
 /** 1인칭 장면 위에 덧그리는 것: 이동 스틱과 피격 때의 붉은 번쩍임. 나머지는 비워 3D 화면이 비치게 한다. */
-export function drawOverlay(ctx: Ctx, view: View, sticks: Stick[], hurt: number, lowHp: boolean, time: number): void {
+export function drawOverlay(
+  ctx: Ctx, view: View, sticks: Stick[], hurt: number, lowHp: boolean, time: number, message: string,
+): void {
   ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
   ctx.clearRect(0, 0, view.w, view.h);
   const r = Math.hypot(view.w, view.h) / 2;
@@ -891,7 +893,34 @@ export function drawOverlay(ctx: Ctx, view: View, sticks: Stick[], hurt: number,
     ctx.fillStyle = 'rgba(179, 38, 30, ' + hurt * 0.9 + ')';
     ctx.fillRect(0, 0, view.w, view.h);
   }
+  if (message) drawMessage(ctx, view, message);
   drawSticks(ctx, sticks);
+}
+
+/** 안내 문구. 화면 폭에 맞춰 여러 줄로 나눠 띠 위에 쓴다. */
+function drawMessage(ctx: Ctx, view: View, message: string): void {
+  ctx.font = '700 15px "IBM Plex Sans KR", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const limit = Math.min(view.w - 56, 560);
+  const lines: string[] = [];
+  let line = '';
+  for (const word of message.split(' ')) {
+    const next = line ? line + ' ' + word : word;
+    if (line && ctx.measureText(next).width > limit) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  }
+  lines.push(line);
+  const width = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 28;
+  const top = view.h * 0.2;
+  ctx.fillStyle = 'rgba(42, 26, 16, 0.9)';
+  ctx.fillRect(view.w / 2 - width / 2, top, width, lines.length * 22 + 14);
+  ctx.fillStyle = C.paper;
+  lines.forEach((l, i) => ctx.fillText(l, view.w / 2, top + 18 + i * 22));
 }
 
 function drawSticks(ctx: Ctx, sticks: Stick[]): void {

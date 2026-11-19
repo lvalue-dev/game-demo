@@ -4,8 +4,11 @@ import { JOBS } from '../game/map.ts';
 import type { GameEvent, Stats } from '../game/types.ts';
 
 export type V3 = [number, number, number];
-export type Mat3 = 'wood' | 'brick' | 'metal' | 'glass' | 'powder';
-export type BlockTag = 'floor' | 'wall' | 'prop' | 'counter' | 'crate' | 'keg' | 'lamp' | 'safe';
+export type Mat3 = 'wood' | 'brick' | 'plaster' | 'stone' | 'metal' | 'glass' | 'powder';
+/** 상자의 쓰임새. 충돌은 모두 같은 상자지만, 화면에서는 쓰임새에 맞는 모양으로 꾸민다. */
+export type BlockTag =
+  | 'floor' | 'ceiling' | 'wall' | 'column' | 'counter' | 'grille' | 'desk' | 'bench' | 'platform' | 'rail'
+  | 'post' | 'vaultdoor' | 'crate' | 'keg' | 'lamp' | 'safe';
 
 /** 실내를 이루는 상자 하나. 바깥의 블록 규칙과 같다. */
 export interface Block {
@@ -95,7 +98,8 @@ export interface Input3 {
 export const NO_INPUT3: Input3 = { moveX: 0, moveZ: 0, lookX: 0, lookY: 0, fire: false, reload: false, assist: false };
 
 export const EYE = 1.62;
-export const ROOM = { halfW: 6, halfD: 4.5, height: 5 };
+/** 은행 홀의 크기. 가로 22m, 세로 18m, 높이 6.5m. */
+export const ROOM = { halfW: 11, halfD: 9, height: 6.5, door: 1.0, mezzanine: 3.3 };
 const PLAYER_R = 0.35;
 const WALK_SPEED = 4.2;
 const MAX_PITCH = 1.25;
@@ -122,7 +126,7 @@ export function forward(yaw: number, pitch: number): V3 {
   return [-Math.sin(yaw) * c, Math.sin(pitch), -Math.cos(yaw) * c];
 }
 
-/** 은행 내부를 짓는다. 창구, 뒤쪽 금고실, 2층 난간이 있는 높은 홀이다. */
+/** 은행 내부를 짓는다. 넓은 로비, 창구, 뒤쪽 금고실, 2층 난간이 있는 높은 홀이다. */
 export function createBank(job: number, stats: Stats, hp: number, ammo: number, seed: number): Interior {
   let id = 1;
   const blocks: Block[] = [];
@@ -131,48 +135,62 @@ export function createBank(job: number, stats: Stats, hp: number, ammo: number, 
     blocks.push(b);
     return b;
   };
-  const { halfW: W, halfD: D, height: H } = ROOM;
-  add([-W, -0.1, -D], [W, 0, D + 0.2], 'wood', 'floor');
-  add([-W, H, -D], [W, H + 0.1, D + 0.2], 'wood', 'floor');
-  // 벽돌 벽. 남쪽 벽 가운데에 문이 있다.
-  add([-W - 0.2, 0, -D - 0.2], [W + 0.2, H, -D], 'brick', 'wall');
-  add([-W - 0.2, 0, -D - 0.2], [-W, H, D + 0.2], 'brick', 'wall');
-  add([W, 0, -D - 0.2], [W + 0.2, H, D + 0.2], 'brick', 'wall');
-  add([-W - 0.2, 0, D], [-0.8, H, D + 0.2], 'brick', 'wall');
-  add([0.8, 0, D], [W + 0.2, H, D + 0.2], 'brick', 'wall');
-  add([-0.8, 2.3, D], [0.8, H, D + 0.2], 'brick', 'wall');
-  // 창구: 나무 계산대와 그 위의 놋쇠 창살. 오른쪽에 드나드는 틈이 있다.
-  add([-5.2, 0, 0.1], [1.4, 1.1, 0.8], 'wood', 'counter');
-  add([2.6, 0, 0.1], [W, 1.1, 0.8], 'wood', 'counter');
-  for (const x of [-4.6, -3.1, -1.6, -0.1, 3.4, 4.9]) add([x - 0.05, 1.1, 0.4], [x + 0.05, 2.1, 0.5], 'metal', 'prop');
-  add([-5.2, 2.1, 0.38], [1.4, 2.2, 0.52], 'metal', 'prop');
-  add([2.6, 2.1, 0.38], [W, 2.2, 0.52], 'metal', 'prop');
-  add([-4.2, 0, -2.4], [-2.8, 0.8, -1.6], 'wood', 'prop');
-  add([-0.9, 0, -2.7], [0.5, 0.8, -1.9], 'wood', 'prop');
+  const { halfW: W, halfD: D, height: H, door, mezzanine: M } = ROOM;
+  add([-W, -0.1, -D], [W, 0, D + 0.3], 'stone', 'floor');
+  add([-W, H, -D], [W, H + 0.1, D + 0.3], 'wood', 'ceiling');
+  // 회벽. 남쪽 벽 가운데에 문이 있다.
+  add([-W - 0.3, 0, -D - 0.3], [W + 0.3, H, -D], 'plaster', 'wall');
+  add([-W - 0.3, 0, -D - 0.3], [-W, H, D + 0.3], 'plaster', 'wall');
+  add([W, 0, -D - 0.3], [W + 0.3, H, D + 0.3], 'plaster', 'wall');
+  add([-W - 0.3, 0, D], [-door, H, D + 0.3], 'plaster', 'wall');
+  add([door, 0, D], [W + 0.3, H, D + 0.3], 'plaster', 'wall');
+  add([-door, 2.6, D], [door, H, D + 0.3], 'plaster', 'wall');
+
+  // 로비의 기둥 네 개. 몸을 숨기기 좋다.
+  for (const [x, z] of [[-5.5, 4.5], [5.5, 4.5], [-5.5, 0.6], [5.5, 0.6]] as const) {
+    add([x - 0.32, 0, z - 0.32], [x + 0.32, H, z + 0.32], 'stone', 'column');
+  }
+  // 손님이 서류를 쓰는 높은 책상과 벽가의 긴 의자
+  add([-3.4, 0, 3.2], [-1.8, 1.1, 4.0], 'wood', 'desk');
+  add([1.8, 0, 3.2], [3.4, 1.1, 4.0], 'wood', 'desk');
+  add([-10.7, 0, 2.0], [-10.1, 0.5, 6.5], 'wood', 'bench');
+  add([10.1, 0, 2.0], [10.7, 0.5, 6.5], 'wood', 'bench');
+  add([-8.6, 0, 6.2], [-7.5, 1.0, 7.3], 'wood', 'crate', 4);
+  add([7.4, 0, 1.8], [8.5, 1.0, 2.9], 'wood', 'crate', 4);
+  add([7.6, 1.0, 2.0], [8.3, 1.7, 2.7], 'wood', 'crate', 4);
+
+  // 창구: 홀을 가로지르는 긴 계산대와 그 위의 놋쇠 창살. 오른쪽에 드나드는 틈이 있다.
+  add([-W, 0, -2.2], [3.2, 1.1, -1.4], 'wood', 'counter');
+  add([4.6, 0, -2.2], [W, 1.1, -1.4], 'wood', 'counter');
+  for (const x of [-9.5, -8, -6.5, -5, -3.5, -2, -0.5, 1, 2.5, 5.5, 7, 8.5, 10]) {
+    add([x - 0.04, 1.1, -1.84], [x + 0.04, 2.3, -1.76], 'metal', 'grille');
+  }
+  add([-W, 2.3, -1.86], [3.2, 2.4, -1.74], 'metal', 'grille');
+  add([4.6, 2.3, -1.86], [W, 2.4, -1.74], 'metal', 'grille');
+  // 창구 뒤 행원들의 책상
+  add([-7.2, 0, -5.6], [-5.4, 0.8, -4.6], 'wood', 'desk');
+  add([-1.2, 0, -5.6], [0.6, 0.8, -4.6], 'wood', 'desk');
+
   // 금고실: 뒤쪽 오른편의 벽돌 방과 열려 있는 철문
-  add([1.9, 0, -D], [2.1, H, -2.1], 'brick', 'wall');
-  add([2.1, 0, -2.1], [3.3, H, -1.9], 'brick', 'wall');
-  add([4.5, 0, -2.1], [W, H, -1.9], 'brick', 'wall');
-  add([3.3, 2.3, -2.1], [4.5, H, -1.9], 'brick', 'wall');
-  add([4.5, 0, -1.9], [4.62, 2.3, -0.8], 'metal', 'prop');
-  const safe = add([4.9, 0, -4.2], [5.8, 1.3, -3.4], 'metal', 'safe');
-  // 2층 난간: 북쪽 벽을 따라 놓인 발판과 난간대
-  add([-W, 2.45, -D], [1.9, 2.6, -3.1], 'wood', 'prop');
-  add([-W, 3.45, -3.14], [1.9, 3.53, -3.06], 'wood', 'prop');
-  for (const x of [-3, 0]) add([x - 0.1, 0, -3.2], [x + 0.1, 2.45, -3.0], 'wood', 'prop');
-  // 로비의 엄폐물과 긴 의자
-  add([-4.2, 0, 2.0], [-3.3, 0.9, 2.9], 'wood', 'crate', 4);
-  add([3.0, 0, 2.3], [3.9, 0.9, 3.2], 'wood', 'crate', 4);
-  add([3.1, 0.9, 2.4], [3.7, 1.5, 3.0], 'wood', 'crate', 4);
-  add([-5.8, 0, 1.6], [-5.2, 0.5, 3.8], 'wood', 'prop');
-  // 발파 화약통: 쏘면 터진다.
-  // 하나는 창구 뒤 책상 위에 있어 로비에서 계산대 너머로 보이고, 하나는 금고실 앞 바닥에 있다.
-  add([-0.45, 0.8, -2.55], [0.05, 1.5, -2.05], 'powder', 'keg', 1);
-  add([1.8, 0, -1.6], [2.3, 0.7, -1.1], 'powder', 'keg', 1);
-  // 천장에 매단 등
-  add([-2.2, 3.7, 1.8], [-1.8, 4.1, 2.2], 'glass', 'lamp', 1);
-  add([2.0, 3.7, 1.8], [2.4, 4.1, 2.2], 'glass', 'lamp', 1);
-  add([-0.2, 3.7, -1.6], [0.2, 4.1, -1.2], 'glass', 'lamp', 1);
+  add([4.9, 0, -D], [5.1, H, -4.6], 'brick', 'wall');
+  add([5.1, 0, -4.6], [6.6, H, -4.4], 'brick', 'wall');
+  add([8.2, 0, -4.6], [W, H, -4.4], 'brick', 'wall');
+  add([6.6, 2.5, -4.6], [8.2, H, -4.4], 'brick', 'wall');
+  add([8.2, 0, -4.4], [8.38, 2.5, -2.9], 'metal', 'vaultdoor');
+  const safe = add([8.9, 0, -8.4], [10.0, 1.5, -7.4], 'metal', 'safe');
+
+  // 2층 난간: 북쪽 벽을 따라 놓인 발판과 난간대, 그것을 받치는 기둥
+  add([-W, M - 0.18, -D], [4.9, M, -6.6], 'wood', 'platform');
+  add([-W, M + 0.95, -6.66], [4.9, M + 1.03, -6.58], 'wood', 'rail');
+  for (const x of [-7.5, -3.5, 0.5, 4.5]) add([x - 0.12, 0, -6.8], [x + 0.12, M - 0.18, -6.56], 'wood', 'post');
+
+  // 발파 화약통. 하나는 창구 뒤 책상 위에 있어 로비에서 계산대 너머로 보이고, 하나는 창구 틈 안쪽 바닥에 있다.
+  add([-0.6, 0.8, -5.4], [0.0, 1.55, -4.8], 'powder', 'keg', 1);
+  add([3.6, 0, -3.7], [4.2, 0.75, -3.1], 'powder', 'keg', 1);
+  // 천장에 매단 샹들리에
+  add([-4.4, 4.6, 3.6], [-3.6, 5.0, 4.4], 'glass', 'lamp', 1);
+  add([3.6, 4.6, 3.6], [4.4, 5.0, 4.4], 'glass', 'lamp', 1);
+  add([-0.4, 4.6, -3.9], [0.4, 5.0, -3.1], 'glass', 'lamp', 1);
 
   const guards: Guard[] = [];
   const guard = (x: number, y: number, z: number): void => {
@@ -181,11 +199,12 @@ export function createBank(job: number, stats: Stats, hp: number, ammo: number, 
       cooldown: 0.6 + guards.length * 0.35, strafe: guards.length % 2 ? 1 : -1, dead: false, hitFlash: 0,
     });
   };
-  guard(-3.2, 0, -0.9);
-  guard(4.0, 0, -0.7);
-  guard(-2.6, 2.6, -3.8);
-  if (job >= 1) guard(3.9, 0, -3.0);
-  if (job >= 2) guard(-1.2, 2.6, -3.8);
+  // 경비원은 창구 뒤와 2층에 떨어져 서 있다. 문에서 11m 이상이다.
+  guard(-5.75, 0, -3.6);
+  guard(6.2, 0, -3.5);
+  guard(-3.0, M, -7.8);
+  if (job >= 1) guard(7.4, 0, -5.8);
+  if (job >= 2) guard(2.4, M, -7.8);
 
   const mult = JOBS[job]!.lootMult * stats.lootMult;
   return {
@@ -195,12 +214,12 @@ export function createBank(job: number, stats: Stats, hp: number, ammo: number, 
     guards,
     shots: [],
     bags: [
-      { x: -2.0, y: 1.1, z: 0.45, value: Math.round(10 * mult), taken: false },
-      { x: 3.4, y: 1.1, z: 0.45, value: Math.round(10 * mult), taken: false },
+      { x: -4.2, y: 1.1, z: -1.8, value: Math.round(10 * mult), taken: false },
+      { x: 6.3, y: 1.1, z: -1.8, value: Math.round(10 * mult), taken: false },
     ],
-    player: { x: 0, z: 3.6, yaw: 0, pitch: 0, hp, ammo, reload: 0, fireCd: 0, invuln: 0, hurtFlash: 0 },
+    player: { x: 0, z: D - 1, yaw: 0, pitch: 0, hp, ammo, reload: 0, fireCd: 0, invuln: 0, hurtFlash: 0 },
     stats,
-    safe: { id: safe.id, x: 5.35, y: 0.65, z: -3.8, value: Math.round(40 * mult), time: 2.6, progress: 0, taken: false },
+    safe: { id: safe.id, x: 9.45, y: 0.75, z: -7.9, value: Math.round(40 * mult), time: 2.6, progress: 0, taken: false },
     loot: 0,
     xp: 0,
     kills: 0,
@@ -354,7 +373,8 @@ function explode(s: Interior, at: V3): void {
 /** 총알이나 폭발이 상자에 닿았다. 재질에 맞는 조각이 튀고, 부서지는 것은 부서진다. */
 function damageBlock(s: Interior, b: Block, damage: number, pos: V3, normal: V3): void {
   s.events.push({ type: 'impact', pos, normal, material: b.material });
-  sound(s, b.material === 'wood' ? 'hitWood' : b.material === 'brick' ? 'hitStone' : b.material === 'powder' ? 'hit' : 'hitMetal');
+  const stony = b.material === 'brick' || b.material === 'plaster' || b.material === 'stone';
+  sound(s, b.material === 'wood' ? 'hitWood' : stony ? 'hitStone' : b.material === 'powder' ? 'hit' : 'hitMetal');
   if (!Number.isFinite(b.hp)) return;
   b.hp -= damage;
   if (b.hp > 0) return;
@@ -383,7 +403,7 @@ function movePlayer(s: Interior, input: Input3, dt: number): void {
   p.x += (-sin * mz + cos * mx) * speed * dt;
   p.z += (-cos * mz - sin * mx) * speed * dt;
   for (const b of s.blocks) {
-    if (b.tag === 'floor' || b.max[1] < 0.2 || b.min[1] > 1.7) continue;
+    if (b.tag === 'floor' || b.tag === 'ceiling' || b.max[1] < 0.2 || b.min[1] > 1.7) continue;
     const cx = Math.max(b.min[0], Math.min(b.max[0], p.x));
     const cz = Math.max(b.min[2], Math.min(b.max[2], p.z));
     const dx = p.x - cx;
@@ -443,7 +463,8 @@ function updateGuards(s: Interior, dt: number): void {
     const head: V3 = [g.x, g.y + 1.6, g.z];
     const sees = canSee(s, head, eye);
     if (!g.alerted) {
-      if (sees && Math.hypot(g.x - eye[0], g.z - eye[2]) < 9) alertAll(s);
+      // 가까이 다가가기 전에는 알아채지 못한다. 그 전에 자리를 잡을 수 있다.
+      if (sees && Math.hypot(g.x - eye[0], g.z - eye[2]) < 8.5) alertAll(s);
       continue;
     }
     g.yaw = Math.atan2(-(eye[0] - g.x), -(eye[2] - g.z));
@@ -505,7 +526,7 @@ function updateShots(s: Interior, dt: number): void {
 function updateLoot(s: Interior, dt: number): void {
   const p = s.player;
   for (const bag of s.bags) {
-    if (bag.taken || Math.hypot(bag.x - p.x, bag.z - p.z) > 1.35) continue;
+    if (bag.taken || Math.hypot(bag.x - p.x, bag.z - p.z) > 1.5) continue;
     bag.taken = true;
     s.loot += bag.value;
     s.xp += 1;
@@ -519,7 +540,7 @@ function updateLoot(s: Interior, dt: number): void {
   const len = Math.hypot(to[0], to[1], to[2]) || 1;
   const facing = (to[0] * f[0] + to[1] * f[1] + to[2] * f[2]) / len;
   // 금고 앞에 서서 금고를 바라보고 있어야 턴다.
-  if (dist > 1.7 || facing < 0.75) return;
+  if (dist > 1.9 || facing < 0.75) return;
   safe.progress += dt * s.stats.crackSpeed;
   if (safe.progress < safe.time) return;
   safe.taken = true;
