@@ -7,16 +7,37 @@ import { createServer } from 'node:http';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 
+// 저장소 안의 게임별 설정. `--project western`처럼 폴더 이름으로 고른다.
+const PROJECTS = {
+  '.': {
+    title: '한탕 작전 프로토타입',
+    fonts: 'https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap',
+    port: 5173,
+  },
+  western: {
+    title: '먼지골 한탕',
+    fonts: 'https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&family=Rye&display=swap',
+    port: 5174,
+  },
+};
+
 const serve = process.argv.includes('--serve');
-const port = Number(process.env.PORT ?? 5173);
-const TITLE = '한탕 작전 프로토타입';
-const FONTS =
-  'https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap';
+const projectArg = process.argv.indexOf('--project');
+const root = projectArg >= 0 ? process.argv[projectArg + 1] : '.';
+const project = PROJECTS[root];
+if (!project) {
+  console.error(`알 수 없는 프로젝트: ${root}. 가능한 값: ${Object.keys(PROJECTS).join(', ')}`);
+  process.exit(1);
+}
+const port = Number(process.env.PORT ?? project.port);
+const TITLE = project.title;
+const FONTS = project.fonts;
+const at = (path) => `${root}/${path}`;
 
 async function assemble(js) {
   const [css, body] = await Promise.all([
-    readFile('src/style.css', 'utf8'),
-    readFile('src/page.html', 'utf8'),
+    readFile(at('src/style.css'), 'utf8'),
+    readFile(at('src/page.html'), 'utf8'),
   ]);
   const head = [
     '<meta name="claude:viewport-fit-sides" content="cover">',
@@ -40,12 +61,12 @@ ${body}${script}
 </body>
 </html>
 `;
-  await mkdir('dist', { recursive: true });
-  await Promise.all([writeFile('dist/index.html', full), writeFile('dist/page.html', page)]);
+  await mkdir(at('dist'), { recursive: true });
+  await Promise.all([writeFile(at('dist/index.html'), full), writeFile(at('dist/page.html'), page)]);
 }
 
 const ctx = await context({
-  entryPoints: ['src/main.ts'],
+  entryPoints: [at('src/main.ts')],
   bundle: true,
   format: 'iife',
   target: 'es2020',
@@ -58,7 +79,7 @@ const ctx = await context({
         build.onEnd(async (result) => {
           if (result.errors.length > 0) return;
           await assemble(result.outputFiles[0].text);
-          console.log(`[${new Date().toLocaleTimeString()}] dist/index.html 갱신`);
+          console.log(`[${new Date().toLocaleTimeString()}] ${at('dist/index.html')} 갱신`);
         });
       },
     },
@@ -73,7 +94,7 @@ if (!serve) {
   createServer(async (_req, res) => {
     try {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-      res.end(await readFile('dist/index.html'));
+      res.end(await readFile(at('dist/index.html')));
     } catch {
       res.writeHead(503).end('빌드 중입니다. 잠시 뒤 새로고침하세요.');
     }

@@ -7,7 +7,9 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/build.mjs --serve",
-    "test": "node --test \"tests/*.test.ts\"",
+    "build:western": "node scripts/build.mjs --project western",
+    "dev:western": "node scripts/build.mjs --project western --serve",
+    "test": "node --test \"tests/*.test.ts\" \"western/tests/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "sim": "node scripts/sim.ts"
   },

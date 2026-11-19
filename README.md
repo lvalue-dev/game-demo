@@ -1,6 +1,13 @@
 # 한탕 (가제)
 
-크루를 모아 가게를 털고 경찰이 오기 전에 빠져나오는 덱빌딩 로그라이크의 **규칙 검증용 웹 프로토타입**이다. 그림 없이 규칙이 재미있는지만 확인하는 단계다.
+"더 털까, 지금 튈까"를 핵심으로 하는 게임의 프로토타입 저장소다. 같은 아이디어를 두 가지 형태로 만들어 비교한다.
+
+| 프로토타입 | 폴더 | 형태 |
+|---|---|---|
+| 먼지골 한탕 | `western/` | 위에서 내려다보는 실시간 서부 슈팅. 돈을 털고 추격대를 따돌려 말로 탈출한다 |
+| 한탕 작전 | 저장소 루트 (`src/`) | 턴제 덱빌딩 로그라이크. 그림 없이 규칙만 검증한다 |
+
+아래 명령은 루트의 카드 게임 기준이고, 서부 게임은 `npm run dev:western`, `npm run build:western`을 쓴다. 빌드 결과는 `western/dist/index.html`이다. 테스트는 `npm test` 한 번으로 둘 다 돈다.
 
 - 규칙과 카드 목록: [docs/prototype-rules.md](docs/prototype-rules.md)
 - 시장 조사 리포트: [reports/첫 게임 타겟 시장 분석.md](reports/첫%20게임%20타겟%20시장%20분석.md)
@@ -34,7 +41,9 @@ cp dist/index.html /var/www/hantang/index.html   # 경로는 서버 설정에 �
 
 | 경로 | 내용 |
 |---|---|
-| `src/game/` | 화면과 무관한 규칙 엔진. 카드(`cards.ts`), 장소(`locations.ts`), 진행(`engine.ts`) |
+| `western/src/game/` | 서부 게임의 로직. 한 프레임 진행(`sim.ts`), 마을 지도와 작전(`map.ts`), 업그레이드와 정산(`run.ts`) |
+| `western/src/` | 서부 게임의 화면(`render.ts`), 입력(`input.ts`), 메뉴와 루프(`main.ts`) |
+| `src/game/` | 카드 게임의 규칙 엔진. 카드(`cards.ts`), 장소(`locations.ts`), 진행(`engine.ts`) |
 | `src/ui/app.ts` | 상태를 화면으로 그리고 입력을 엔진에 전달 |
 | `scripts/sim.ts` | 난이도 점검용 봇 시뮬레이션 |
 | `tests/` | 규칙 엔진 테스트 |

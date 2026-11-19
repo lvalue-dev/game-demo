@@ -1,0 +1,225 @@
+/* 배치: 화면 전체가 모래 마을. 위쪽에 체력·수배·돈, 가운데에 수배 전단 모양의 안내판이 뜬다. */
+:root {
+  color-scheme: light;
+  --sand: #e2c48a;
+  --paper: #f3e3bf;
+  --paper-edge: #dcc592;
+  --ink: #2a1a10;
+  --ink-soft: #5a3a22;
+  --blood: #b3261e;
+  --gold: #a86a00;
+  --gold-bright: #d99a1c;
+  --sage: #2f6b45;
+  --veil: rgb(42 26 16 / 0.5);
+
+  --font-display: 'Rye', 'Black Han Sans', 'Apple SD Gothic Neo', 'Malgun Gothic', serif;
+  --font-body: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+
+  --step--1: 0.8125rem;
+  --step-0: 0.9375rem;
+  --step-1: 1.125rem;
+  --step-2: 2rem;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { height: 100%; }
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--sand);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--step-0);
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  word-break: keep-all;
+  overscroll-behavior: none;
+}
+p, h1, dl, dd { margin: 0; }
+
+.stage { position: relative; height: 100%; overflow: hidden; }
+.game {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: crosshair;
+}
+
+/* ---------- 플레이 중 정보 ---------- */
+.hud {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  pointer-events: none;
+}
+.hud-plate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 340px;
+  padding: 8px 10px;
+  background: rgb(243 227 191 / 0.9);
+  border: 2px solid var(--ink);
+}
+.hud-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.hud-hp { display: inline-flex; gap: 4px; }
+.heart {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--paper);
+}
+.heart.is-on { background: var(--blood); }
+.hud-heat { display: inline-flex; align-items: center; gap: 6px; }
+.hud-label { font-size: var(--step--1); font-weight: 700; letter-spacing: 0.08em; }
+.hud-stars { display: inline-flex; gap: 1px; font-size: 1.15rem; line-height: 1; }
+.star { font-style: normal; color: rgb(42 26 16 / 0.25); }
+.star.is-on { color: var(--blood); }
+
+.hud-loot { display: flex; flex-direction: column; gap: 3px; }
+.hud-money { font-family: var(--font-display); font-size: 1.5rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.hud-quota { font-size: 1rem; color: var(--ink-soft); }
+.hud-bar { height: 8px; background: var(--paper); border: 2px solid var(--ink); }
+.hud-bar-fill { height: 100%; width: 0; background: var(--gold-bright); }
+.hud-note { font-size: var(--step--1); font-weight: 700; color: var(--ink-soft); }
+.hud.is-ready .hud-bar-fill { background: var(--sage); }
+.hud.is-ready .hud-note { color: var(--sage); }
+
+.banner {
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 8px 14px;
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 700;
+  text-align: center;
+  text-wrap: balance;
+  pointer-events: none;
+}
+
+.dash {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  width: 72px;
+  height: 72px;
+  border: 3px solid var(--ink);
+  border-radius: 50%;
+  background: rgb(243 227 191 / 0.85);
+  color: var(--ink);
+  font: 700 var(--step-0) var(--font-body);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.dash:active { background: var(--gold-bright); }
+
+/* ---------- 안내판 ---------- */
+.panel {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: var(--veil);
+}
+.poster {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(100%, 440px);
+  padding: 22px 20px;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  outline: 1px solid var(--ink);
+  outline-offset: -8px;
+}
+.poster-eyebrow {
+  font-family: var(--font-display);
+  font-size: var(--step--1);
+  letter-spacing: 0.14em;
+  color: var(--blood);
+  text-align: center;
+}
+h1 {
+  font-family: var(--font-display);
+  font-size: var(--step-2);
+  font-weight: 400;
+  line-height: 1.15;
+  text-align: center;
+  text-wrap: balance;
+}
+.poster-lead { max-width: 34em; }
+
+.howto { display: flex; flex-direction: column; gap: 8px; padding-block: 10px; border-block: 2px solid var(--ink); }
+.howto div { display: grid; grid-template-columns: 3em minmax(0, 1fr); gap: 8px; }
+.howto dt { font-weight: 700; }
+.howto dd { color: var(--ink-soft); font-size: var(--step--1); }
+
+.btn {
+  padding: 12px 16px;
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 700 var(--step-1) var(--font-body);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.btn-go { background: var(--ink); color: var(--paper); }
+.btn-go:hover { background: var(--blood); border-color: var(--blood); }
+:focus-visible { outline: 3px solid var(--blood); outline-offset: 2px; }
+
+.purse { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.purse-money { font-family: var(--font-display); font-size: 1.75rem; color: var(--gold); line-height: 1; }
+
+.offers { display: flex; flex-direction: column; gap: 8px; }
+.offer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.offer:hover:not(:disabled) { background: var(--paper-edge); }
+.offer:disabled { cursor: default; border-style: dashed; color: var(--ink-soft); }
+.offer-name { font-weight: 700; font-size: var(--step-1); }
+.offer-text { grid-column: 1; color: var(--ink-soft); font-size: var(--step--1); }
+.offer-price {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  font-family: var(--font-display);
+  font-size: var(--step-1);
+  color: var(--gold);
+  white-space: nowrap;
+}
+.offer:disabled .offer-price { color: var(--ink-soft); }
+.next-job { padding-top: 10px; border-top: 2px solid var(--ink); font-size: var(--step--1); }
