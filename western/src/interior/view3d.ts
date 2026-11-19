@@ -3,9 +3,11 @@
 // 색은 바깥과 같은 재질표(kit.ts)에서 가져와 두 장면의 그림체가 이어지게 한다.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { ENEMY_KITS, MATERIAL, PLAYER_KIT } from '../kit.ts';
+import { ENEMY_KITS, MATERIAL } from '../kit.ts';
 import { EYE, ROOM } from './level.ts';
 import type { Block, Guard, Interior, Mat3, V3 } from './level.ts';
+import { createViewmodel } from './viewmodel.ts';
+import type { Viewmodel } from './viewmodel.ts';
 
 const BRASS = '#c9a24a';
 const IRON = '#3d4147';
@@ -191,13 +193,7 @@ export function createView3D(canvas: HTMLCanvasElement): View3D {
   let chips: Chip[] = [];
   let holes: THREE.Mesh[] = [];
   let blasts: { mesh: THREE.Mesh; life: number; radius: number }[] = [];
-  let gun = new THREE.Group();
-  let cylinder = new THREE.Group();
-  let hammer = new THREE.Group();
-  let thumb = new THREE.Group();
-  let trigger = new THREE.Mesh();
-  let flash = new THREE.PointLight('#ffd27a', 0, 10);
-  let muzzle = new THREE.Sprite();
+  let vm: Viewmodel | null = null;
   let blastLight = new THREE.PointLight('#ff9a3a', 0, 20);
   let shake = 0;
   let walk = 0;
@@ -211,7 +207,6 @@ export function createView3D(canvas: HTMLCanvasElement): View3D {
   const pmrem = new THREE.PMREMGenerator(renderer);
   const surroundings = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
-  const ease = (t: number): number => t * t * (3 - 2 * t);
 
   const box = (w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -559,122 +554,6 @@ export function createView3D(canvas: HTMLCanvasElement): View3D {
     });
   }
 
-  /** 손에 쥔 싱글액션 6연발 리볼버와 오른손. 크기는 실물 비례를 따른다. */
-  function buildGun(): void {
-    gun = new THREE.Group();
-    const steel = standard('#7a828e', undefined, 0.3, 0.6, 1.2);
-    const dark = standard('#2a2d33', undefined, 0.5, 0.5, 0.8);
-    const walnut = standard('#5e3b22', undefined, 0.42, 0, 0.6);
-    const lay = (m: THREE.Mesh): THREE.Mesh => {
-      m.rotation.x = Math.PI / 2;
-      return m;
-    };
-    // 총열, 그 아래의 탄피 밀대, 가늠쇠
-    gun.add(lay(rod(0.0085, 0.14, steel, 0, 0.014, -0.118, 18)));
-    gun.add(lay(rod(0.0045, 0.095, steel, 0.0085, 0.004, -0.096, 8)));
-    gun.add(box(0.0026, 0.008, 0.012, steel, 0, 0.0265, -0.18));
-    // 몸통: 윗띠, 뒤판, 아래틀
-    gun.add(box(0.019, 0.007, 0.062, steel, 0, 0.0335, -0.013), box(0.02, 0.05, 0.02, steel, 0, 0.012, 0.027), box(0.019, 0.012, 0.058, steel, 0, -0.017, -0.013));
-    // 탄창: 홈이 팬 원통. 쏠 때마다 한 칸씩 돈다.
-    cylinder = new THREE.Group();
-    cylinder.position.set(0, 0.009, -0.014);
-    cylinder.add(lay(rod(0.0205, 0.042, steel, 0, 0, 0, 24)));
-    for (let i = 0; i < 6; i++) {
-      const a = (i * Math.PI) / 3;
-      const flute = box(0.009, 0.004, 0.026, dark, Math.cos(a) * 0.0195, Math.sin(a) * 0.0195, -0.004);
-      flute.rotation.z = a + Math.PI / 2;
-      cylinder.add(flute);
-    }
-    gun.add(cylinder);
-    // 공이치기: 뒤쪽 위의 축을 중심으로 젖혀진다.
-    hammer = new THREE.Group();
-    hammer.position.set(0, 0.026, 0.03);
-    hammer.add(box(0.007, 0.022, 0.008, steel, 0, 0.011, 0.004), box(0.009, 0.005, 0.013, steel, 0, 0.022, 0.011));
-    gun.add(hammer);
-    // 방아쇠울과 방아쇠
-    const guard = new THREE.Mesh(new THREE.TorusGeometry(0.014, 0.0024, 6, 14, Math.PI), steel);
-    guard.rotation.set(0, Math.PI / 2, Math.PI);
-    guard.position.set(0, -0.023, 0.004);
-    trigger = box(0.003, 0.013, 0.004, steel, 0, -0.028, 0.006);
-    gun.add(guard, trigger);
-
-    // 손잡이는 아래로 갈수록 뒤로 휜다. 손도 이 기울기를 따라 쥔다.
-    const grip = new THREE.Group();
-    grip.position.set(0, -0.022, 0.034);
-    grip.rotation.x = -0.36;
-    grip.add(box(0.019, 0.085, 0.03, steel, 0, -0.04, 0.006), box(0.027, 0.074, 0.024, walnut, 0, -0.042, 0.004), box(0.028, 0.012, 0.034, walnut, 0, -0.084, 0.008));
-    const skin = standard('#b47c56', undefined, 0.78, 0, 0.12);
-    const digit = (r: number, len: number, x: number, y: number, z: number, rx: number, rz: number, parent: THREE.Object3D = grip): THREE.Mesh => {
-      const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 4, 10), skin);
-      m.position.set(x, y, z);
-      m.rotation.set(rx, 0, rz);
-      parent.add(m);
-      return m;
-    };
-    // 손바닥과 손등: 손잡이 오른쪽과 뒤를 감싼다.
-    const palm = new THREE.Mesh(new THREE.SphereGeometry(0.03, 14, 12), skin);
-    palm.position.set(0.019, -0.042, 0.02);
-    palm.scale.set(0.58, 1.3, 1.05);
-    grip.add(palm);
-    digit(0.012, 0.022, 0.004, -0.006, 0.034, 0, Math.PI / 2);
-    // 가운뎃손가락부터 새끼손가락까지: 손잡이 앞을 가로질러 왼쪽으로 감아쥔다.
-    for (let i = 0; i < 3; i++) {
-      const y = -0.022 - i * 0.0185;
-      digit(0.0088 - i * 0.0006, 0.03, 0.001, y, -0.017, 0, Math.PI / 2);
-      digit(0.008 - i * 0.0006, 0.013, -0.018, y, -0.006, Math.PI / 2, 0);
-    }
-    // 검지: 몸통을 따라 뻗다가 방아쇠에 걸친다.
-    digit(0.0085, 0.028, 0.014, 0.0, -0.014, Math.PI / 2 + 0.36, 0);
-    digit(0.0078, 0.012, 0.004, -0.008, -0.035, 0.36, Math.PI / 2);
-    // 엄지: 왼쪽에서 올라와 공이치기를 당긴다.
-    thumb = new THREE.Group();
-    thumb.position.set(-0.013, 0.0, 0.03);
-    digit(0.0095, 0.03, 0, 0.012, -0.012, Math.PI / 2 - 0.5, 0, thumb);
-    grip.add(thumb);
-    // 손목, 팔뚝, 소매. 화면 오른쪽 아래에서 들어온다.
-    digit(0.024, 0.05, 0.024, -0.078, 0.045, -0.7, 0.2);
-    digit(0.03, 0.26, 0.05, -0.145, 0.18, -0.75, 0.22);
-    const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.04, 0.3, 4, 12), standard(PLAYER_KIT.torso, undefined, 0.9));
-    sleeve.position.set(0.075, -0.2, 0.3);
-    sleeve.rotation.set(-0.75, 0, 0.22);
-    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.03, 14), standard('#f6d67a', undefined, 0.8));
-    cuff.position.set(0.058, -0.158, 0.205);
-    cuff.rotation.set(-0.75, 0, 0.22);
-    grip.add(sleeve, cuff);
-    gun.add(grip);
-
-    // 총구 화염: 밝게 번지는 빛 한 장
-    const c = document.createElement('canvas');
-    c.width = c.height = 128;
-    const g2 = c.getContext('2d')!;
-    const glow = g2.createRadialGradient(64, 64, 0, 64, 64, 64);
-    glow.addColorStop(0, 'rgba(255, 250, 220, 1)');
-    glow.addColorStop(0.25, 'rgba(255, 210, 110, 0.9)');
-    glow.addColorStop(0.6, 'rgba(240, 120, 40, 0.35)');
-    glow.addColorStop(1, 'rgba(240, 120, 40, 0)');
-    g2.fillStyle = glow;
-    g2.fillRect(0, 0, 128, 128);
-    g2.strokeStyle = 'rgba(255, 240, 190, 0.9)';
-    g2.lineWidth = 5;
-    for (let i = 0; i < 6; i++) {
-      const a = (i * Math.PI) / 3 + 0.3;
-      g2.beginPath();
-      g2.moveTo(64, 64);
-      g2.lineTo(64 + Math.cos(a) * 58, 64 + Math.sin(a) * 58);
-      g2.stroke();
-    }
-    muzzle = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
-    }));
-    muzzle.position.set(0, 0.014, -0.21);
-    muzzle.scale.setScalar(0.17);
-    muzzle.visible = false;
-    flash = new THREE.PointLight('#ffd27a', 0, 10);
-    flash.position.set(0, 0.03, -0.3);
-    gun.add(muzzle, flash);
-    camera.add(gun);
-  }
-
   function spray(pos: V3, normal: V3, colors: string[], count: number, speed: number, size: number, gravity: number): void {
     for (let i = 0; i < count; i++) {
       const s = size * (0.6 + Math.random() * 0.8);
@@ -744,7 +623,9 @@ export function createView3D(canvas: HTMLCanvasElement): View3D {
         scene.add(shadowed(sack));
         return sack;
       });
-      buildGun();
+      if (vm) camera.remove(vm.root);
+      vm = createViewmodel(renderer);
+      camera.add(vm.root);
     },
 
     resize(w, h, dpr) {
@@ -764,7 +645,7 @@ export function createView3D(canvas: HTMLCanvasElement): View3D {
           hold.kickV += 5.2;
           hold.sinceShot = 0;
           hold.turns += 1;
-          const at = muzzle.getWorldPosition(new THREE.Vector3());
+          const at = vm ? vm.muzzlePoint() : camera.position.clone();
           spray([at.x, at.y, at.z], [0, 0.3, 0], ['#cfc8bc', '#9c958a'], 4, 0.35, 0.012, -0.9);
         } else if (e.type === 'impact') {
           const fast = e.material === 'metal' || e.material === 'powder' || e.material === 'glass';
@@ -845,35 +726,10 @@ export function createView3D(canvas: HTMLCanvasElement): View3D {
         camera.updateProjectionMatrix();
       }
 
-      // 재장전: 총을 내려 기울이고, 한 발씩 넣는 동안 작게 흔들리다가, 다시 올린다.
-      const q = p.reload > 0 ? 1 - p.reload / s.stats.reloadTime : 0;
-      const down = p.reload > 0 ? ease(Math.min(1, q / 0.18)) * ease(Math.min(1, (1 - q) / 0.15)) : 0;
-      const tick = Math.sin(q * Math.PI * 12) * 0.006 * down;
-      const breath = Math.sin(clock * 1.5);
-      gun.position.set(
-        0.135 + Math.cos(walk) * 0.009 * hold.speed + hold.sway * 0.04 - down * 0.05,
-        -0.135 - Math.abs(Math.sin(walk)) * 0.012 * hold.speed + breath * 0.0025 - hold.lift * 0.04 - down * 0.07 + hold.kick * 0.03 + tick,
-        -0.5 + hold.kick * 0.12 + hold.speed * 0.01,
-      );
-      gun.rotation.set(
-        hold.kick * 1.1 + hold.lift * 0.5 + breath * 0.004 + down * 0.75,
-        0.1 - hold.sway * 0.9 + down * 0.35,
-        hold.roll * 2.2 - hold.sway * 0.5 - down * 0.9,
-      );
-      // 싱글액션: 쏘면 공이치기가 떨어지고, 엄지가 다시 당기는 동안 탄창이 한 칸 돈다.
-      const cocked = ease(clamp((hold.sinceShot - 0.06) / 0.14, 0, 1));
-      hammer.rotation.x = 0.95 * cocked;
-      thumb.rotation.x = -0.45 * Math.sin(Math.PI * clamp((hold.sinceShot - 0.04) / 0.2, 0, 1));
-      const turned = p.reload > 0 ? Math.floor(q * 6) : hold.turns - 1 + cocked;
-      cylinder.rotation.z = turned * (Math.PI / 3);
-      trigger.rotation.x = 0.3 + (hold.sinceShot < 0.08 ? 0.35 : 0);
-      const firing = hold.sinceShot < 0.05;
-      muzzle.visible = firing;
-      if (firing) {
-        muzzle.material.rotation = hold.turns * 1.7;
-        muzzle.scale.setScalar(0.14 + ((hold.turns * 37) % 10) * 0.006);
-      }
-      flash.intensity = firing ? 14 : 0;
+      vm?.update({
+        dt, clock, walk, speed: hold.speed, sway: hold.sway, lift: hold.lift, roll: hold.roll, kick: hold.kick,
+        sinceShot: hold.sinceShot, turns: hold.turns, reload: p.reload > 0 ? 1 - p.reload / s.stats.reloadTime : -1,
+      });
 
       for (const g of s.guards) {
         const rig = rigs.get(g.id);
