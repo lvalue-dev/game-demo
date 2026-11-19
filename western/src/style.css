@@ -39,6 +39,14 @@ body {
 p, h1, dl, dd { margin: 0; }
 
 .stage { position: relative; height: 100%; overflow: hidden; }
+/* 가로 화면 모드: 세로로 선 폰에서 화면을 통째로 옆으로 돌린다. 크기는 스크립트가 정한다. */
+.stage.is-rotated {
+  position: fixed;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+  transform: rotate(90deg) translateY(-100%);
+}
 .game {
   position: absolute;
   inset: 0;
@@ -56,55 +64,79 @@ p, h1, dl, dd { margin: 0; }
   position: absolute;
   inset: 0 0 auto;
   display: flex;
-  flex-direction: column;
+  align-items: flex-start;
   gap: 6px;
-  padding-block: 10px;
+  padding-block: 8px;
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   pointer-events: none;
 }
+.stage.is-rotated .hud { padding-left: 44px; padding-right: 44px; }
 .hud-plate {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-width: 340px;
-  padding: 8px 10px;
-  background: rgb(243 227 191 / 0.9);
+  gap: 4px;
+  flex: 0 1 290px;
+  min-width: 0;
+  padding: 5px 8px;
+  background: rgb(243 227 191 / 0.86);
   border: 2px solid var(--ink);
 }
-.hud-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.hud-hp { display: inline-flex; gap: 4px; }
+.hud-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.hud-hp { display: inline-flex; gap: 3px; }
 .heart {
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
   border: 2px solid var(--ink);
   border-radius: 50%;
   background: var(--paper);
 }
 .heart.is-on { background: var(--blood); }
-.hud-heat { display: inline-flex; align-items: center; gap: 6px; }
-.hud-label { font-size: var(--step--1); font-weight: 700; letter-spacing: 0.08em; }
-.hud-stars { display: inline-flex; gap: 1px; font-size: 1.15rem; line-height: 1; }
+.hud-label { font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
+.hud-stars { display: inline-flex; gap: 0; font-size: 0.95rem; line-height: 1; }
 .star { font-style: normal; color: rgb(42 26 16 / 0.25); }
 .star.is-on { color: var(--blood); }
-
-.hud-loot { display: flex; flex-direction: column; gap: 3px; }
-.hud-money { font-family: var(--font-display); font-size: 1.5rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.hud-quota { font-size: 1rem; color: var(--ink-soft); }
-.hud-bar { height: 8px; background: var(--paper); border: 2px solid var(--ink); }
+.hud-money { font-family: var(--font-display); font-size: 1.1rem; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hud-quota { font-size: 0.8125rem; color: var(--ink-soft); }
+.hud-bar { height: 6px; background: var(--paper); border: 1.5px solid var(--ink); }
 .hud-bar-fill { height: 100%; width: 0; background: var(--gold-bright); }
-.hud-note { font-size: var(--step--1); font-weight: 700; color: var(--ink-soft); }
-.hud.is-ready .hud-bar-fill { background: var(--sage); }
-.hud.is-ready .hud-note { color: var(--sage); }
+.hud.is-ready .hud-loot-fill { background: var(--sage); }
+.hud-bar-thin { flex: 1; height: 5px; }
+.hud-xp-fill { background: var(--ink); }
+.hud-chip {
+  padding: 0 5px;
+  border: 1.5px dashed var(--ink-soft);
+  color: var(--ink-soft);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.hud-chip.is-ready { border-style: solid; border-color: var(--blood); color: var(--blood); }
+/* 터치 기기에서는 폭탄 버튼이 남은 시간을 보여 주므로 따로 적지 않는다. */
+.stage.is-touch .hud-chip { display: none; }
+
+.hud-tools { display: flex; flex-direction: column; gap: 4px; }
+.tool {
+  padding: 2px 7px;
+  border: 1.5px solid var(--ink);
+  border-radius: 0;
+  background: rgb(243 227 191 / 0.86);
+  color: var(--ink);
+  font: 500 0.6875rem var(--font-body);
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: manipulation;
+}
 
 .banner {
   position: absolute;
   left: 50%;
-  top: 30%;
+  top: 22%;
   transform: translateX(-50%);
   width: max-content;
   max-width: calc(100% - 32px);
-  padding: 8px 14px;
+  padding: 6px 12px;
   background: var(--ink);
   color: var(--paper);
   font-weight: 700;
@@ -113,56 +145,26 @@ p, h1, dl, dd { margin: 0; }
   pointer-events: none;
 }
 
+/* 구르기와 폭탄 버튼은 두 스틱 사이 아래쪽에 둔다. 화면을 더 가리지 않게 하려는 것이다. */
 .pad {
   position: absolute;
-  bottom: calc(196px + env(safe-area-inset-bottom, 0px));
-  width: 64px;
-  height: 64px;
-  border: 3px solid var(--ink);
+  bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+  width: 58px;
+  height: 58px;
+  border: 2.5px solid rgb(42 26 16 / 0.8);
   border-radius: 50%;
-  background: rgb(243 227 191 / 0.85);
+  background: rgb(243 227 191 / 0.6);
   color: var(--ink);
-  font: 700 var(--step--1) var(--font-body);
+  font: 700 0.8125rem var(--font-body);
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
 }
 .pad:active { background: var(--gold-bright); }
-.pad-dash { right: max(16px, env(safe-area-inset-right, 0px)); }
-.pad-bomb {
-  right: calc(max(16px, env(safe-area-inset-right, 0px)) + 76px);
-  background: rgb(179 38 30 / 0.85);
-  color: var(--paper);
-}
-.pad-bomb.is-waiting { background: rgb(243 227 191 / 0.5); color: var(--ink-soft); border-style: dashed; }
-
-.hud-foot { gap: 10px; }
-.hud-xp { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
-.hud-xp .hud-label { white-space: nowrap; letter-spacing: 0; }
-.hud-bar-thin { flex: 1; height: 6px; border-width: 1.5px; }
-.hud-xp-fill { background: var(--ink); }
-.hud.is-ready .hud-xp-fill { background: var(--ink); }
-.hud-chip {
-  padding: 1px 6px;
-  border: 1.5px dashed var(--ink-soft);
-  color: var(--ink-soft);
-  font-size: 0.75rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.hud-chip.is-ready { border-style: solid; border-color: var(--blood); color: var(--blood); }
-
-.mute {
-  align-self: flex-start;
-  padding: 3px 8px;
-  border: 1.5px solid var(--ink);
-  border-radius: 0;
-  background: rgb(243 227 191 / 0.9);
-  color: var(--ink);
-  font: 500 0.75rem var(--font-body);
-  pointer-events: auto;
-  cursor: pointer;
-}
+.pad-dash { right: 128px; }
+.pad-bomb { right: 194px; background: rgb(179 38 30 / 0.7); color: var(--paper); }
+.pad-bomb.is-waiting { background: rgb(243 227 191 / 0.35); color: var(--ink-soft); border-style: dashed; }
+.stage.is-rotated .pad { bottom: 26px; }
 
 /* ---------- 안내판 ---------- */
 .panel {
@@ -205,6 +207,22 @@ h1 {
   text-wrap: balance;
 }
 .poster-lead { max-width: 34em; }
+.poster-note { margin-top: -8px; color: var(--ink-soft); font-size: var(--step--1); text-align: center; }
+/* 가로로 눕힌 화면은 높이가 낮으므로 안내판을 넓고 낮게 편다. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .poster { width: min(100%, 640px); gap: 8px; padding: 14px 18px; }
+  h1 { font-size: 1.5rem; }
+  .howto { gap: 4px; padding-block: 6px; }
+  .offers { flex-direction: row; }
+  .offer { flex: 1; grid-template-columns: minmax(0, 1fr); }
+  .offer-price { grid-column: 1; grid-row: auto; }
+}
+.stage.is-rotated .poster { width: min(100%, 640px); gap: 8px; padding: 14px 18px; }
+.stage.is-rotated h1 { font-size: 1.5rem; }
+.stage.is-rotated .howto { gap: 4px; padding-block: 6px; }
+.stage.is-rotated .offers { flex-direction: row; }
+.stage.is-rotated .offer { flex: 1; grid-template-columns: minmax(0, 1fr); }
+.stage.is-rotated .offer-price { grid-column: 1; grid-row: auto; }
 
 .howto { display: flex; flex-direction: column; gap: 8px; padding-block: 10px; border-block: 2px solid var(--ink); }
 .howto div { display: grid; grid-template-columns: 3em minmax(0, 1fr); gap: 8px; }
@@ -259,15 +277,3 @@ h1 {
 .offer:disabled .offer-price { color: var(--ink-soft); }
 .next-job { padding-top: 10px; border-top: 2px solid var(--ink); font-size: var(--step--1); }
 
-/* 폰에서는 정보판이 화면을 덜 가리게 줄인다. */
-@media (max-width: 480px) {
-  .hud { padding-block: 8px; gap: 4px; }
-  .hud-plate { gap: 3px; padding: 6px 8px; max-width: none; }
-  .heart { width: 13px; height: 13px; }
-  .hud-stars { font-size: 1rem; }
-  .hud-money { font-size: 1.2rem; }
-  .hud-quota { font-size: 0.875rem; }
-  .hud-bar { height: 6px; }
-  .hud-note { font-size: 0.75rem; }
-  .hud-loot { gap: 2px; }
-}

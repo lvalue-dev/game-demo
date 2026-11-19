@@ -3,14 +3,17 @@ import { JOBS } from './game/map.ts';
 import { buy, canBuy, choosePerk, finishJob, newRun, nextJob, perkChoices, perkDef, startJob } from './game/run.ts';
 import type { Run } from './game/run.ts';
 import { MAX_HEAT, NO_INPUT, heatLevel, quotaMet, step, xpForLevel } from './game/sim.ts';
-import type { World } from './game/types.ts';
+import type { Vec, World } from './game/types.ts';
 import { attachControls } from './input.ts';
 import { draw, makeView, screenToWorld, snapCamera, updateCamera } from './render.ts';
-import type { View } from './render.ts';
+import type { Insets, View } from './render.ts';
 
 type Screen = 'title' | 'play' | 'perk' | 'shop' | 'dead' | 'won';
 
+const LANDSCAPE_KEY = 'mungigol-landscape';
+
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
+const stage = $('stage');
 const canvas = $<HTMLCanvasElement>('game');
 const ctx = canvas.getContext('2d')!;
 const hud = $('hud');
@@ -19,7 +22,20 @@ const banner = $('banner');
 const dashButton = $('dash');
 const bombButton = $('bomb');
 const muteButton = $('mute');
-const controls = attachControls(canvas, dashButton, bombButton);
+const rotateButton = $('rotate');
+
+/** 세로로 선 폰에서 화면을 옆으로 돌려 가로로 쓰는 중인가. */
+let rotated = false;
+let wantLandscape = loadLandscapePref();
+
+/** 브라우저 좌표를 캔버스 안의 좌표로 바꾼다. 화면을 90도 돌렸으면 축이 서로 바뀐다. */
+function toLocal(clientX: number, clientY: number): Vec {
+  if (rotated) return { x: clientY, y: window.innerWidth - clientX };
+  const rect = canvas.getBoundingClientRect();
+  return { x: clientX - rect.left, y: clientY - rect.top };
+}
+
+const controls = attachControls(canvas, dashButton, bombButton, toLocal);
 
 let run: Run = newRun(randomSeed());
 let world: World = startJob(run);
@@ -38,14 +54,49 @@ function randomSeed(): number {
   return Math.floor(Math.random() * 0x7fffffff);
 }
 
-function resize(): void {
+function loadLandscapePref(): boolean {
+  try {
+    return localStorage.getItem(LANDSCAPE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function setLandscape(value: boolean): void {
+  wantLandscape = value;
+  try {
+    localStorage.setItem(LANDSCAPE_KEY, value ? '1' : '0');
+  } catch {
+    // 저장이 막혀 있으면 이번 판에만 적용된다.
+  }
+  layout();
+  if (screen !== 'play') renderPanel();
+}
+
+const isPortraitViewport = (): boolean => window.innerHeight > window.innerWidth;
+
+/** 화면 크기와 방향에 맞춰 무대, 캔버스, 카메라 여백을 다시 잡는다. */
+function layout(): void {
+  const touch = controls.usesTouch();
+  rotated = touch && wantLandscape && isPortraitViewport();
+  stage.classList.toggle('is-rotated', rotated);
+  stage.classList.toggle('is-touch', touch);
+  stage.style.width = rotated ? window.innerHeight + 'px' : '';
+  stage.style.height = rotated ? window.innerWidth + 'px' : '';
+  rotateButton.hidden = !(touch && isPortraitViewport());
+  rotateButton.textContent = rotated ? '세로 화면' : '가로 화면';
+
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   canvas.width = Math.round(w * dpr);
   canvas.height = Math.round(h * dpr);
+  // 조작부가 덮는 만큼은 게임 화면에서 뺀다. 세로에서는 아래쪽, 가로에서는 양옆이다.
+  const insets: Insets = !touch ? { top: 0, right: 0, bottom: 0, left: 0 }
+    : w > h ? { top: 0, right: 120, bottom: 0, left: 120 }
+    : { top: 64, right: 0, bottom: 132, left: 0 };
   const prev = view;
-  view = makeView(w, h, dpr);
+  view = makeView(w, h, dpr, insets);
   view.camX = prev.camX;
   view.camY = prev.camY;
 }
@@ -95,17 +146,24 @@ function renderPanel(): void {
 }
 
 function titlePanel(): string {
+  // 세로로 선 폰에서는 화면 방향을 고르게 한다. 가로가 조작부에 덜 가려진다.
+  const choose = controls.usesTouch() && (isPortraitViewport() || rotated);
+  const buttons = choose
+    ? `<button type="button" class="btn btn-go" data-action="start-landscape">가로 화면으로 시작</button>
+       <p class="poster-note">폰을 옆으로 돌려 잡는다. 화면이 넓어지고 조작부가 양쪽 구석으로 빠진다.</p>
+       <button type="button" class="btn" data-action="start-portrait">세로 화면으로 시작</button>`
+    : `<button type="button" class="btn btn-go" data-action="start">작전 시작</button>`;
   return `
     <div class="poster">
       <p class="poster-eyebrow">WANTED</p>
       <h1>먼지골 한탕</h1>
       <p class="poster-lead">마을 곳곳의 돈을 털어 상납금을 채우고, 말에게 돌아가 달아나라. 오래 머물수록 수배 등급이 올라 추격대가 늘어난다.</p>
       <dl class="howto">
-        <div><dt>폰</dt><dd>왼쪽 스틱으로 이동한다. 쏘고 싶은 곳을 화면에서 누르거나, 오른쪽 스틱을 밀면 그 방향으로 쏜다. 오른쪽 버튼으로 구르고 폭탄을 던진다.</dd></div>
+        <div><dt>폰</dt><dd>왼쪽 스틱으로 이동한다. 쏘고 싶은 곳을 화면에서 누르거나, 오른쪽 스틱을 밀면 그 방향으로 쏜다.</dd></div>
         <div><dt>PC</dt><dd>WASD 이동, 마우스 조준과 사격, 스페이스 구르기, 오른쪽 클릭이나 E로 다이너마이트, R 재장전.</dd></div>
         <div><dt>요령</dt><dd>적은 가는 방향을 앞질러 쏜다. 붉은 선이 굵어지는 순간 방향을 틀거나 굴러라. 다이너마이트는 금고도 터뜨린다.</dd></div>
       </dl>
-      <button type="button" class="btn btn-go" data-action="start">작전 시작</button>
+      ${buttons}
     </div>`;
 }
 
@@ -186,6 +244,14 @@ panel.addEventListener('click', (e) => {
   const index = Number(target.dataset.index);
   unlock();
   switch (target.dataset.action) {
+    case 'start-landscape':
+      setLandscape(true);
+      beginJob();
+      break;
+    case 'start-portrait':
+      setLandscape(false);
+      beginJob();
+      break;
     case 'start':
       beginJob();
       break;
@@ -214,6 +280,7 @@ muteButton.addEventListener('click', () => {
   muteButton.textContent = isMuted() ? '소리 켜기' : '소리 끄기';
   muteButton.setAttribute('aria-pressed', String(isMuted()));
 });
+rotateButton.addEventListener('click', () => setLandscape(!wantLandscape));
 
 // ---------- 플레이 중 화면 위 정보 ----------
 
@@ -222,7 +289,6 @@ const hudHeat = $('hud-heat');
 const hudLoot = $('hud-loot');
 const hudQuota = $('hud-quota');
 const hudFill = $('hud-bar-fill');
-const hudNote = $('hud-note');
 const hudLevel = $('hud-level');
 const hudXp = $('hud-xp-fill');
 const hudBomb = $('hud-bomb');
@@ -238,18 +304,16 @@ function updateHud(): void {
   hudHp.innerHTML = hearts(p.hp, world.stats.maxHp);
   hudHp.setAttribute('aria-label', '체력 ' + p.hp + ' / ' + world.stats.maxHp);
   hudHeat.innerHTML = Array.from({ length: MAX_HEAT }, (_, i) => `<i class="star${i < level ? ' is-on' : ''}">★</i>`).join('');
+  hudHeat.setAttribute('aria-label', '수배 ' + level + '등급');
   hudLoot.textContent = '$' + world.loot;
   hudQuota.textContent = ' / ' + world.quota;
   hudFill.style.width = Math.min(100, (world.loot / world.quota) * 100) + '%';
-  const done = quotaMet(world);
-  hud.classList.toggle('is-ready', done);
-  hudNote.textContent = done
-    ? '말에게 돌아가면 탈출 · 내 몫 $' + (world.loot - world.quota)
-    : '상납금까지 $' + (world.quota - world.loot);
+  hud.classList.toggle('is-ready', quotaMet(world));
   hudLevel.textContent = '악명 ' + world.level;
   hudXp.style.width = Math.min(100, (world.xp / xpForLevel(world.level)) * 100) + '%';
   hudBomb.textContent = bombLeft > 0 ? '다이너마이트 ' + bombLeft + '초' : '다이너마이트 준비';
   hudBomb.classList.toggle('is-ready', bombLeft === 0);
+  bombButton.textContent = bombLeft > 0 ? String(bombLeft) : '폭탄';
   bombButton.classList.toggle('is-waiting', bombLeft > 0);
 }
 
@@ -299,10 +363,11 @@ function frame(now: number): void {
 }
 
 // 자동 점검 스크립트가 진행 상태를 들여다보고 바꿀 수 있게 열어 둔 창구.
-(window as unknown as { __game: () => { world: World; run: Run } }).__game = () => ({ world, run });
+(window as unknown as { __game: () => { world: World; run: Run; rotated: boolean } }).__game = () => ({ world, run, rotated });
 
-window.addEventListener('resize', resize);
-resize();
+window.addEventListener('resize', layout);
+window.addEventListener('orientationchange', layout);
+layout();
 snapCamera(view, world);
 setScreen('title');
 requestAnimationFrame(frame);

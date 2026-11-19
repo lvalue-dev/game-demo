@@ -1,25 +1,23 @@
-<div class="stage">
+<div id="stage" class="stage">
   <canvas id="game" class="game"></canvas>
   <div id="hud" class="hud" hidden>
     <div class="hud-plate">
       <div class="hud-row">
         <div id="hud-hp" class="hud-hp" aria-label="체력"></div>
-        <div class="hud-heat"><span class="hud-label">수배</span><span id="hud-heat" class="hud-stars"></span></div>
-      </div>
-      <div class="hud-loot">
         <div class="hud-money"><span id="hud-loot"></span><span id="hud-quota" class="hud-quota"></span></div>
-        <div class="hud-bar"><div id="hud-bar-fill" class="hud-bar-fill"></div></div>
-        <p id="hud-note" class="hud-note"></p>
+        <div id="hud-heat" class="hud-stars" aria-label="수배 등급"></div>
       </div>
-      <div class="hud-row hud-foot">
-        <div class="hud-xp">
-          <span id="hud-level" class="hud-label"></span>
-          <div class="hud-bar hud-bar-thin"><div id="hud-xp-fill" class="hud-bar-fill hud-xp-fill"></div></div>
-        </div>
+      <div class="hud-bar"><div id="hud-bar-fill" class="hud-bar-fill hud-loot-fill"></div></div>
+      <div class="hud-row">
+        <span id="hud-level" class="hud-label"></span>
+        <div class="hud-bar hud-bar-thin"><div id="hud-xp-fill" class="hud-bar-fill hud-xp-fill"></div></div>
         <span id="hud-bomb" class="hud-chip"></span>
       </div>
     </div>
-    <button id="mute" class="mute" type="button" aria-pressed="false">소리 끄기</button>
+    <div class="hud-tools">
+      <button id="mute" class="tool" type="button" aria-pressed="false">소리 끄기</button>
+      <button id="rotate" class="tool" type="button" hidden>가로 화면</button>
+    </div>
   </div>
   <p id="banner" class="banner" aria-live="polite" hidden></p>
   <button id="bomb" class="pad pad-bomb" type="button" hidden>폭탄</button>

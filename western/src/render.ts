@@ -51,6 +51,14 @@ const LOOKS: Record<EnemyKind, Look> = {
   sheriff: { coat: '#1e1a1a', hat: '#f1ead8', band: '#d99a1c', barrel: 17, thick: 5 },
 };
 
+/** 조작부나 정보판이 덮고 있어서 게임 화면으로 쓰지 못하는 가장자리 폭. */
+export interface Insets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
 export interface View {
   w: number;
   h: number;
@@ -59,18 +67,29 @@ export interface View {
   zoom: number;
   camX: number;
   camY: number;
+  insets: Insets;
+  /** 가려지지 않는 영역의 중심. 카메라는 주인공을 화면 정중앙이 아니라 여기에 둔다. */
+  fx: number;
+  fy: number;
 }
 
 const VIEW_SHORT_SIDE = 600;
+const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
 
-export function makeView(w: number, h: number, dpr: number): View {
-  return { w, h, dpr, zoom: Math.min(w, h) / VIEW_SHORT_SIDE, camX: 0, camY: 0 };
+export function makeView(w: number, h: number, dpr: number, insets: Insets = NO_INSETS): View {
+  return {
+    w, h, dpr, zoom: Math.min(w, h) / VIEW_SHORT_SIDE, camX: 0, camY: 0, insets,
+    fx: insets.left + (w - insets.left - insets.right) / 2,
+    fy: insets.top + (h - insets.top - insets.bottom) / 2,
+  };
 }
 
 export function updateCamera(view: View, world: World, dt: number): void {
   const p = world.player;
-  const halfW = view.w / view.zoom / 2;
-  const halfH = view.h / view.zoom / 2;
+  // 가려지지 않는 영역의 절반 크기(게임 좌표). 세계의 끝이 이 영역의 끝까지 오도록 카메라를 묶는다.
+  // 그래서 지도 가장자리에 있어도 주인공이 조작부 밑으로 들어가지 않는다.
+  const halfW = (view.w - view.insets.left - view.insets.right) / view.zoom / 2;
+  const halfH = (view.h - view.insets.top - view.insets.bottom) / view.zoom / 2;
   // 조준하는 쪽이 조금 더 보이게 당겨 준다.
   const tx = p.x + Math.cos(p.aimDir) * 50;
   const ty = p.y + Math.sin(p.aimDir) * 50;
@@ -88,11 +107,11 @@ export function snapCamera(view: View, world: World): void {
 }
 
 export function screenToWorld(view: View, sx: number, sy: number): Vec {
-  return { x: (sx - view.w / 2) / view.zoom + view.camX, y: (sy - view.h / 2) / view.zoom + view.camY };
+  return { x: (sx - view.fx) / view.zoom + view.camX, y: (sy - view.fy) / view.zoom + view.camY };
 }
 
 function toScreen(view: View, p: Vec): Vec {
-  return { x: (p.x - view.camX) * view.zoom + view.w / 2, y: (p.y - view.camY) * view.zoom + view.h / 2 };
+  return { x: (p.x - view.camX) * view.zoom + view.fx, y: (p.y - view.camY) * view.zoom + view.fy };
 }
 
 /** 모래 바닥의 얼룩. 한 번 정해 두고 계속 쓴다. */
@@ -112,7 +131,7 @@ export function draw(ctx: CanvasRenderingContext2D, view: View, world: World, st
   const shakeX = (Math.random() - 0.5) * world.shake;
   const shakeY = (Math.random() - 0.5) * world.shake;
   ctx.save();
-  ctx.translate(view.w / 2 + shakeX, view.h / 2 + shakeY);
+  ctx.translate(view.fx + shakeX, view.fy + shakeY);
   ctx.scale(view.zoom, view.zoom);
   ctx.translate(-view.camX, -view.camY);
 
@@ -890,19 +909,16 @@ function drawAtmosphere(ctx: CanvasRenderingContext2D, view: View, world: World,
 
 /** 화면 밖에 있는 돈과 말의 방향을 가장자리 화살표로 알려 준다. */
 function drawArrows(ctx: CanvasRenderingContext2D, view: View, world: World, time: number): void {
-  const margin = 34;
+  const margin = 26;
+  const halfW = (view.w - view.insets.left - view.insets.right) / 2 - margin;
+  const halfH = (view.h - view.insets.top - view.insets.bottom) / 2 - margin;
   const arrow = (target: Vec, color: string, size: number): void => {
     const s = toScreen(view, target);
-    if (s.x > margin && s.x < view.w - margin && s.y > margin + 40 && s.y < view.h - margin) return;
-    const cx = view.w / 2;
-    const cy = view.h / 2;
-    const a = Math.atan2(s.y - cy, s.x - cx);
-    const t = Math.min(
-      (view.w / 2 - margin) / Math.abs(Math.cos(a) || 1e-6),
-      (view.h / 2 - margin - 30) / Math.abs(Math.sin(a) || 1e-6),
-    );
+    if (Math.abs(s.x - view.fx) < halfW && Math.abs(s.y - view.fy) < halfH) return;
+    const a = Math.atan2(s.y - view.fy, s.x - view.fx);
+    const t = Math.min(halfW / Math.abs(Math.cos(a) || 1e-6), halfH / Math.abs(Math.sin(a) || 1e-6));
     ctx.save();
-    ctx.translate(cx + Math.cos(a) * t, cy + 15 + Math.sin(a) * t);
+    ctx.translate(view.fx + Math.cos(a) * t, view.fy + Math.sin(a) * t);
     ctx.rotate(a);
     ctx.fillStyle = color;
     ctx.strokeStyle = C.ink;
@@ -922,23 +938,24 @@ function drawArrows(ctx: CanvasRenderingContext2D, view: View, world: World, tim
 }
 
 function drawSticks(ctx: CanvasRenderingContext2D, sticks: Stick[]): void {
-  ctx.font = '700 13px "IBM Plex Sans KR", sans-serif';
+  ctx.font = '700 12px "IBM Plex Sans KR", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const s of sticks) {
-    ctx.fillStyle = 'rgba(243, 227, 191, 0.35)';
-    ctx.strokeStyle = s.active ? 'rgba(42, 26, 16, 0.75)' : 'rgba(42, 26, 16, 0.45)';
-    ctx.lineWidth = 2.5;
+    // 손을 대지 않은 스틱은 거의 비치게 해서 화면을 덜 가린다.
+    ctx.fillStyle = s.active ? 'rgba(243, 227, 191, 0.28)' : 'rgba(243, 227, 191, 0.14)';
+    ctx.strokeStyle = s.active ? 'rgba(42, 26, 16, 0.6)' : 'rgba(42, 26, 16, 0.3)';
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(s.originX, s.originY, s.radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = s.active ? 'rgba(42, 26, 16, 0.6)' : 'rgba(42, 26, 16, 0.3)';
+    ctx.fillStyle = s.active ? 'rgba(42, 26, 16, 0.5)' : 'rgba(42, 26, 16, 0.18)';
     ctx.beginPath();
-    ctx.arc(s.originX + s.dx * s.radius, s.originY + s.dy * s.radius, 22, 0, Math.PI * 2);
+    ctx.arc(s.originX + s.dx * s.radius, s.originY + s.dy * s.radius, 18, 0, Math.PI * 2);
     ctx.fill();
     if (!s.active) {
-      ctx.fillStyle = 'rgba(42, 26, 16, 0.8)';
+      ctx.fillStyle = 'rgba(42, 26, 16, 0.6)';
       ctx.fillText(s.side === 'move' ? '이동' : '조준', s.originX, s.originY);
     }
   }

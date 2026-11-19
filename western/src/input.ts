@@ -11,14 +11,14 @@ export interface Stick {
   active: boolean;
 }
 
-const STICK_RADIUS = 54;
+const STICK_RADIUS = 46;
 /** 스틱 중심에서 이 배수 안쪽을 누르면 스틱을 잡은 것으로 본다. */
 const STICK_GRAB = 1.7;
 /** 조준 스틱을 이만큼 이상 밀어야 총을 쏜다. */
 const AIM_DEADZONE = 0.2;
 /** 화면 아래 모서리에서 스틱 중심까지의 거리. */
-const STICK_INSET_X = 84;
-const STICK_INSET_Y = 112;
+export const STICK_INSET_X = 68;
+export const STICK_INSET_Y = 76;
 
 type TouchRole =
   | { kind: 'move' }
@@ -36,7 +36,11 @@ export interface Controls {
   reset(): void;
 }
 
-export function attachControls(canvas: HTMLCanvasElement, dashButton: HTMLElement, bombButton: HTMLElement): Controls {
+export function attachControls(
+  canvas: HTMLCanvasElement, dashButton: HTMLElement, bombButton: HTMLElement,
+  /** 브라우저 좌표를 캔버스 안의 좌표로 바꾼다. 화면을 옆으로 돌린 상태도 여기서 처리한다. */
+  toLocal: (clientX: number, clientY: number) => Vec,
+): Controls {
   const keys = new Set<string>();
   let mouse: { x: number; y: number; down: boolean } | null = null;
   let dashQueued = false;
@@ -67,18 +71,18 @@ export function attachControls(canvas: HTMLCanvasElement, dashButton: HTMLElemen
   function syncTouches(e: TouchEvent): void {
     e.preventDefault();
     touch = true;
-    const rect = canvas.getBoundingClientRect();
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
     const grab = STICK_RADIUS * STICK_GRAB;
 
     for (const t of Array.from(e.changedTouches)) {
       if (e.type !== 'touchstart') continue;
-      const x = t.clientX - rect.left;
-      const y = t.clientY - rect.top;
+      const { x, y } = toLocal(t.clientX, t.clientY);
       const mc = moveCenter();
       const ac = aimCenter();
       // 왼쪽 스틱 근처는 이동, 오른쪽 스틱 근처는 조준 스틱, 그 밖의 화면은 "누른 곳을 향해 쏘기".
       // 왼쪽 아래 구역 전체도 이동으로 본다. 엄지가 스틱을 조금 벗어나도 계속 움직이게 하려는 것이다.
-      const inMoveZone = Math.hypot(x - mc.x, y - mc.y) <= grab || (x < rect.width * 0.4 && y > rect.height * 0.6);
+      const inMoveZone = Math.hypot(x - mc.x, y - mc.y) <= grab || (x < width * 0.4 && y > height * 0.55);
       const role: TouchRole =
         inMoveZone ? { kind: 'move' }
         : Math.hypot(x - ac.x, y - ac.y) <= grab ? { kind: 'aimStick' }
@@ -95,8 +99,7 @@ export function attachControls(canvas: HTMLCanvasElement, dashButton: HTMLElemen
       const role = roles.get(t.identifier);
       if (!role) continue;
       live.add(t.identifier);
-      const x = t.clientX - rect.left;
-      const y = t.clientY - rect.top;
+      const { x, y } = toLocal(t.clientX, t.clientY);
       if (role.kind === 'move') move = { ...stickValue(moveCenter(), x, y), active: true };
       else if (role.kind === 'aimStick') aimStick = { ...stickValue(aimCenter(), x, y), active: true };
       else aimPoint = { x, y };
