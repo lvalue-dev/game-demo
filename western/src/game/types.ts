@@ -3,15 +3,75 @@ export interface Vec {
   y: number;
 }
 
-export type ObstacleKind = 'bank' | 'saloon' | 'store' | 'house' | 'cover';
+/** 물체의 재질. 색과, 총알이나 폭발에 대한 반응이 여기서 정해진다. */
+export type Material = 'wood' | 'adobe' | 'stone' | 'metal' | 'plant' | 'tnt';
 
+export type ObstacleKind = 'building' | 'crate' | 'barrel' | 'tnt' | 'trough' | 'wagon' | 'cactus' | 'rock';
+
+/** 물체 표면에 남는 흔적. dx, dy는 물체 왼쪽 위에서의 위치, u는 옆면에서의 높이(0~1). */
+export interface Mark {
+  dx: number;
+  dy: number;
+  u: number;
+  kind: 'hole' | 'scorch';
+  size: number;
+}
+
+/** 건물을 이루는 부품 조합. */
+export interface BuildingStyle {
+  roof: 'red' | 'brown' | 'olive' | 'tan';
+  chimney: boolean;
+  /** 길 쪽을 향한 면에 문과 창, 나무 보도를 단다. */
+  front: boolean;
+}
+
+/** 길을 막는 물체. 사각형 바닥을 차지한다. */
 export interface Rect {
+  id: number;
   x: number;
   y: number;
   w: number;
   h: number;
   kind: ObstacleKind;
+  material: Material;
+  /** 부서지지 않는 물체는 Infinity. */
+  hp: number;
+  maxHp: number;
+  /** 화면에 그릴 때의 높이. */
+  tall: number;
+  marks: Mark[];
   label?: string;
+  style?: BuildingStyle;
+}
+
+/** 지나다닐 수 있는 덤불. 총알은 통과하고, 불에는 탄다. */
+export interface Bush {
+  id: number;
+  x: number;
+  y: number;
+  size: number;
+  burnt: boolean;
+}
+
+/** 바닥에 남는 자국. */
+export interface Decal {
+  x: number;
+  y: number;
+  kind: 'crater' | 'scorch' | 'blood' | 'ash' | 'puddle' | 'debris' | 'stump';
+  size: number;
+  rot: number;
+}
+
+/** 타고 있는 불. 닿으면 누구든 다친다. */
+export interface Fire {
+  x: number;
+  y: number;
+  r: number;
+  life: number;
+  maxLife: number;
+  tick: number;
+  /** 건물 벽에 붙은 불은 바닥보다 위에 그린다. */
+  lift: number;
 }
 
 export interface Loot {
@@ -59,7 +119,7 @@ export interface Bullet {
   fromPlayer: boolean;
   damage: number;
   pierce: number;
-  /** 이미 맞힌 적의 id. 관통탄이 같은 적을 두 번 맞히지 않게 한다. */
+  /** 이미 맞힌 대상의 id. 같은 대상을 두 번 맞히지 않게 한다. */
   hit: number[];
 }
 
@@ -74,7 +134,8 @@ export interface Bomb {
   fuse: number;
   radius: number;
   damage: number;
-  fromPlayer: boolean;
+  /** 누가 터뜨렸는가. 화약통처럼 주인이 없으면 누구든 다친다. */
+  owner: 'player' | 'enemy' | 'neutral';
 }
 
 export interface Pickup {
@@ -93,6 +154,8 @@ export interface Corpse {
   y: number;
   dir: number;
   kind: EnemyKind;
+  /** 폭발이나 불에 쓰러져 그을렸는가. */
+  charred: boolean;
 }
 
 export interface Blast {
@@ -112,6 +175,8 @@ export interface FloatText {
   color: string;
 }
 
+export type ParticleShape = 'dot' | 'shard' | 'chunk' | 'spark' | 'leaf' | 'drop' | 'smoke' | 'flame';
+
 export interface Particle {
   x: number;
   y: number;
@@ -121,19 +186,16 @@ export interface Particle {
   maxLife: number;
   size: number;
   color: string;
-}
-
-export interface Decor {
-  x: number;
-  y: number;
-  kind: 'cactus' | 'bush' | 'stone';
-  size: number;
+  shape: ParticleShape;
+  rot: number;
+  spin: number;
 }
 
 /** 소리와 화면 연출이 반응하는 사건. 화면 쪽이 매 프레임 읽고 비운다. */
 export type GameEvent =
   | 'shot' | 'enemyShot' | 'hit' | 'kill' | 'hurt' | 'loot' | 'safe' | 'coin' | 'heal'
-  | 'reload' | 'dash' | 'throw' | 'boom' | 'alarm' | 'levelup' | 'sheriff' | 'escape' | 'dead';
+  | 'reload' | 'dash' | 'throw' | 'boom' | 'alarm' | 'levelup' | 'sheriff' | 'escape' | 'dead'
+  | 'hitWood' | 'hitStone' | 'hitMetal' | 'hitPlant' | 'splash' | 'break' | 'burn';
 
 /** 능력으로 바뀌는 수치. 한 판 내내 유지된다. */
 export interface Stats {
@@ -196,7 +258,9 @@ export interface World {
   texts: FloatText[];
   particles: Particle[];
   obstacles: Rect[];
-  decor: Decor[];
+  bushes: Bush[];
+  decals: Decal[];
+  fires: Fire[];
   horse: Vec;
   /** 수배 수치. 정수 부분이 화면의 별 개수다. */
   heat: number;

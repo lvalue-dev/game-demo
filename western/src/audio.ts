@@ -124,6 +124,26 @@ const SOUNDS: Record<GameEvent, () => void> = {
     tone({ type: 'sawtooth', from: 92, time: 0.7, gain: 0.35, delay: 0.45 });
   },
   escape: () => [523, 659, 784, 1047, 1319].forEach((f, i) => tone({ type: 'triangle', from: f, time: 0.2, gain: 0.25, delay: i * 0.09 })),
+  // 재질마다 맞는 소리가 다르다.
+  hitWood: () => {
+    tone({ type: 'triangle', from: 210, to: 90, time: 0.07, gain: 0.3 });
+    hiss(0.05, 0.18, 1400);
+  },
+  hitStone: () => hiss(0.06, 0.3, 5200, 0, 'highpass'),
+  hitMetal: () => {
+    tone({ type: 'sine', from: 2100, to: 1700, time: 0.22, gain: 0.2 });
+    tone({ type: 'sine', from: 3150, to: 2900, time: 0.12, gain: 0.08 });
+  },
+  hitPlant: () => hiss(0.09, 0.14, 2400, 0, 'bandpass'),
+  splash: () => {
+    hiss(0.3, 0.35, 2600, 0, 'bandpass');
+    tone({ type: 'sine', from: 520, to: 180, time: 0.2, gain: 0.12 });
+  },
+  break: () => {
+    hiss(0.25, 0.55, 1900);
+    tone({ type: 'triangle', from: 150, to: 50, time: 0.2, gain: 0.4 });
+  },
+  burn: () => hiss(0.5, 0.22, 700, 0, 'bandpass'),
   dead: () => {
     tone({ type: 'sawtooth', from: 220, to: 40, time: 0.9, gain: 0.45 });
     hiss(0.5, 0.3, 600);

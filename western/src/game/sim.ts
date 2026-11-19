@@ -1,7 +1,7 @@
 import { HORSE, JOBS, PLAYER_START, WORLD_H, WORLD_W, buildMap } from './map.ts';
 import { rand, randRange } from './rng.ts';
 import type {
-  Bomb, Enemy, EnemyKind, GameEvent, Input, Loot, Rect, Stats, Vec, World,
+  Bomb, Bush, Decal, Enemy, EnemyKind, GameEvent, Input, Loot, Mark, ParticleShape, Rect, Stats, Vec, World,
 } from './types.ts';
 
 export const PLAYER_R = 12;
@@ -97,7 +97,9 @@ export function createWorld(
     texts: [],
     particles: [],
     obstacles: map.obstacles,
-    decor: map.decor,
+    bushes: map.bushes,
+    decals: [],
+    fires: [],
     horse: { ...HORSE },
     heat: 0,
     alarmed: false,
@@ -205,16 +207,24 @@ const emit = (w: World, event: GameEvent): void => {
   w.events.push(event);
 };
 
-function burst(w: World, x: number, y: number, color: string, count: number, speed: number, size = 3): void {
+function burst(
+  w: World, x: number, y: number, color: string, count: number, speed: number, size = 3,
+  shape: ParticleShape = 'dot',
+): void {
   for (let i = 0; i < count; i++) {
     const a = rand(w) * Math.PI * 2;
     const s = speed * (0.3 + rand(w) * 0.7);
     const life = 0.25 + rand(w) * 0.4;
     w.particles.push({
       x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life, maxLife: life,
-      size: size * (0.6 + rand(w) * 0.9), color,
+      size: size * (0.6 + rand(w) * 0.9), color, shape, rot: rand(w) * Math.PI * 2, spin: (rand(w) - 0.5) * 16,
     });
   }
+}
+
+function addDecal(w: World, x: number, y: number, kind: Decal['kind'], size: number): void {
+  w.decals.push({ x, y, kind, size, rot: rand(w) * Math.PI * 2 });
+  if (w.decals.length > 160) w.decals.shift();
 }
 
 function floatText(w: World, x: number, y: number, text: string, color: string): void {
@@ -257,6 +267,169 @@ function takeLoot(w: World, l: Loot): void {
   burst(w, l.x, l.y, '#d99a1c', l.kind === 'safe' ? 24 : 10, 180);
   floatText(w, l.x, l.y - 18, '+$' + gain, '#a86a00');
   emit(w, l.kind === 'safe' ? 'safe' : 'loot');
+}
+
+// ---------- 재질 반응 ----------
+// 총알과 폭발이 무엇에 닿았느냐에 따라 튀는 것, 남는 흔적, 벌어지는 일이 달라진다.
+
+function nearestOnRect(o: Rect, p: Vec): Vec {
+  return { x: clamp(p.x, o.x, o.x + o.w), y: clamp(p.y, o.y, o.y + o.h) };
+}
+
+const centerOf = (o: Rect): Vec => ({ x: o.x + o.w / 2, y: o.y + o.h / 2 });
+
+function addMark(w: World, o: Rect, at: Vec, kind: Mark['kind'], size: number): void {
+  o.marks.push({ dx: at.x - o.x, dy: at.y - o.y, u: rand(w), kind, size });
+  if (o.marks.length > 14) o.marks.shift();
+}
+
+/** 재질별로 튀는 조각. */
+function spray(w: World, o: Rect, at: Vec, amount: number): void {
+  switch (o.material) {
+    case 'wood':
+      burst(w, at.x, at.y, '#c79a66', 5 * amount, 170, 6, 'shard');
+      emit(w, 'hitWood');
+      break;
+    case 'adobe':
+      burst(w, at.x, at.y, '#d9b58a', 4 * amount, 130, 4, 'chunk');
+      burst(w, at.x, at.y, '#e6cfa6', 3 * amount, 60, 7, 'smoke');
+      emit(w, 'hitStone');
+      break;
+    case 'stone':
+      burst(w, at.x, at.y, '#a39c90', 3 * amount, 150, 3.5, 'chunk');
+      burst(w, at.x, at.y, '#fff1b8', 3 * amount, 240, 2, 'spark');
+      emit(w, 'hitStone');
+      break;
+    case 'metal':
+      burst(w, at.x, at.y, '#fff1b8', 6 * amount, 280, 2, 'spark');
+      emit(w, 'hitMetal');
+      break;
+    case 'plant':
+      burst(w, at.x, at.y, '#6a9a55', 5 * amount, 140, 5, 'leaf');
+      emit(w, 'hitPlant');
+      break;
+    case 'tnt':
+      burst(w, at.x, at.y, '#fff1b8', 6 * amount, 260, 2, 'spark');
+      break;
+  }
+}
+
+/** 총알이 물체에 맞았다. */
+function hitObstacle(w: World, o: Rect, at: Vec, damage: number): void {
+  spray(w, o, at, 1);
+  if (o.kind === 'trough') {
+    burst(w, at.x, at.y, '#8cc4d4', 6, 150, 4, 'drop');
+    emit(w, 'splash');
+  }
+  addMark(w, o, at, 'hole', 2.5);
+  if (!Number.isFinite(o.hp)) return;
+  o.hp -= damage;
+  if (o.hp <= 0) destroyObstacle(w, o);
+}
+
+/** 내구도가 다한 물체를 없애고, 종류에 맞는 뒷일을 일으킨다. */
+function destroyObstacle(w: World, o: Rect): void {
+  const index = w.obstacles.indexOf(o);
+  if (index < 0) return;
+  w.obstacles.splice(index, 1);
+  const c = centerOf(o);
+  switch (o.kind) {
+    case 'tnt':
+      // 화약통은 주인 없는 폭발을 일으킨다. 곁에 있으면 누구든 다치고, 옆의 통도 따라 터진다.
+      w.bombs.push({
+        sx: c.x, sy: c.y, tx: c.x, ty: c.y, elapsed: 0, flight: 0, fuse: 0.12, radius: 92, damage: 3, owner: 'neutral',
+      });
+      break;
+    case 'trough':
+      burst(w, c.x, c.y, '#8cc4d4', 34, 260, 5, 'drop');
+      burst(w, c.x, c.y, '#c79a66', 12, 190, 7, 'shard');
+      addDecal(w, c.x, c.y, 'puddle', 62);
+      // 쏟아진 물이 근처의 불을 끈다.
+      w.fires = w.fires.filter((f) => dist(f, c) > 95);
+      emit(w, 'splash');
+      emit(w, 'break');
+      break;
+    case 'cactus':
+      burst(w, c.x, c.y, '#6a9a55', 16, 190, 6, 'leaf');
+      burst(w, c.x, c.y, '#48733e', 6, 150, 5, 'chunk');
+      addDecal(w, c.x, c.y, 'stump', 9);
+      emit(w, 'hitPlant');
+      break;
+    default:
+      burst(w, c.x, c.y, '#c79a66', o.kind === 'wagon' ? 30 : 16, 230, 8, 'shard');
+      burst(w, c.x, c.y, '#7a5230', 8, 150, 5, 'chunk');
+      addDecal(w, c.x, c.y, 'debris', Math.max(o.w, o.h) * 0.6);
+      // 상자 안에는 가끔 돈이 들어 있다.
+      if (o.kind === 'crate' && rand(w) < 0.5) {
+        dropPickup(w, c, 'coin');
+        dropPickup(w, c, 'coin');
+      }
+      emit(w, 'break');
+  }
+}
+
+/** 불을 붙인다. 이미 타고 있는 자리면 불을 되살리기만 한다. */
+function ignite(w: World, x: number, y: number, r: number, life: number, lift = 0): void {
+  const existing = w.fires.find((f) => Math.hypot(f.x - x, f.y - y) < 18);
+  if (existing) {
+    existing.life = Math.max(existing.life, life);
+    return;
+  }
+  w.fires.push({ x, y, r, life, maxLife: life, tick: 0.35, lift });
+  if (w.fires.length > 24) w.fires.shift();
+  emit(w, 'burn');
+}
+
+function burnBush(w: World, b: Bush): void {
+  if (b.burnt) return;
+  b.burnt = true;
+  burst(w, b.x, b.y, '#6a9a55', 8, 150, 5, 'leaf');
+  ignite(w, b.x, b.y, 20, 2.6);
+}
+
+function updateFires(w: World, dt: number): void {
+  const p = w.player;
+  // 불이 덤불로 옮겨붙으면 새 불이 생기므로, 목록을 비워 두고 돌면서 다시 채운다.
+  const burning = w.fires;
+  w.fires = [];
+  const kept = burning.filter((f) => {
+    f.life -= dt;
+    if (f.life <= 0) {
+      if (f.lift === 0) addDecal(w, f.x, f.y, 'ash', f.r);
+      return false;
+    }
+    // 불꽃과 연기
+    if (rand(w) < dt * 26) {
+      const a = rand(w) * Math.PI * 2;
+      const d = rand(w) * f.r * 0.8;
+      w.particles.push({
+        x: f.x + Math.cos(a) * d, y: f.y + Math.sin(a) * d * 0.6 - f.lift, vx: (rand(w) - 0.5) * 20, vy: -50 - rand(w) * 50,
+        life: 0.45, maxLife: 0.45, size: 7 + rand(w) * 6, color: rand(w) < 0.5 ? '#e8742a' : '#f6c453',
+        shape: 'flame', rot: 0, spin: 0,
+      });
+    }
+    if (rand(w) < dt * 7) {
+      w.particles.push({
+        x: f.x + (rand(w) - 0.5) * f.r, y: f.y - f.lift - 8, vx: (rand(w) - 0.5) * 16, vy: -36 - rand(w) * 24,
+        life: 1.1, maxLife: 1.1, size: 9 + rand(w) * 8, color: '#3a2f2a', shape: 'smoke', rot: 0, spin: 0,
+      });
+    }
+    f.tick -= dt;
+    if (f.tick > 0) return true;
+    f.tick = 0.5;
+    // 불에 닿은 사람은 누구든 덴다.
+    for (const e of w.enemies) {
+      if (dist(e, f) <= f.r + ENEMY_R) damageEnemy(w, e, 1, rand(w) * Math.PI * 2, 0, true);
+    }
+    if (dist(p, f) <= f.r + PLAYER_R) hurtPlayer(w, 1);
+    // 가까운 덤불로 옮겨붙는다.
+    for (const b of w.bushes) {
+      if (!b.burnt && dist(b, f) <= f.r + 30 && rand(w) < 0.4) burnBush(w, b);
+    }
+    return true;
+  });
+  w.fires = [...kept, ...w.fires];
+  w.enemies = w.enemies.filter((e) => e.hp > 0);
 }
 
 // ---------- 적 ----------
@@ -341,7 +514,7 @@ function throwEnemyBomb(w: World, e: Enemy, def: EnemyDef): void {
   const lead = 0.75 * def.lead;
   w.bombs.push({
     sx: e.x, sy: e.y, tx: p.x + p.vx * lead, ty: p.y + p.vy * lead,
-    elapsed: 0, flight: 0.75, fuse: 0.55, radius: 72, damage: def.damage, fromPlayer: false,
+    elapsed: 0, flight: 0.75, fuse: 0.55, radius: 72, damage: def.damage, owner: 'enemy',
   });
   e.cooldown = randRange(w, def.cooldown[0], def.cooldown[1]);
   emit(w, 'throw');
@@ -446,7 +619,7 @@ function separateEnemies(w: World): void {
   }
 }
 
-function damageEnemy(w: World, e: Enemy, damage: number, dir: number, force: number): void {
+function damageEnemy(w: World, e: Enemy, damage: number, dir: number, force: number, charred = false): void {
   if (e.hp <= 0) return;
   e.hp -= damage;
   e.hitFlash = 0.12;
@@ -457,16 +630,17 @@ function damageEnemy(w: World, e: Enemy, damage: number, dir: number, force: num
     emit(w, 'hit');
     return;
   }
-  killEnemy(w, e, dir);
+  killEnemy(w, e, dir, charred);
 }
 
-function killEnemy(w: World, e: Enemy, dir: number): void {
+function killEnemy(w: World, e: Enemy, dir: number, charred: boolean): void {
   const def = ENEMY[e.kind];
   w.kills += 1;
   w.shake = Math.max(w.shake, e.kind === 'sheriff' ? 14 : 5);
   w.hitStop = Math.max(w.hitStop, e.kind === 'sheriff' ? 0.14 : 0.045);
   burst(w, e.x, e.y, '#8c1d16', 12, 200);
-  w.corpses.push({ x: e.x, y: e.y, dir, kind: e.kind });
+  w.corpses.push({ x: e.x, y: e.y, dir, kind: e.kind, charred });
+  addDecal(w, e.x, e.y, 'blood', 18);
   if (w.corpses.length > 60) w.corpses.shift();
   addXp(w, def.xp);
   for (let i = 0; i < def.coins; i++) dropPickup(w, e, 'coin');
@@ -535,7 +709,7 @@ function updatePlayer(w: World, input: Input, dt: number): void {
       p.dust = 0.09;
       w.particles.push({
         x: p.x - p.vx * 0.03, y: p.y - p.vy * 0.03 + 6, vx: (rand(w) - 0.5) * 30, vy: (rand(w) - 0.5) * 30,
-        life: 0.4, maxLife: 0.4, size: 4 + rand(w) * 3, color: '#cfae72',
+        life: 0.4, maxLife: 0.4, size: 5 + rand(w) * 4, color: '#cfae72', shape: 'smoke', rot: 0, spin: 0,
       });
     }
   }
@@ -571,7 +745,7 @@ function updatePlayer(w: World, input: Input, dt: number): void {
     const side = p.aimDir + Math.PI / 2;
     w.particles.push({
       x: p.x, y: p.y, vx: Math.cos(side) * 90 + (rand(w) - 0.5) * 40, vy: Math.sin(side) * 90 + (rand(w) - 0.5) * 40,
-      life: 0.5, maxLife: 0.5, size: 2.5, color: '#b8862b',
+      life: 0.5, maxLife: 0.5, size: 4, color: '#b8862b', shape: 'shard', rot: rand(w) * 6, spin: 20,
     });
     w.shake = Math.max(w.shake, 3);
     emit(w, 'shot');
@@ -586,7 +760,7 @@ function updatePlayer(w: World, input: Input, dt: number): void {
       sx: p.x, sy: p.y,
       tx: clamp(p.x + Math.cos(p.aimDir) * reach, 10, WORLD_W - 10),
       ty: clamp(p.y + Math.sin(p.aimDir) * reach, 10, WORLD_H - 10),
-      elapsed: 0, flight: 0.42, fuse: 0.2, radius: s.bombRadius, damage: PLAYER_BOMB_DAMAGE, fromPlayer: true,
+      elapsed: 0, flight: 0.42, fuse: 0.2, radius: s.bombRadius, damage: PLAYER_BOMB_DAMAGE, owner: 'player',
     });
     emit(w, 'throw');
     raiseAlarm(w);
@@ -666,19 +840,43 @@ function explode(w: World, b: Bomb): void {
   const at = { x: b.tx, y: b.ty };
   w.blasts.push({ x: at.x, y: at.y, radius: b.radius, life: 0.4, maxLife: 0.4 });
   w.shake = Math.max(w.shake, 16);
-  burst(w, at.x, at.y, '#e8742a', 26, 320, 5);
-  burst(w, at.x, at.y, '#3a2618', 16, 220, 6);
-  burst(w, at.x, at.y, '#f6d67a', 12, 260, 3);
+  // 모래 바닥: 구덩이가 파이고 흙먼지가 인다.
+  addDecal(w, at.x, at.y, 'crater', b.radius * 0.5);
+  burst(w, at.x, at.y, '#e8742a', 22, 320, 7, 'flame');
+  burst(w, at.x, at.y, '#d9bd86', 18, 240, 12, 'smoke');
+  burst(w, at.x, at.y, '#3a2f2a', 10, 150, 14, 'smoke');
+  burst(w, at.x, at.y, '#fff1b8', 12, 380, 2, 'spark');
   emit(w, 'boom');
-  if (!b.fromPlayer) {
-    if (dist(at, w.player) <= b.radius + PLAYER_R) hurtPlayer(w, b.damage);
-    return;
+
+  // 사람: 날아가고 그을린다.
+  if (b.owner !== 'enemy') {
+    for (const e of w.enemies) {
+      if (dist(at, e) > b.radius + ENEMY_R) continue;
+      damageEnemy(w, e, b.damage, Math.atan2(e.y - at.y, e.x - at.x), 340, true);
+    }
   }
-  for (const e of w.enemies) {
-    const d = dist(at, e);
-    if (d > b.radius + ENEMY_R) continue;
-    damageEnemy(w, e, b.damage, Math.atan2(e.y - at.y, e.x - at.x), 320);
+  if (b.owner !== 'player' && dist(at, w.player) <= b.radius + PLAYER_R) hurtPlayer(w, b.damage);
+
+  // 물체: 재질과 종류에 따라 그을리거나, 불이 붙거나, 부서진다.
+  for (const o of [...w.obstacles]) {
+    const near = nearestOnRect(o, at);
+    if (dist(near, at) > b.radius) continue;
+    spray(w, o, near, 2);
+    if (o.kind === 'building') {
+      addMark(w, o, near, 'scorch', 16);
+      // 나무 건물은 불이 붙고, 흙벽은 그을리기만 한다.
+      if (o.material === 'wood') ignite(w, near.x, near.y, 30, 6, o.tall * 0.5);
+    } else if (Number.isFinite(o.hp)) {
+      o.hp -= 6;
+      if (o.hp <= 0) destroyObstacle(w, o);
+      else addMark(w, o, near, 'scorch', 8);
+    }
   }
+  // 식물: 덤불은 불타 재가 된다.
+  for (const bush of w.bushes) {
+    if (dist(bush, at) <= b.radius + 8) burnBush(w, bush);
+  }
+  if (b.owner === 'enemy') return;
   // 폭발에 휘말린 금고와 돈자루는 그 자리에서 열린다. 대신 요란해서 수배가 더 오른다.
   let opened = 0;
   for (const l of w.loots) {
@@ -690,12 +888,16 @@ function explode(w: World, b: Bomb): void {
 }
 
 function updateBombs(w: World, dt: number): void {
-  w.bombs = w.bombs.filter((b) => {
+  // 폭발이 화약통을 터뜨리면 새 폭탄이 생기므로, 목록을 비워 두고 돌면서 다시 채운다.
+  const pending = w.bombs;
+  w.bombs = [];
+  const live: Bomb[] = [];
+  for (const b of pending) {
     b.elapsed += dt;
-    if (b.elapsed < b.flight + b.fuse) return true;
-    explode(w, b);
-    return false;
-  });
+    if (b.elapsed < b.flight + b.fuse) live.push(b);
+    else explode(w, b);
+  }
+  w.bombs = [...live, ...w.bombs];
   w.enemies = w.enemies.filter((e) => e.hp > 0);
 }
 
@@ -707,10 +909,24 @@ function updateBullets(w: World, dt: number): void {
     b.x += b.vx * dt;
     b.y += b.vy * dt;
     b.life -= dt;
-    if (b.life <= 0 || b.x < 0 || b.y < 0 || b.x > WORLD_W || b.y > WORLD_H) return false;
-    if (w.obstacles.some((o) => segmentHitsRect(px, py, b.x, b.y, o))) {
-      burst(w, b.x, b.y, '#8a6a3a', 4, 90);
+    if (b.x < 0 || b.y < 0 || b.x > WORLD_W || b.y > WORLD_H) return false;
+    if (b.life <= 0) {
+      // 아무것도 못 맞히고 땅에 박히면 모래 먼지가 인다.
+      burst(w, b.x, b.y, '#d9bd86', 2, 50, 6, 'smoke');
       return false;
+    }
+    const struck = w.obstacles.find((o) => segmentHitsRect(px, py, b.x, b.y, o));
+    if (struck) {
+      hitObstacle(w, struck, nearestOnRect(struck, { x: px, y: py }), b.damage);
+      return false;
+    }
+    // 덤불은 뚫고 지나가며 잎을 날린다.
+    for (const bush of w.bushes) {
+      if (bush.burnt || b.hit.includes(-bush.id)) continue;
+      if (!segmentHitsCircle(px, py, b.x, b.y, bush, 10)) continue;
+      b.hit.push(-bush.id);
+      burst(w, bush.x, bush.y, '#6a9a55', 4, 120, 5, 'leaf');
+      emit(w, 'hitPlant');
     }
     if (b.fromPlayer) {
       for (const e of w.enemies) {
@@ -772,6 +988,7 @@ export function step(w: World, input: Input, dt: number): void {
   separateEnemies(w);
   updateBombs(w, dt);
   updateBullets(w, dt);
+  updateFires(w, dt);
   updatePickups(w, dt);
   updateEffects(w, dt);
 }

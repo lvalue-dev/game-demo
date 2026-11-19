@@ -1,7 +1,11 @@
 import { WORLD_H, WORLD_W } from './game/map.ts';
 import { ENEMY_DEFS, ESCAPE_TIME, HORSE_REACH, LOOT_REACH, PLAYER_R, heatLevel, quotaMet } from './game/sim.ts';
-import type { Bomb, Corpse, Enemy, EnemyKind, Loot, Pickup, Rect, Vec, World } from './game/types.ts';
+import type { Bomb, Bush, Decal, Enemy, Loot, Particle, Pickup, Rect, Vec, World } from './game/types.ts';
 import type { Stick } from './input.ts';
+import {
+  ENEMY_KITS, INK, MATERIAL, PLAYER_KIT, ROOF, SHADOW, box, cylinder, fallenFigure, figure, groundShadow,
+} from './kit.ts';
+import type { Ctx, Tone } from './kit.ts';
 
 // 캔버스 안의 색은 CSS 토큰과 같은 팔레트를 쓴다.
 const C = {
@@ -10,11 +14,6 @@ const C = {
   sandDark: '#cfa969',
   street: '#edd6a6',
   rut: '#d6b77f',
-  shadow: 'rgba(52, 30, 16, 0.3)',
-  ink: '#2a1a10',
-  leather: '#5a3a22',
-  wood: '#7a5230',
-  woodLight: '#a47a4a',
   paper: '#f3e3bf',
   gold: '#d99a1c',
   goldLight: '#f6d67a',
@@ -22,34 +21,13 @@ const C = {
   bloodDark: '#7a1712',
   fire: '#e8742a',
   sage: '#3f7a52',
-  cactus: '#5d8a4e',
-  cactusDark: '#3f6a3a',
-  water: '#6fa8b8',
 };
 
-const ROOF: Record<Rect['kind'], [string, string]> = {
-  bank: ['#a34a34', '#7d3526'],
-  saloon: ['#8d6238', '#6c4826'],
-  store: ['#7f7d55', '#5f5d3e'],
-  house: ['#9a7850', '#765a3a'],
-  cover: ['#7a5230', '#5a3a22'],
-};
-
-interface Look {
-  coat: string;
-  hat: string;
-  band: string;
-  barrel: number;
-  thick: number;
-}
-
-const LOOKS: Record<EnemyKind, Look> = {
-  deputy: { coat: '#3d5a80', hat: '#c9b48a', band: '#243a57', barrel: 13, thick: 4 },
-  shotgun: { coat: '#6b4a2f', hat: '#241a14', band: '#b3261e', barrel: 15, thick: 7 },
-  rifle: { coat: '#6d7278', hat: '#3c4046', band: '#c9b48a', barrel: 26, thick: 3.5 },
-  bomber: { coat: '#9c3327', hat: '#4a3524', band: '#f6d67a', barrel: 0, thick: 0 },
-  sheriff: { coat: '#1e1a1a', hat: '#f1ead8', band: '#d99a1c', barrel: 17, thick: 5 },
-};
+const SACK: Tone = { top: '#c9a36a', side: '#a07c48', light: '#e0c08c' };
+const HIDE: Tone = { top: '#8a5a36', side: '#5f3b20', light: '#a8744a' };
+const CHARRED: Tone = { top: '#3a302a', side: '#241d19', light: '#4d4038' };
+/** 지붕 두께. 건물 높이 위에 얹힌다. */
+const ROOF_H = 7;
 
 /** 조작부나 정보판이 덮고 있어서 게임 화면으로 쓰지 못하는 가장자리 폭. */
 export interface Insets {
@@ -87,7 +65,6 @@ export function makeView(w: number, h: number, dpr: number, insets: Insets = NO_
 export function updateCamera(view: View, world: World, dt: number): void {
   const p = world.player;
   // 가려지지 않는 영역의 절반 크기(게임 좌표). 세계의 끝이 이 영역의 끝까지 오도록 카메라를 묶는다.
-  // 그래서 지도 가장자리에 있어도 주인공이 조작부 밑으로 들어가지 않는다.
   const halfW = (view.w - view.insets.left - view.insets.right) / view.zoom / 2;
   const halfH = (view.h - view.insets.top - view.insets.bottom) / view.zoom / 2;
   // 조준하는 쪽이 조금 더 보이게 당겨 준다.
@@ -123,7 +100,15 @@ const GROUND_SPOTS = (() => {
   }));
 })();
 
-export function draw(ctx: CanvasRenderingContext2D, view: View, world: World, sticks: Stick[], time: number): void {
+/** 블록을 바닥에서 띄워 그린다. 다른 블록 위에 얹을 때 쓴다. */
+function lifted(ctx: Ctx, lift: number, drawIt: () => void): void {
+  ctx.save();
+  ctx.translate(0, -lift);
+  drawIt();
+  ctx.restore();
+}
+
+export function draw(ctx: Ctx, view: View, world: World, sticks: Stick[], time: number): void {
   ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
   ctx.fillStyle = C.sand;
   ctx.fillRect(0, 0, view.w, view.h);
@@ -135,26 +120,31 @@ export function draw(ctx: CanvasRenderingContext2D, view: View, world: World, st
   ctx.scale(view.zoom, view.zoom);
   ctx.translate(-view.camX, -view.camY);
 
-  drawGround(ctx, world, time);
-  for (const c of world.corpses) drawCorpse(ctx, c);
+  drawGround(ctx, time);
+  for (const d of world.decals) drawDecal(ctx, d);
+  for (const c of world.corpses) fallenFigure(ctx, c.x, c.y, c.dir, ENEMY_KITS[c.kind], c.charred);
   for (const b of world.bombs) drawBombTarget(ctx, b);
-  for (const l of world.loots) if (!l.taken) drawLoot(ctx, l, time);
-  for (const k of world.pickups) drawPickup(ctx, k, time);
-  drawHorse(ctx, world, time);
-  for (const o of world.obstacles) drawObstacle(ctx, o, time);
   for (const e of world.enemies) drawTelegraph(ctx, e);
-  for (const e of world.enemies) drawEnemy(ctx, e, time);
-  drawPlayer(ctx, world, time);
+  drawFence(ctx, 4);
+
+  // 서 있는 것들은 남쪽에 있는 것이 북쪽 것을 가리도록 아래쪽부터 차례로 그린다.
+  const items: { y: number; paint: () => void }[] = [];
+  for (const o of world.obstacles) items.push({ y: o.y + o.h, paint: () => drawObstacle(ctx, o, time) });
+  for (const b of world.bushes) items.push({ y: b.y + 5, paint: () => drawBush(ctx, b) });
+  for (const l of world.loots) if (!l.taken) items.push({ y: l.y + 11, paint: () => drawLoot(ctx, l, time) });
+  for (const k of world.pickups) items.push({ y: k.y, paint: () => drawPickup(ctx, k, time) });
+  items.push({ y: world.horse.y + 10, paint: () => drawHorse(ctx, world, time) });
+  for (const e of world.enemies) items.push({ y: e.y + 6, paint: () => drawEnemy(ctx, e, time) });
+  items.push({ y: world.player.y + 6, paint: () => drawPlayer(ctx, world, time) });
+  items.sort((a, b) => a.y - b.y);
+  for (const item of items) item.paint();
+  drawFence(ctx, WORLD_H - 4);
+
+  drawFireGlow(ctx, world);
   drawBullets(ctx, world);
   for (const b of world.bombs) drawBomb(ctx, b, time);
   drawBlasts(ctx, world);
-  for (const q of world.particles) {
-    ctx.globalAlpha = Math.max(0, q.life / q.maxLife);
-    ctx.fillStyle = q.color;
-    ctx.beginPath();
-    ctx.arc(q.x, q.y, q.size / 2, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  for (const q of world.particles) drawParticle(ctx, q);
   ctx.globalAlpha = 1;
   drawProgress(ctx, world);
   drawTexts(ctx, world);
@@ -165,9 +155,9 @@ export function draw(ctx: CanvasRenderingContext2D, view: View, world: World, st
   drawSticks(ctx, sticks);
 }
 
-// ---------- 땅과 건물 ----------
+// ---------- 땅 ----------
 
-function drawGround(ctx: CanvasRenderingContext2D, world: World, time: number): void {
+function drawGround(ctx: Ctx, time: number): void {
   ctx.fillStyle = C.sand;
   ctx.fillRect(0, 0, WORLD_W, WORLD_H);
   for (const s of GROUND_SPOTS) {
@@ -197,54 +187,6 @@ function drawGround(ctx: CanvasRenderingContext2D, world: World, time: number): 
     ctx.fill();
   }
 
-  // 세계 끝의 나무 울타리
-  ctx.strokeStyle = C.leather;
-  ctx.lineWidth = 5;
-  ctx.strokeRect(3, 3, WORLD_W - 6, WORLD_H - 6);
-  ctx.fillStyle = C.leather;
-  for (let x = 3; x < WORLD_W; x += 60) {
-    ctx.fillRect(x - 3, 0, 7, 9);
-    ctx.fillRect(x - 3, WORLD_H - 9, 7, 9);
-  }
-
-  for (const d of world.decor) {
-    const s = d.size;
-    if (d.kind === 'cactus') {
-      ctx.fillStyle = C.shadow;
-      ctx.beginPath();
-      ctx.ellipse(d.x + 8 * s, d.y + 6, 12 * s, 4 * s, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = C.cactus;
-      ctx.strokeStyle = C.cactusDark;
-      ctx.lineWidth = 1.5;
-      const part = (x: number, y: number, w: number, h: number): void => {
-        ctx.beginPath();
-        ctx.roundRect(d.x + x * s, d.y + y * s, w * s, h * s, 3 * s);
-        ctx.fill();
-        ctx.stroke();
-      };
-      part(-4, -18, 8, 24);
-      part(-11, -10, 5, 9);
-      part(6, -14, 5, 10);
-    } else if (d.kind === 'bush') {
-      ctx.fillStyle = '#b89a5e';
-      ctx.beginPath();
-      ctx.arc(d.x, d.y, 7 * s, 0, Math.PI * 2);
-      ctx.arc(d.x + 8 * s, d.y + 2, 5 * s, 0, Math.PI * 2);
-      ctx.arc(d.x + 3 * s, d.y - 5 * s, 4 * s, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      ctx.fillStyle = C.shadow;
-      ctx.beginPath();
-      ctx.ellipse(d.x + 3, d.y + 3, 9 * s, 5 * s, 0.3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#b9a07a';
-      ctx.beginPath();
-      ctx.ellipse(d.x, d.y, 8 * s, 5 * s, 0.3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
   // 길 위를 굴러다니는 회전초
   for (let i = 0; i < 4; i++) {
     const speed = 46 + i * 17;
@@ -264,174 +206,305 @@ function drawGround(ctx: CanvasRenderingContext2D, world: World, time: number): 
   }
 }
 
-function drawObstacle(ctx: CanvasRenderingContext2D, o: Rect, time: number): void {
-  if (o.kind === 'cover') {
-    drawCover(ctx, o);
-    return;
-  }
-  const [light, dark] = ROOF[o.kind];
-  // 길 쪽을 향한 나무 보도와 기둥
-  const facesSouth = o.y < 520;
-  const porchY = facesSouth ? o.y + o.h : o.y - 18;
-  ctx.fillStyle = C.shadow;
-  ctx.fillRect(o.x + 12, o.y + 16, o.w, o.h + (facesSouth ? 18 : 0));
-  ctx.fillStyle = C.woodLight;
-  ctx.fillRect(o.x + 6, porchY, o.w - 12, 18);
-  ctx.strokeStyle = 'rgba(42, 26, 16, 0.35)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let x = o.x + 6; x <= o.x + o.w - 6; x += 14) {
-    ctx.moveTo(x, porchY);
-    ctx.lineTo(x, porchY + 18);
-  }
-  ctx.stroke();
-  ctx.fillStyle = C.leather;
-  for (const x of [o.x + 8, o.x + o.w / 2 - 3, o.x + o.w - 14]) ctx.fillRect(x, facesSouth ? porchY + 12 : porchY, 6, 6);
+/** 세계 끝의 울타리. 말뚝 블록과 가로대. */
+function drawFence(ctx: Ctx, y: number): void {
+  ctx.fillStyle = MATERIAL.wood.side;
+  ctx.fillRect(0, y - 9, WORLD_W, 3);
+  for (let x = 6; x < WORLD_W; x += 60) box(ctx, x - 3, y - 3, 6, 6, 12, MATERIAL.wood);
+}
 
-  // 지붕: 용마루를 경계로 밝은 면과 어두운 면
-  ctx.fillStyle = light;
-  ctx.fillRect(o.x, o.y, o.w, o.h / 2);
-  ctx.fillStyle = dark;
-  ctx.fillRect(o.x, o.y + o.h / 2, o.w, o.h / 2);
-  ctx.strokeStyle = 'rgba(42, 26, 16, 0.22)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let y = o.y + 13; y < o.y + o.h; y += 13) {
-    ctx.moveTo(o.x, y);
-    ctx.lineTo(o.x + o.w, y);
+function drawDecal(ctx: Ctx, d: Decal): void {
+  ctx.save();
+  ctx.translate(d.x, d.y);
+  ctx.rotate(d.rot);
+  switch (d.kind) {
+    case 'crater':
+      ctx.fillStyle = 'rgba(120, 88, 48, 0.55)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, d.size, d.size * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(60, 40, 22, 0.55)';
+      ctx.beginPath();
+      ctx.ellipse(2, 2, d.size * 0.62, d.size * 0.42, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(240, 218, 170, 0.7)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, d.size, d.size * 0.7, 0, Math.PI * 0.9, Math.PI * 1.9);
+      ctx.stroke();
+      break;
+    case 'scorch':
+    case 'ash':
+      ctx.fillStyle = d.kind === 'ash' ? 'rgba(70, 62, 56, 0.5)' : 'rgba(30, 22, 18, 0.5)';
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.ellipse(Math.cos(i * 1.7) * d.size * 0.35, Math.sin(i * 2.3) * d.size * 0.25, d.size * 0.6, d.size * 0.4, i, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    case 'blood':
+      ctx.fillStyle = 'rgba(122, 23, 18, 0.5)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, d.size, d.size * 0.62, 0, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case 'puddle':
+      ctx.fillStyle = 'rgba(96, 150, 170, 0.5)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, d.size, d.size * 0.6, 0, 0, Math.PI * 2);
+      ctx.ellipse(d.size * 0.6, d.size * 0.2, d.size * 0.5, d.size * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case 'debris':
+      ctx.fillStyle = MATERIAL.wood.side;
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 5; i++) {
+        ctx.save();
+        ctx.translate(Math.cos(i * 1.9) * d.size * 0.6, Math.sin(i * 2.7) * d.size * 0.5);
+        ctx.rotate(i * 1.3);
+        ctx.fillRect(-9, -2, 18, 4);
+        ctx.strokeRect(-9, -2, 18, 4);
+        ctx.restore();
+      }
+      break;
+    case 'stump':
+      ctx.fillStyle = MATERIAL.plant.side;
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, d.size * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      break;
   }
-  for (let x = o.x + 40; x < o.x + o.w; x += 40) {
-    ctx.moveTo(x, o.y);
-    ctx.lineTo(x, o.y + o.h);
+  ctx.restore();
+}
+
+// ---------- 건물과 소품 ----------
+
+function drawObstacle(ctx: Ctx, o: Rect, time: number): void {
+  const cx = o.x + o.w / 2;
+  groundShadow(ctx, o.x, o.y, o.w, o.h, o.kind === 'building' ? o.tall + ROOF_H : o.tall);
+  switch (o.kind) {
+    case 'building':
+      drawBuilding(ctx, o, time);
+      return;
+    case 'crate':
+      box(ctx, o.x, o.y, o.w, o.h, o.tall, MATERIAL.wood);
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(o.x, o.y - o.tall);
+      ctx.lineTo(o.x + o.w, o.y + o.h - o.tall);
+      ctx.moveTo(o.x + o.w, o.y - o.tall);
+      ctx.lineTo(o.x, o.y + o.h - o.tall);
+      ctx.moveTo(o.x + o.w / 2, o.y + o.h - o.tall);
+      ctx.lineTo(o.x + o.w / 2, o.y + o.h);
+      ctx.stroke();
+      break;
+    case 'barrel':
+    case 'tnt': {
+      const tone = o.kind === 'tnt' ? MATERIAL.tnt : MATERIAL.wood;
+      const cy = o.y + o.h / 2;
+      const r = o.w / 2;
+      cylinder(ctx, cx, cy, r, o.tall, tone);
+      // 통을 조이는 쇠테
+      ctx.strokeStyle = o.kind === 'tnt' ? INK : MATERIAL.metal.side;
+      ctx.lineWidth = 2;
+      for (const t of [0.3, 0.72]) {
+        ctx.beginPath();
+        ctx.ellipse(cx, cy - o.tall * t, r, r * 0.62, 0, 0.05, Math.PI - 0.05);
+        ctx.stroke();
+      }
+      if (o.kind === 'tnt') {
+        ctx.fillStyle = C.paper;
+        ctx.font = '700 8px "IBM Plex Sans KR", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('TNT', cx, cy - o.tall * 0.42 + r * 0.5);
+        // 도화선 불씨
+        ctx.fillStyle = Math.floor(time * 6) % 2 === 0 ? C.goldLight : C.fire;
+        ctx.beginPath();
+        ctx.arc(cx + 3, cy - o.tall - 3, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case 'trough':
+      box(ctx, o.x, o.y, o.w, o.h, o.tall, MATERIAL.wood, 20);
+      ctx.fillStyle = MATERIAL.water.top;
+      ctx.fillRect(o.x + 4, o.y - o.tall + 4, o.w - 8, o.h - 8);
+      ctx.fillStyle = MATERIAL.water.light;
+      ctx.fillRect(o.x + 8 + ((time * 12) % (o.w - 30)), o.y - o.tall + 8, 12, 2);
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(o.x + 4, o.y - o.tall + 4, o.w - 8, o.h - 8);
+      break;
+    case 'wagon':
+      // 바퀴, 짐칸, 천 덮개
+      for (const wx of [o.x + 14, o.x + o.w - 14]) {
+        cylinder(ctx, wx, o.y + o.h + 2, 9, 3, MATERIAL.dark);
+        cylinder(ctx, wx, o.y + 2, 9, 3, MATERIAL.dark);
+      }
+      lifted(ctx, 5, () => box(ctx, o.x, o.y, o.w, o.h, o.tall - 5, MATERIAL.wood, 16));
+      lifted(ctx, o.tall, () => box(ctx, o.x + 8, o.y + 4, o.w - 30, o.h - 8, 13, MATERIAL.cloth, 14));
+      break;
+    case 'cactus':
+      lifted(ctx, 8, () => box(ctx, o.x - 5, o.y + 3, 6, 6, 9, MATERIAL.plant));
+      box(ctx, o.x + 2, o.y + 2, 8, 8, o.tall, MATERIAL.plant, 8);
+      lifted(ctx, 5, () => box(ctx, o.x + 11, o.y + 3, 6, 6, 11, MATERIAL.plant));
+      break;
+    case 'rock':
+      box(ctx, o.x, o.y, o.w, o.h, o.tall, MATERIAL.stone);
+      lifted(ctx, o.tall, () => box(ctx, o.x + 4, o.y + 3, o.w - 11, o.h - 6, 5, MATERIAL.stone));
+      break;
   }
-  ctx.stroke();
-  ctx.strokeStyle = C.ink;
-  ctx.lineWidth = 2.5;
-  ctx.strokeRect(o.x, o.y, o.w, o.h);
-  ctx.beginPath();
-  ctx.moveTo(o.x, o.y + o.h / 2);
-  ctx.lineTo(o.x + o.w, o.y + o.h / 2);
-  ctx.stroke();
+  drawMarks(ctx, o, o.tall);
+}
 
-  // 굴뚝
-  ctx.fillStyle = '#4a3a30';
-  ctx.fillRect(o.x + o.w - 40, o.y + 16, 18, 18);
-  ctx.fillStyle = C.ink;
-  ctx.fillRect(o.x + o.w - 36, o.y + 20, 10, 10);
+function drawBuilding(ctx: Ctx, o: Rect, time: number): void {
+  const style = o.style ?? { roof: 'brown', chimney: false, front: false };
+  const walls = o.material === 'adobe' ? MATERIAL.adobe : MATERIAL.wood;
+  const cx = o.x + o.w / 2;
+  const faceTop = o.y + o.h - o.tall;
 
-  // 문 앞 등불
-  const doorX = o.x + o.w / 2;
-  const doorY = facesSouth ? o.y + o.h + 9 : o.y - 9;
-  const glow = ctx.createRadialGradient(doorX, doorY, 0, doorX, doorY, 34);
-  glow.addColorStop(0, `rgba(255, 214, 110, ${0.5 + Math.sin(time * 9 + o.x) * 0.06})`);
-  glow.addColorStop(1, 'rgba(255, 214, 110, 0)');
-  ctx.fillStyle = glow;
-  ctx.fillRect(doorX - 36, doorY - 36, 72, 72);
-  ctx.fillStyle = C.ink;
-  ctx.fillRect(doorX - 11, facesSouth ? o.y + o.h - 3 : o.y - 3, 22, 6);
+  // 벽
+  box(ctx, o.x, o.y, o.w, o.h, o.tall, walls, o.material === 'adobe' ? 0 : 13);
 
-  if (o.label) {
-    const sy = facesSouth ? o.y + o.h - 36 : o.y + 12;
-    ctx.fillStyle = C.paper;
-    ctx.fillRect(doorX - 44, sy, 88, 24);
-    ctx.strokeStyle = C.ink;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(doorX - 44, sy, 88, 24);
-    ctx.fillStyle = C.ink;
-    ctx.font = '700 15px "IBM Plex Sans KR", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(o.label, doorX, sy + 13);
+  // 남쪽 벽의 창과 문
+  const windows = Math.max(2, Math.floor(o.w / 64));
+  for (let i = 0; i < windows; i++) {
+    const wx = o.x + ((i + 0.5) * o.w) / windows - 8;
+    if (style.front && Math.abs(wx + 8 - cx) < 22) continue;
+    ctx.fillStyle = MATERIAL.glass.top;
+    ctx.fillRect(wx, faceTop + 7, 16, 12);
+    ctx.fillStyle = MATERIAL.glass.light;
+    ctx.fillRect(wx + 2, faceTop + 9, 5, 3);
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(wx, faceTop + 7, 16, 12);
+    ctx.beginPath();
+    ctx.moveTo(wx + 8, faceTop + 7);
+    ctx.lineTo(wx + 8, faceTop + 19);
+    ctx.stroke();
+  }
+  if (style.front) {
+    // 나무 보도, 문, 기둥, 등불
+    box(ctx, o.x + 6, o.y + o.h, o.w - 12, 16, 3, MATERIAL.wood, 14);
+    ctx.fillStyle = MATERIAL.dark.top;
+    ctx.fillRect(cx - 10, faceTop + 6, 20, o.tall - 6);
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(cx - 10, faceTop + 6, 20, o.tall - 6);
+    ctx.fillStyle = MATERIAL.gold.top;
+    ctx.fillRect(cx + 4, faceTop + 18, 3, 3);
+    for (const px of [o.x + 10, o.x + o.w - 15]) box(ctx, px, o.y + o.h + 9, 5, 5, 22, MATERIAL.wood);
+    const glow = ctx.createRadialGradient(cx, o.y + o.h + 6, 0, cx, o.y + o.h + 6, 38);
+    glow.addColorStop(0, 'rgba(255, 214, 110, ' + (0.42 + Math.sin(time * 9 + o.x) * 0.05) + ')');
+    glow.addColorStop(1, 'rgba(255, 214, 110, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(cx - 40, o.y + o.h - 34, 80, 80);
+  }
+
+  // 지붕과 그 위의 부품
+  const roof = ROOF[style.roof];
+  lifted(ctx, o.tall, () => {
+    box(ctx, o.x - 5, o.y - 5, o.w + 10, o.h + 10, ROOF_H, roof);
+    // 지붕널과 용마루
+    ctx.strokeStyle = 'rgba(42, 26, 16, 0.22)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let y = o.y + 6; y < o.y + o.h + 5; y += 12) {
+      ctx.moveTo(o.x - 5, y - ROOF_H);
+      ctx.lineTo(o.x + o.w + 5, y - ROOF_H);
+    }
+    ctx.stroke();
+    ctx.fillStyle = roof.side;
+    ctx.fillRect(o.x - 5, o.y + o.h / 2 - ROOF_H - 2, o.w + 10, 4);
+    if (style.chimney) lifted(ctx, ROOF_H, () => box(ctx, o.x + o.w - 44, o.y + 18, 16, 16, 12, MATERIAL.stone, 8));
+    if (o.label) {
+      lifted(ctx, ROOF_H, () => {
+        const sy = o.y + o.h - 30;
+        box(ctx, cx - 44, sy, 88, 22, 4, MATERIAL.cloth);
+        ctx.fillStyle = INK;
+        ctx.font = '700 15px "IBM Plex Sans KR", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(o.label!, cx, sy + 8);
+      });
+    }
+  });
+  drawMarks(ctx, o, o.tall + ROOF_H);
+}
+
+/** 총알구멍과 그을음. 남쪽 가장자리에 맞은 것은 옆면에, 나머지는 윗면에 그린다. */
+function drawMarks(ctx: Ctx, o: Rect, topLift: number): void {
+  for (const m of o.marks) {
+    const onSide = m.dy >= o.h - 1;
+    const x = Math.max(o.x + 3, Math.min(o.x + o.w - 3, o.x + m.dx));
+    const y = onSide
+      ? o.y + o.h - 2 - m.u * (o.tall - 4)
+      : Math.max(o.y + 3, Math.min(o.y + o.h - 3, o.y + m.dy)) - topLift;
+    if (m.kind === 'hole') {
+      ctx.fillStyle = 'rgba(24, 14, 8, 0.85)';
+      ctx.beginPath();
+      ctx.arc(x, y, m.size, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = 'rgba(24, 16, 12, 0.5)';
+      ctx.beginPath();
+      ctx.ellipse(x, y, m.size, m.size * 0.7, m.u * 3, 0, Math.PI * 2);
+      ctx.ellipse(x + m.size * 0.5, y - m.size * 0.3, m.size * 0.6, m.size * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 
-function drawCover(ctx: CanvasRenderingContext2D, o: Rect): void {
-  ctx.fillStyle = C.shadow;
-  ctx.fillRect(o.x + 6, o.y + 8, o.w, o.h);
-  ctx.strokeStyle = C.ink;
-  ctx.lineWidth = 2;
-  if (o.w >= 70 && o.h < 34) {
-    // 말 물통
-    ctx.fillStyle = C.wood;
-    ctx.fillRect(o.x, o.y, o.w, o.h);
-    ctx.fillStyle = C.water;
-    ctx.fillRect(o.x + 5, o.y + 5, o.w - 10, o.h - 10);
-    ctx.strokeRect(o.x, o.y, o.w, o.h);
-  } else if (o.w >= 80) {
-    // 짐마차
-    ctx.fillStyle = C.ink;
-    for (const [wx, wy] of [[0.15, -4], [0.85, -4], [0.15, o.h + 4], [0.85, o.h + 4]] as const) {
-      ctx.beginPath();
-      ctx.ellipse(o.x + o.w * wx, o.y + wy, 10, 4, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.fillStyle = C.woodLight;
-    ctx.fillRect(o.x, o.y, o.w, o.h);
-    ctx.strokeRect(o.x, o.y, o.w, o.h);
-    ctx.fillStyle = '#e9dcc0';
-    ctx.beginPath();
-    ctx.roundRect(o.x + 10, o.y + 4, o.w - 34, o.h - 8, 8);
-    ctx.fill();
-    ctx.stroke();
-  } else {
-    // 나무 상자
-    ctx.fillStyle = C.wood;
-    ctx.fillRect(o.x, o.y, o.w, o.h);
-    ctx.strokeRect(o.x, o.y, o.w, o.h);
-    ctx.beginPath();
-    ctx.moveTo(o.x, o.y);
-    ctx.lineTo(o.x + o.w, o.y + o.h);
-    ctx.moveTo(o.x + o.w, o.y);
-    ctx.lineTo(o.x, o.y + o.h);
-    ctx.stroke();
+function drawBush(ctx: Ctx, b: Bush): void {
+  const s = b.size;
+  if (b.burnt) {
+    box(ctx, b.x - 5 * s, b.y - 2, 5 * s, 4 * s, 3, CHARRED);
+    box(ctx, b.x + 1, b.y, 4 * s, 4 * s, 4, CHARRED);
+    return;
   }
+  box(ctx, b.x - 10 * s, b.y - 3, 9 * s, 7 * s, 6 * s, MATERIAL.plant);
+  box(ctx, b.x + 3 * s, b.y, 8 * s, 6 * s, 5 * s, MATERIAL.plant);
+  box(ctx, b.x - 3 * s, b.y - 5, 11 * s, 8 * s, 9 * s, MATERIAL.plant);
 }
 
 // ---------- 돈, 말 ----------
 
-function drawLoot(ctx: CanvasRenderingContext2D, l: Loot, time: number): void {
-  const bob = Math.sin(time * 3 + l.x) * 1.5;
-  ctx.fillStyle = C.shadow;
-  ctx.beginPath();
-  ctx.ellipse(l.x + 4, l.y + 11, 15, 5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = C.ink;
-  ctx.lineWidth = 2;
+function drawLoot(ctx: Ctx, l: Loot, time: number): void {
   if (l.kind === 'safe') {
-    ctx.fillStyle = '#4f555e';
+    groundShadow(ctx, l.x - 15, l.y - 11, 30, 22, 22);
+    box(ctx, l.x - 15, l.y - 11, 30, 22, 22, MATERIAL.metal);
+    // 앞면의 다이얼과 손잡이
+    ctx.fillStyle = MATERIAL.gold.top;
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.roundRect(l.x - 17, l.y - 17, 34, 34, 3);
+    ctx.arc(l.x - 3, l.y, 6, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = '#6d747e';
-    ctx.fillRect(l.x - 12, l.y - 12, 24, 24);
-    ctx.fillStyle = C.gold;
     ctx.beginPath();
-    ctx.arc(l.x, l.y, 7, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(l.x - 3, l.y);
+    ctx.lineTo(l.x - 3 + Math.cos(time * 2) * 5, l.y + Math.sin(time * 2) * 5);
     ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(l.x, l.y);
-    ctx.lineTo(l.x + Math.cos(time * 2) * 5, l.y + Math.sin(time * 2) * 5);
-    ctx.stroke();
+    ctx.fillStyle = MATERIAL.metal.light;
+    ctx.fillRect(l.x + 7, l.y - 4, 3, 8);
   } else {
-    ctx.fillStyle = '#b08a4f';
+    ctx.fillStyle = SHADOW;
     ctx.beginPath();
-    ctx.arc(l.x, l.y + bob, 11, 0, Math.PI * 2);
+    ctx.ellipse(l.x + 5, l.y + 5, 12, 5, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(l.x - 5, l.y - 9 + bob);
-    ctx.lineTo(l.x - 7, l.y - 16 + bob);
-    ctx.lineTo(l.x + 7, l.y - 16 + bob);
-    ctx.lineTo(l.x + 5, l.y - 9 + bob);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = C.ink;
-    ctx.font = '700 13px "Rye", serif';
+    cylinder(ctx, l.x, l.y, 10, 12, SACK);
+    lifted(ctx, 12, () => box(ctx, l.x - 4, l.y - 3, 8, 6, 4, SACK));
+    ctx.fillStyle = INK;
+    ctx.font = '700 12px "Rye", serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('$', l.x, l.y + 1 + bob);
+    ctx.fillText('$', l.x, l.y - 1);
   }
   // 멀리서도 눈에 띄게 반짝임
   const tw = (Math.sin(time * 4 + l.id * 1.7) + 1) / 2;
@@ -439,45 +512,32 @@ function drawLoot(ctx: CanvasRenderingContext2D, l: Loot, time: number): void {
   ctx.globalAlpha = tw * 0.9;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(l.x + 12, l.y - 20);
-  ctx.lineTo(l.x + 12, l.y - 10);
-  ctx.moveTo(l.x + 7, l.y - 15);
-  ctx.lineTo(l.x + 17, l.y - 15);
+  ctx.moveTo(l.x + 13, l.y - 32);
+  ctx.lineTo(l.x + 13, l.y - 22);
+  ctx.moveTo(l.x + 8, l.y - 27);
+  ctx.lineTo(l.x + 18, l.y - 27);
   ctx.stroke();
   ctx.globalAlpha = 1;
 }
 
-function drawPickup(ctx: CanvasRenderingContext2D, k: Pickup, time: number): void {
+function drawPickup(ctx: Ctx, k: Pickup, time: number): void {
   if (k.life < 3 && Math.floor(time * 10) % 2 === 0) return;
-  ctx.fillStyle = C.shadow;
+  const bob = Math.abs(Math.sin(time * 5 + k.id)) * 3;
+  ctx.fillStyle = SHADOW;
   ctx.beginPath();
-  ctx.ellipse(k.x + 2, k.y + 5, 6, 2.5, 0, 0, Math.PI * 2);
+  ctx.ellipse(k.x + 2, k.y + 3, 6, 2.5, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = C.ink;
-  ctx.lineWidth = 1.5;
   if (k.kind === 'coin') {
-    const squash = Math.abs(Math.cos(time * 6 + k.id));
-    ctx.fillStyle = C.gold;
-    ctx.beginPath();
-    ctx.ellipse(k.x, k.y, 2 + 4 * squash, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = C.goldLight;
-    ctx.fillRect(k.x - 1, k.y - 3, 2, 3);
+    lifted(ctx, bob, () => cylinder(ctx, k.x, k.y, 5.5, 2.5, MATERIAL.gold));
   } else {
-    ctx.fillStyle = '#b5651d';
-    ctx.beginPath();
-    ctx.roundRect(k.x - 5, k.y - 5, 10, 13, 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillRect(k.x - 2, k.y - 10, 4, 6);
-    ctx.strokeRect(k.x - 2, k.y - 10, 4, 6);
-    ctx.fillStyle = C.paper;
-    ctx.fillRect(k.x - 4, k.y - 1, 8, 5);
+    lifted(ctx, bob, () => {
+      box(ctx, k.x - 4, k.y - 3, 8, 6, 11, { top: '#c57a2a', side: '#94561a', light: '#e39a48' });
+      lifted(ctx, 11, () => box(ctx, k.x - 2, k.y - 1.5, 4, 3, 5, MATERIAL.dark));
+    });
   }
 }
 
-function drawHorse(ctx: CanvasRenderingContext2D, world: World, time: number): void {
+function drawHorse(ctx: Ctx, world: World, time: number): void {
   const h = world.horse;
   if (quotaMet(world)) {
     const pulse = 0.5 + Math.sin(time * 5) * 0.5;
@@ -485,163 +545,55 @@ function drawHorse(ctx: CanvasRenderingContext2D, world: World, time: number): v
     ctx.lineWidth = 4;
     ctx.globalAlpha = 0.35 + pulse * 0.5;
     ctx.beginPath();
-    ctx.arc(h.x, h.y, HORSE_REACH + pulse * 5, 0, Math.PI * 2);
+    ctx.ellipse(h.x, h.y, HORSE_REACH + pulse * 5, (HORSE_REACH + pulse * 5) * 0.7, 0, 0, Math.PI * 2);
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
-  ctx.fillStyle = C.leather;
-  ctx.fillRect(h.x - 36, h.y - 6, 6, 28);
-  ctx.fillRect(h.x - 44, h.y - 2, 22, 4);
-  ctx.fillStyle = C.shadow;
+  // 말뚝과 가로대
+  box(ctx, h.x - 44, h.y - 14, 5, 5, 20, MATERIAL.wood);
+  box(ctx, h.x - 44, h.y + 10, 5, 5, 20, MATERIAL.wood);
+  lifted(ctx, 16, () => box(ctx, h.x - 44, h.y - 14, 5, 29, 3, MATERIAL.wood));
+  // 블록 말: 다리 넷, 몸통, 목과 머리, 갈기, 안장, 꼬리
+  ctx.fillStyle = SHADOW;
   ctx.beginPath();
-  ctx.ellipse(h.x + 7, h.y + 15, 28, 9, 0, 0, Math.PI * 2);
+  ctx.ellipse(h.x + 8, h.y + 10, 30, 9, 0, 0, Math.PI * 2);
   ctx.fill();
-  // 위에서 본 말: 몸통, 목과 머리, 갈기, 꼬리, 안장
-  ctx.strokeStyle = C.ink;
-  ctx.lineWidth = 1.5;
-  ctx.fillStyle = '#6b4226';
-  ctx.beginPath();
-  ctx.ellipse(h.x, h.y, 25, 12, -0.3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.ellipse(h.x + 25, h.y - 11, 11, 6, -0.6, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.strokeStyle = C.ink;
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(h.x + 12, h.y - 8);
-  ctx.lineTo(h.x + 22, h.y - 13);
-  ctx.moveTo(h.x - 23, h.y + 7);
-  ctx.lineTo(h.x - 33, h.y + 12 + Math.sin(time * 3) * 3);
-  ctx.stroke();
-  ctx.fillStyle = C.blood;
-  ctx.beginPath();
-  ctx.ellipse(h.x - 2, h.y, 9, 8, -0.3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
+  for (const lx of [h.x - 18, h.x + 12]) {
+    box(ctx, lx, h.y - 7, 5, 4, 9, MATERIAL.dark);
+    box(ctx, lx, h.y + 3, 5, 4, 9, MATERIAL.dark);
+  }
+  const sway = Math.sin(time * 3) * 2;
+  lifted(ctx, 9, () => {
+    box(ctx, h.x - 30 + sway * 0.3, h.y - 2, 8, 4, 8, MATERIAL.dark);
+    box(ctx, h.x - 22, h.y - 8, 42, 16, 13, HIDE);
+    lifted(ctx, 13, () => box(ctx, h.x - 8, h.y - 8, 16, 16, 3, MATERIAL.tnt));
+    lifted(ctx, 5, () => {
+      box(ctx, h.x + 18, h.y - 6, 15, 12, 14, HIDE);
+      lifted(ctx, 14, () => box(ctx, h.x + 16, h.y - 2, 12, 4, 3, MATERIAL.dark));
+    });
+  });
 }
 
 // ---------- 인물 ----------
 
-function drawFigure(
-  ctx: CanvasRenderingContext2D, x: number, y: number, r: number, dir: number, look: Look,
-  opts: { walk: number; flash: boolean; muzzle: boolean; star?: boolean; poncho?: boolean },
-): void {
-  ctx.fillStyle = C.shadow;
-  ctx.beginPath();
-  ctx.ellipse(x + 5, y + 7, r * 1.05, r * 0.6, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(dir);
-  ctx.strokeStyle = C.ink;
-  ctx.lineWidth = 1.5;
-
-  // 걷는 다리
-  const stride = Math.sin(opts.walk) * r * 0.55;
-  ctx.fillStyle = C.ink;
-  ctx.beginPath();
-  ctx.ellipse(stride, -r * 0.42, r * 0.36, r * 0.24, 0, 0, Math.PI * 2);
-  ctx.ellipse(-stride, r * 0.42, r * 0.36, r * 0.24, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // 총과 팔
-  if (look.barrel > 0) {
-    ctx.fillStyle = C.ink;
-    ctx.fillRect(r * 0.5, -look.thick / 2 + r * 0.25, look.barrel + r * 0.4, look.thick);
-    if (opts.muzzle) {
-      const tip = r * 0.9 + look.barrel;
-      ctx.fillStyle = C.goldLight;
-      ctx.beginPath();
-      for (let i = 0; i < 8; i++) {
-        const a = (i * Math.PI) / 4;
-        const len = i % 2 === 0 ? 15 : 6;
-        ctx.lineTo(tip + Math.cos(a) * len, r * 0.25 + Math.sin(a) * len * 0.7);
-      }
-      ctx.closePath();
-      ctx.fill();
-    }
-  } else {
-    // 손에 든 다이너마이트
-    ctx.fillStyle = C.blood;
-    ctx.fillRect(r * 0.5, r * 0.1, r * 0.9, 5);
-    ctx.strokeRect(r * 0.5, r * 0.1, r * 0.9, 5);
-  }
-
-  // 어깨와 외투
-  ctx.fillStyle = opts.flash ? C.paper : look.coat;
-  ctx.beginPath();
-  if (opts.poncho) {
-    ctx.moveTo(r * 0.95, 0);
-    ctx.lineTo(0, r * 1.25);
-    ctx.lineTo(-r * 1.05, 0);
-    ctx.lineTo(0, -r * 1.25);
-    ctx.closePath();
-  } else {
-    ctx.ellipse(0, 0, r * 0.8, r * 1.1, 0, 0, Math.PI * 2);
-  }
-  ctx.fill();
-  ctx.stroke();
-  if (opts.poncho && !opts.flash) {
-    ctx.strokeStyle = C.goldLight;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(-r * 0.5, -r * 0.5);
-    ctx.lineTo(-r * 0.5, r * 0.5);
-    ctx.stroke();
-    ctx.strokeStyle = C.ink;
-    ctx.lineWidth = 1.5;
-  }
-  if (opts.star) {
-    ctx.fillStyle = C.gold;
-    ctx.beginPath();
-    for (let i = 0; i < 10; i++) {
-      const a = (i * Math.PI) / 5;
-      const len = i % 2 === 0 ? r * 0.36 : r * 0.15;
-      ctx.lineTo(r * 0.15 + Math.cos(a) * len, r * 0.6 + Math.sin(a) * len);
-    }
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  // 모자: 넓은 챙, 정수리, 띠
-  ctx.fillStyle = opts.flash ? C.paper : look.hat;
-  ctx.beginPath();
-  ctx.ellipse(-r * 0.05, 0, r * 0.82, r * 0.74, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.ellipse(-r * 0.05, 0, r * 0.42, r * 0.36, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = opts.flash ? C.ink : look.band;
-  ctx.lineWidth = 2.5;
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy, time: number): void {
-  const def = ENEMY_DEFS[e.kind];
-  const dir = e.aim > 0 ? e.aimDir : e.facing;
-  drawFigure(ctx, e.x, e.y, def.radius, dir, LOOKS[e.kind], {
+function drawEnemy(ctx: Ctx, e: Enemy, time: number): void {
+  const kit = ENEMY_KITS[e.kind];
+  figure(ctx, e.x, e.y, e.aim > 0 ? e.aimDir : e.facing, kit, {
     walk: e.aim > 0 ? 0 : time * 11 + e.id,
     flash: e.hitFlash > 0,
     muzzle: e.muzzle > 0,
-    star: e.kind === 'deputy' || e.kind === 'sheriff',
   });
   if (e.hp < e.maxHp || e.kind === 'sheriff') {
     const w = e.kind === 'sheriff' ? 46 : 26;
-    const y = e.y - def.radius - 14;
-    ctx.fillStyle = C.ink;
+    const y = e.y - 38 * kit.scale;
+    ctx.fillStyle = INK;
     ctx.fillRect(e.x - w / 2 - 1, y - 1, w + 2, 6);
     ctx.fillStyle = C.blood;
     ctx.fillRect(e.x - w / 2, y, (w * e.hp) / e.maxHp, 4);
   }
 }
 
-function drawTelegraph(ctx: CanvasRenderingContext2D, e: Enemy): void {
+function drawTelegraph(ctx: Ctx, e: Enemy): void {
   if (e.aim <= 0) return;
   const def = ENEMY_DEFS[e.kind];
   const locked = e.aim <= def.lockTime;
@@ -662,38 +614,10 @@ function drawTelegraph(ctx: CanvasRenderingContext2D, e: Enemy): void {
   ctx.globalAlpha = 1;
 }
 
-const CORPSE_COAT: Record<EnemyKind, string> = {
-  deputy: '#2f4664', shotgun: '#54391f', rifle: '#585c61', bomber: '#7a271e', sheriff: '#161313',
-};
-
-function drawCorpse(ctx: CanvasRenderingContext2D, c: Corpse): void {
-  ctx.fillStyle = 'rgba(122, 23, 18, 0.45)';
-  ctx.beginPath();
-  ctx.ellipse(c.x, c.y, 17, 11, c.dir, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.save();
-  ctx.translate(c.x, c.y);
-  ctx.rotate(c.dir);
-  ctx.fillStyle = CORPSE_COAT[c.kind];
-  ctx.strokeStyle = 'rgba(42, 26, 16, 0.6)';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, 15, 8, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  // 벗겨진 모자
-  ctx.fillStyle = LOOKS[c.kind].hat;
-  ctx.beginPath();
-  ctx.ellipse(22, 7, 8, 7, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawPlayer(ctx: CanvasRenderingContext2D, world: World, time: number): void {
+function drawPlayer(ctx: Ctx, world: World, time: number): void {
   const p = world.player;
   if (world.phase === 'dead') {
-    drawCorpse(ctx, { x: p.x, y: p.y, dir: p.aimDir + Math.PI, kind: 'bomber' });
+    fallenFigure(ctx, p.x, p.y, p.aimDir + Math.PI, PLAYER_KIT, false);
     return;
   }
   // 조준선
@@ -701,16 +625,15 @@ function drawPlayer(ctx: CanvasRenderingContext2D, world: World, time: number): 
   ctx.lineWidth = 1.5;
   ctx.setLineDash([4, 7]);
   ctx.beginPath();
-  ctx.moveTo(p.x + Math.cos(p.aimDir) * 34, p.y + Math.sin(p.aimDir) * 34);
-  ctx.lineTo(p.x + Math.cos(p.aimDir) * 150, p.y + Math.sin(p.aimDir) * 150);
+  ctx.moveTo(p.x + Math.cos(p.aimDir) * 34, p.y - 9 + Math.sin(p.aimDir) * 34);
+  ctx.lineTo(p.x + Math.cos(p.aimDir) * 150, p.y - 9 + Math.sin(p.aimDir) * 150);
   ctx.stroke();
   ctx.setLineDash([]);
 
   const blink = p.invuln > 0 && p.dashTime === 0 && Math.floor(time * 20) % 2 === 0;
   if (blink) ctx.globalAlpha = 0.45;
-  const moving = Math.hypot(p.vx, p.vy) > 30;
-  drawFigure(ctx, p.x, p.y, PLAYER_R, p.aimDir, { coat: '#b3261e', hat: '#3a2618', band: '#d99a1c', barrel: 14, thick: 4 }, {
-    walk: moving ? time * 14 : 0, flash: false, muzzle: p.muzzle > 0, poncho: true,
+  figure(ctx, p.x, p.y, p.aimDir, PLAYER_KIT, {
+    walk: Math.hypot(p.vx, p.vy) > 30 ? time * 14 : 0, flash: false, muzzle: p.muzzle > 0,
   });
   ctx.globalAlpha = 1;
 
@@ -720,66 +643,69 @@ function drawPlayer(ctx: CanvasRenderingContext2D, world: World, time: number): 
   const startX = p.x - ((n - 1) * gap) / 2;
   for (let i = 0; i < n; i++) {
     ctx.beginPath();
-    ctx.arc(startX + i * gap, p.y + PLAYER_R + 14, 2.4, 0, Math.PI * 2);
-    ctx.fillStyle = i < p.ammo ? C.ink : 'rgba(42, 26, 16, 0.22)';
+    ctx.arc(startX + i * gap, p.y + PLAYER_R + 10, 2.4, 0, Math.PI * 2);
+    ctx.fillStyle = i < p.ammo ? INK : 'rgba(42, 26, 16, 0.22)';
     ctx.fill();
   }
   if (p.reload > 0) {
     const t = 1 - p.reload / world.stats.reloadTime;
-    ctx.strokeStyle = C.ink;
+    ctx.strokeStyle = INK;
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, PLAYER_R + 9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * t);
+    ctx.arc(p.x, p.y - 8, PLAYER_R + 12, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * t);
     ctx.stroke();
   }
 }
 
-// ---------- 총알, 폭발 ----------
+// ---------- 총알, 폭발, 불 ----------
 
-function drawBullets(ctx: CanvasRenderingContext2D, world: World): void {
+/** 총은 바닥보다 조금 위에서 쏘므로 총알도 그만큼 띄워 그린다. */
+const GUN_LIFT = 9;
+
+function drawBullets(ctx: Ctx, world: World): void {
   ctx.lineCap = 'round';
   for (const b of world.bullets) {
     const len = b.fromPlayer ? 0.03 : 0.045;
-    const tx = b.x - b.vx * len;
-    const ty = b.y - b.vy * len;
+    const y = b.y - GUN_LIFT;
     ctx.strokeStyle = b.fromPlayer ? C.fire : C.bloodDark;
     ctx.lineWidth = b.fromPlayer ? 5 : 7;
     ctx.globalAlpha = 0.55;
     ctx.beginPath();
-    ctx.moveTo(tx, ty);
-    ctx.lineTo(b.x, b.y);
+    ctx.moveTo(b.x - b.vx * len, y - b.vy * len);
+    ctx.lineTo(b.x, y);
     ctx.stroke();
     ctx.globalAlpha = 1;
     ctx.strokeStyle = b.fromPlayer ? '#fff4c9' : '#ff8a7a';
     ctx.lineWidth = b.fromPlayer ? 2 : 3;
     ctx.beginPath();
-    ctx.moveTo(b.x - b.vx * len * 0.5, b.y - b.vy * len * 0.5);
-    ctx.lineTo(b.x, b.y);
+    ctx.moveTo(b.x - b.vx * len * 0.5, y - b.vy * len * 0.5);
+    ctx.lineTo(b.x, y);
     ctx.stroke();
     if (!b.fromPlayer) {
       ctx.fillStyle = C.blood;
       ctx.beginPath();
-      ctx.arc(b.x, b.y, 4, 0, Math.PI * 2);
+      ctx.arc(b.x, y, 4, 0, Math.PI * 2);
       ctx.fill();
     }
   }
   ctx.lineCap = 'butt';
 }
 
-function drawBombTarget(ctx: CanvasRenderingContext2D, b: Bomb): void {
+function drawBombTarget(ctx: Ctx, b: Bomb): void {
+  if (b.owner === 'neutral') return;
   const k = Math.min(1, b.elapsed / (b.flight + b.fuse));
-  if (b.fromPlayer) {
+  if (b.owner === 'player') {
     ctx.strokeStyle = 'rgba(42, 26, 16, 0.45)';
     ctx.lineWidth = 2;
     ctx.setLineDash([6, 6]);
     ctx.beginPath();
-    ctx.arc(b.tx, b.ty, b.radius, 0, Math.PI * 2);
+    ctx.ellipse(b.tx, b.ty, b.radius, b.radius * 0.8, 0, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
     return;
   }
   // 적이 던진 다이너마이트는 떨어질 자리를 붉게 알려 준다.
-  ctx.fillStyle = `rgba(179, 38, 30, ${0.12 + k * 0.2})`;
+  ctx.fillStyle = 'rgba(179, 38, 30, ' + (0.12 + k * 0.2) + ')';
   ctx.beginPath();
   ctx.arc(b.tx, b.ty, b.radius, 0, Math.PI * 2);
   ctx.fill();
@@ -791,25 +717,26 @@ function drawBombTarget(ctx: CanvasRenderingContext2D, b: Bomb): void {
   ctx.stroke();
 }
 
-function drawBomb(ctx: CanvasRenderingContext2D, b: Bomb, time: number): void {
-  const t = Math.min(1, b.elapsed / b.flight);
+function drawBomb(ctx: Ctx, b: Bomb, time: number): void {
+  if (b.owner === 'neutral') return;
+  const t = b.flight > 0 ? Math.min(1, b.elapsed / b.flight) : 1;
   const x = b.sx + (b.tx - b.sx) * t;
   const y = b.sy + (b.ty - b.sy) * t;
   const height = Math.sin(Math.PI * t) * 70;
-  ctx.fillStyle = C.shadow;
+  ctx.fillStyle = SHADOW;
   ctx.beginPath();
   ctx.ellipse(x, y + 4, 7, 3, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.save();
-  ctx.translate(x, y - height);
+  ctx.translate(x, y - height - 4);
   ctx.rotate(t < 1 ? time * 14 : 0.4);
-  ctx.fillStyle = C.blood;
-  ctx.strokeStyle = C.ink;
+  ctx.fillStyle = MATERIAL.tnt.top;
+  ctx.strokeStyle = INK;
   ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.roundRect(-9, -4, 18, 8, 2);
-  ctx.fill();
-  ctx.stroke();
+  ctx.fillRect(-9, -4, 18, 8);
+  ctx.strokeRect(-9, -4, 18, 8);
+  ctx.fillStyle = MATERIAL.tnt.side;
+  ctx.fillRect(-9, 1, 18, 3);
   ctx.fillStyle = Math.floor(time * 30) % 2 === 0 ? C.goldLight : C.fire;
   ctx.beginPath();
   ctx.arc(12, 0, 3.5, 0, Math.PI * 2);
@@ -817,7 +744,7 @@ function drawBomb(ctx: CanvasRenderingContext2D, b: Bomb, time: number): void {
   ctx.restore();
 }
 
-function drawBlasts(ctx: CanvasRenderingContext2D, world: World): void {
+function drawBlasts(ctx: Ctx, world: World): void {
   for (const b of world.blasts) {
     const k = b.life / b.maxLife;
     ctx.globalAlpha = k;
@@ -834,7 +761,89 @@ function drawBlasts(ctx: CanvasRenderingContext2D, world: World): void {
   ctx.globalAlpha = 1;
 }
 
-function drawProgress(ctx: CanvasRenderingContext2D, world: World): void {
+function drawFireGlow(ctx: Ctx, world: World): void {
+  for (const f of world.fires) {
+    const k = Math.min(1, f.life / 0.6);
+    const y = f.y - f.lift;
+    const glow = ctx.createRadialGradient(f.x, y, 0, f.x, y, f.r * 1.9);
+    glow.addColorStop(0, 'rgba(255, 150, 50, ' + 0.5 * k + ')');
+    glow.addColorStop(1, 'rgba(255, 150, 50, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(f.x - f.r * 2, y - f.r * 2, f.r * 4, f.r * 4);
+  }
+}
+
+/** 재질마다 다른 모양의 조각. */
+function drawParticle(ctx: Ctx, q: Particle): void {
+  const k = Math.max(0, q.life / q.maxLife);
+  const age = 1 - k;
+  ctx.fillStyle = q.color;
+  switch (q.shape) {
+    case 'shard':
+    case 'chunk':
+    case 'leaf': {
+      // 나뭇조각은 길쭉하게, 돌 조각은 네모나게, 잎은 둥글게
+      ctx.globalAlpha = Math.min(1, k * 2);
+      ctx.save();
+      ctx.translate(q.x, q.y);
+      ctx.rotate(q.rot + q.spin * age);
+      if (q.shape === 'leaf') {
+        ctx.beginPath();
+        ctx.ellipse(0, 0, q.size * 0.6, q.size * 0.3, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        const w = q.shape === 'shard' ? q.size * 1.5 : q.size;
+        const h = q.shape === 'shard' ? q.size * 0.32 : q.size;
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+        ctx.strokeStyle = 'rgba(42, 26, 16, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-w / 2, -h / 2, w, h);
+      }
+      ctx.restore();
+      break;
+    }
+    case 'spark':
+      ctx.globalAlpha = k;
+      ctx.strokeStyle = q.color;
+      ctx.lineWidth = q.size;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(q.x, q.y);
+      ctx.lineTo(q.x - q.vx * 0.035, q.y - q.vy * 0.035);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      break;
+    case 'smoke':
+      ctx.globalAlpha = k * 0.5;
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, q.size * (0.5 + age), 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case 'flame':
+      ctx.globalAlpha = k;
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, q.size * (0.3 + k * 0.5), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff1b8';
+      ctx.beginPath();
+      ctx.arc(q.x, q.y + 1, q.size * k * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case 'drop':
+      ctx.globalAlpha = Math.min(1, k * 1.5);
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, q.size * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    default:
+      ctx.globalAlpha = k;
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, q.size / 2, 0, Math.PI * 2);
+      ctx.fill();
+  }
+}
+
+function drawProgress(ctx: Ctx, world: World): void {
   const p = world.player;
   for (const l of world.loots) {
     if (l.taken) continue;
@@ -843,23 +852,23 @@ function drawProgress(ctx: CanvasRenderingContext2D, world: World): void {
     ctx.strokeStyle = 'rgba(42, 26, 16, 0.35)';
     ctx.lineWidth = 6;
     ctx.beginPath();
-    ctx.arc(l.x, l.y, 27, 0, Math.PI * 2);
+    ctx.arc(l.x, l.y - 8, 30, 0, Math.PI * 2);
     ctx.stroke();
     ctx.strokeStyle = C.gold;
     ctx.beginPath();
-    ctx.arc(l.x, l.y, 27, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, l.progress / l.time));
+    ctx.arc(l.x, l.y - 8, 30, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, l.progress / l.time));
     ctx.stroke();
   }
   if (world.escapeProgress > 0) {
     ctx.strokeStyle = C.sage;
     ctx.lineWidth = 7;
     ctx.beginPath();
-    ctx.arc(world.horse.x, world.horse.y, 38, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, world.escapeProgress / ESCAPE_TIME));
+    ctx.arc(world.horse.x, world.horse.y - 10, 42, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, world.escapeProgress / ESCAPE_TIME));
     ctx.stroke();
   }
 }
 
-function drawTexts(ctx: CanvasRenderingContext2D, world: World): void {
+function drawTexts(ctx: Ctx, world: World): void {
   ctx.font = '700 17px "Rye", "IBM Plex Sans KR", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -868,16 +877,16 @@ function drawTexts(ctx: CanvasRenderingContext2D, world: World): void {
     ctx.globalAlpha = Math.min(1, (t.life / t.maxLife) * 2);
     ctx.strokeStyle = C.paper;
     ctx.lineWidth = 4;
-    ctx.strokeText(t.text, t.x, t.y);
+    ctx.strokeText(t.text, t.x, t.y - 16);
     ctx.fillStyle = t.color;
-    ctx.fillText(t.text, t.x, t.y);
+    ctx.fillText(t.text, t.x, t.y - 16);
   }
   ctx.globalAlpha = 1;
 }
 
 // ---------- 화면 전체 효과 ----------
 
-function drawAtmosphere(ctx: CanvasRenderingContext2D, view: View, world: World, time: number): void {
+function drawAtmosphere(ctx: Ctx, view: View, world: World, time: number): void {
   // 해 질 녘의 가장자리 어둠
   const r = Math.hypot(view.w, view.h) / 2;
   const vignette = ctx.createRadialGradient(view.w / 2, view.h / 2, r * 0.45, view.w / 2, view.h / 2, r);
@@ -889,7 +898,7 @@ function drawAtmosphere(ctx: CanvasRenderingContext2D, view: View, world: World,
   // 수배가 오를수록 하늘빛이 붉어진다.
   const level = heatLevel(world);
   if (level > 0) {
-    ctx.fillStyle = `rgba(190, 60, 30, ${level * 0.022})`;
+    ctx.fillStyle = 'rgba(190, 60, 30, ' + level * 0.022 + ')';
     ctx.fillRect(0, 0, view.w, view.h);
   }
   const p = world.player;
@@ -897,18 +906,18 @@ function drawAtmosphere(ctx: CanvasRenderingContext2D, view: View, world: World,
     const pulse = 0.5 + Math.sin(time * 6) * 0.5;
     const danger = ctx.createRadialGradient(view.w / 2, view.h / 2, r * 0.5, view.w / 2, view.h / 2, r);
     danger.addColorStop(0, 'rgba(179, 38, 30, 0)');
-    danger.addColorStop(1, `rgba(179, 38, 30, ${0.25 + pulse * 0.2})`);
+    danger.addColorStop(1, 'rgba(179, 38, 30, ' + (0.25 + pulse * 0.2) + ')');
     ctx.fillStyle = danger;
     ctx.fillRect(0, 0, view.w, view.h);
   }
   if (p.hurtFlash > 0) {
-    ctx.fillStyle = `rgba(179, 38, 30, ${p.hurtFlash * 0.9})`;
+    ctx.fillStyle = 'rgba(179, 38, 30, ' + p.hurtFlash * 0.9 + ')';
     ctx.fillRect(0, 0, view.w, view.h);
   }
 }
 
 /** 화면 밖에 있는 돈과 말의 방향을 가장자리 화살표로 알려 준다. */
-function drawArrows(ctx: CanvasRenderingContext2D, view: View, world: World, time: number): void {
+function drawArrows(ctx: Ctx, view: View, world: World, time: number): void {
   const margin = 26;
   const halfW = (view.w - view.insets.left - view.insets.right) / 2 - margin;
   const halfH = (view.h - view.insets.top - view.insets.bottom) / 2 - margin;
@@ -921,7 +930,7 @@ function drawArrows(ctx: CanvasRenderingContext2D, view: View, world: World, tim
     ctx.translate(view.fx + Math.cos(a) * t, view.fy + Math.sin(a) * t);
     ctx.rotate(a);
     ctx.fillStyle = color;
-    ctx.strokeStyle = C.ink;
+    ctx.strokeStyle = INK;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(size, 0);
@@ -937,7 +946,7 @@ function drawArrows(ctx: CanvasRenderingContext2D, view: View, world: World, tim
   if (quotaMet(world)) arrow(world.horse, C.sage, 13 + Math.sin(time * 6) * 2);
 }
 
-function drawSticks(ctx: CanvasRenderingContext2D, sticks: Stick[]): void {
+function drawSticks(ctx: Ctx, sticks: Stick[]): void {
   ctx.font = '700 12px "IBM Plex Sans KR", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';

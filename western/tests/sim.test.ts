@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { JOBS, WORLD_H, WORLD_W } from '../src/game/map.ts';
+import { JOBS, WORLD_H, WORLD_W, makeObstacle } from '../src/game/map.ts';
 import {
   BASE_STATS, FREE_PICKS, PERKS, buy, canBuy, choosePerk, finishJob, newRun, nextJob, perkChoices, perkDef,
   startJob, takePerk,
@@ -16,10 +16,12 @@ const input = (over: Partial<Input>): Input => ({ ...NO_INPUT, ...over });
 function run(w: World, seconds: number, inp: Input = NO_INPUT): void {
   for (let t = 0; t < seconds; t += DT) step(w, inp, DT);
 }
-/** 건물이 없는 빈 들판으로 옮긴다. */
+/** 건물이 없는 빈 들판으로 옮긴다. 흩어진 선인장, 바위, 덤불, 소품도 치워 둔다. */
 function toOpenField(w: World): void {
   w.player.x = 760;
   w.player.y = 1080;
+  w.obstacles = w.obstacles.filter((o) => o.kind === 'building');
+  w.bushes = [];
 }
 /** 경보는 울렸지만 새 적은 오지 않는 상태로 만든다. */
 function quiet(w: World): void {
@@ -34,7 +36,7 @@ const enemyBullet = (w: World, damage = 1): Bullet => ({
 
 test('입력대로 움직이고 벽은 통과하지 못한다', () => {
   const w = make();
-  const bank = w.obstacles.find((o) => o.kind === 'bank')!;
+  const bank = w.obstacles.find((o) => o.label === '은행')!;
   w.player.x = bank.x - 60;
   w.player.y = bank.y + bank.h / 2;
   const startX = w.player.x;
@@ -111,7 +113,7 @@ test('적을 쓰러뜨린 순간 게임이 아주 잠깐 멈춘다', () => {
 
 test('총알은 건물을 통과하지 못한다', () => {
   const w = make();
-  const bank = w.obstacles.find((o) => o.kind === 'bank')!;
+  const bank = w.obstacles.find((o) => o.label === '은행')!;
   w.player.x = bank.x - 40;
   w.player.y = bank.y + bank.h / 2;
   quiet(w);
@@ -224,14 +226,14 @@ test('적이 던진 다이너마이트는 그 자리에 있으면 맞고, 벗어
   const stay = make();
   toOpenField(stay);
   quiet(stay);
-  stay.bombs.push({ sx: 0, sy: 0, tx: stay.player.x, ty: stay.player.y, elapsed: 0, flight: 0.5, fuse: 0.3, radius: 72, damage: 2, fromPlayer: false });
+  stay.bombs.push({ sx: 0, sy: 0, tx: stay.player.x, ty: stay.player.y, elapsed: 0, flight: 0.5, fuse: 0.3, radius: 72, damage: 2, owner: 'enemy' });
   run(stay, 1);
   assert.equal(stay.player.hp, BASE_STATS.maxHp - 2);
 
   const flee = make();
   toOpenField(flee);
   quiet(flee);
-  flee.bombs.push({ sx: 0, sy: 0, tx: flee.player.x, ty: flee.player.y, elapsed: 0, flight: 0.5, fuse: 0.3, radius: 72, damage: 2, fromPlayer: false });
+  flee.bombs.push({ sx: 0, sy: 0, tx: flee.player.x, ty: flee.player.y, elapsed: 0, flight: 0.5, fuse: 0.3, radius: 72, damage: 2, owner: 'enemy' });
   run(flee, 1, input({ moveX: 1 }));
   assert.equal(flee.player.hp, BASE_STATS.maxHp);
 });
@@ -361,4 +363,165 @@ test('능력은 정해진 횟수까지만 겹치고, 기본 수치는 건드리�
   // 끝까지 가진 능력은 더 나오지 않는다.
   for (const perk of PERKS) r.owned[perk.id] = perk.max;
   assert.deepEqual(perkChoices(r, w), []);
+});
+
+// ---------- 재질 반응 ----------
+
+/** 주인공 오른쪽에 물체 하나를 놓는다. */
+function place(w: World, kind: Parameters<typeof makeObstacle>[1], dx: number, dy = 0, size = 30): ReturnType<typeof makeObstacle> {
+  const o = makeObstacle(w.nextId++, kind, w.player.x + dx, w.player.y + dy - size / 2, size, size);
+  w.obstacles.push(o);
+  return o;
+}
+
+test('나무 상자는 총알에 조각이 튀고 구멍이 나다가 부서진다', () => {
+  const w = make();
+  toOpenField(w);
+  quiet(w);
+  const crate = place(w, 'crate', 120);
+  step(w, input({ aim: 0, fire: true }), DT);
+  run(w, 0.15);
+  assert.equal(crate.hp, crate.maxHp - 1);
+  assert.equal(crate.marks.filter((m) => m.kind === 'hole').length, 1);
+  assert.ok(w.particles.some((q) => q.shape === 'shard'), '나뭇조각이 튀어야 한다');
+  run(w, 2, input({ aim: 0, fire: true }));
+  assert.equal(w.obstacles.includes(crate), false);
+  assert.ok(w.decals.some((d) => d.kind === 'debris'));
+});
+
+test('재질마다 튀는 조각과 소리가 다르다', () => {
+  const cases = [
+    ['crate', 'shard', 'hitWood'], ['rock', 'spark', 'hitStone'], ['cactus', 'leaf', 'hitPlant'],
+  ] as const;
+  for (const [kind, shape, sound] of cases) {
+    const w = make();
+    toOpenField(w);
+    quiet(w);
+    place(w, kind, 120);
+    step(w, input({ aim: 0, fire: true }), DT);
+    const events: string[] = [];
+    for (let t = 0; t < 0.2; t += DT) {
+      step(w, NO_INPUT, DT);
+      events.push(...w.events);
+      w.events.length = 0;
+    }
+    assert.ok(w.particles.some((q) => q.shape === shape), kind + '에서 ' + shape + '가 튀어야 한다');
+    assert.ok(events.includes(sound), kind + '에서 ' + sound + ' 소리가 나야 한다');
+  }
+});
+
+test('바위는 부서지지 않고, 총알은 덤불을 뚫고 지나간다', () => {
+  const w = make();
+  toOpenField(w);
+  quiet(w);
+  const rock = place(w, 'rock', 200);
+  w.bushes.push({ id: w.nextId++, x: w.player.x + 90, y: w.player.y, size: 1, burnt: false });
+  run(w, 0.3, input({ aim: 0, fire: true }));
+  assert.ok(w.particles.some((q) => q.shape === 'leaf'), '덤불에서 잎이 날려야 한다');
+  assert.ok(rock.marks.length > 0, '덤불을 지나 바위까지 닿아야 한다');
+  run(w, 2, input({ aim: 0, fire: true }));
+  assert.equal(w.obstacles.includes(rock), true);
+});
+
+test('화약통은 쏘면 터지고, 옆의 통도 따라 터진다', () => {
+  const w = make();
+  toOpenField(w);
+  quiet(w);
+  const first = place(w, 'tnt', 220, 0, 22);
+  const second = place(w, 'tnt', 290, 0, 22);
+  const victim = spawnEnemy(w, 'deputy', { x: w.player.x + 330, y: w.player.y + 30 });
+  victim.cooldown = 99;
+  step(w, input({ aim: 0, fire: true }), DT);
+  const events: string[] = [];
+  for (let t = 0; t < 1.2; t += DT) {
+    step(w, NO_INPUT, DT);
+    events.push(...w.events);
+    w.events.length = 0;
+  }
+  assert.equal(w.obstacles.includes(first), false);
+  assert.equal(w.obstacles.includes(second), false, '연쇄 폭발');
+  assert.equal(events.filter((e) => e === 'boom').length, 2);
+  assert.equal(w.enemies.some((e) => e.id === victim.id), false);
+  assert.equal(w.corpses.at(-1)!.charred, true, '폭발에 쓰러지면 그을린다');
+  assert.equal(w.player.hp, BASE_STATS.maxHp, '멀리 있던 주인공은 무사하다');
+});
+
+test('화약통 곁에 있으면 주인공도 다친다', () => {
+  const w = make();
+  toOpenField(w);
+  quiet(w);
+  const tnt = place(w, 'tnt', 40, 0, 22);
+  tnt.hp = 0.5;
+  step(w, input({ aim: 0, fire: true }), DT);
+  run(w, 0.6);
+  assert.ok(w.player.hp < BASE_STATS.maxHp);
+});
+
+test('폭발 하나가 사람, 덤불, 나무 건물, 흙벽 건물, 상자에 각각 다르게 작용한다', () => {
+  const w = make();
+  toOpenField(w);
+  quiet(w);
+  const p = w.player;
+  const at = { x: p.x + 200, y: p.y };
+  const wood = makeObstacle(w.nextId++, 'building', at.x - 40, at.y + 50, 80, 60, { material: 'wood' });
+  const adobe = makeObstacle(w.nextId++, 'building', at.x - 40, at.y - 110, 80, 60, { material: 'adobe' });
+  const crate = makeObstacle(w.nextId++, 'crate', at.x + 50, at.y - 15, 30, 30);
+  w.obstacles = [wood, adobe, crate];
+  const bush = { id: w.nextId++, x: at.x - 60, y: at.y, size: 1, burnt: false };
+  w.bushes = [bush];
+  const man = spawnEnemy(w, 'deputy', { x: at.x - 20, y: at.y + 10 });
+  man.cooldown = 99;
+
+  step(w, input({ aim: 0, aimDist: 200, bomb: true }), DT);
+  run(w, 0.8);
+
+  // 사람: 쓰러지고 그을린다
+  assert.equal(w.enemies.length, 0);
+  assert.equal(w.corpses[0]!.charred, true);
+  // 덤불: 탄다
+  assert.equal(bush.burnt, true);
+  // 나무 건물: 그을리고 불이 붙는다
+  assert.ok(wood.marks.some((m) => m.kind === 'scorch'));
+  assert.ok(w.fires.some((f) => f.lift > 0), '나무 건물에는 불이 붙어야 한다');
+  // 흙벽 건물: 그을리기만 한다
+  assert.ok(adobe.marks.some((m) => m.kind === 'scorch'));
+  assert.equal(w.fires.filter((f) => f.lift > 0).length, 1, '흙벽 건물에는 불이 붙지 않는다');
+  // 상자: 부서진다
+  assert.equal(w.obstacles.includes(crate), false);
+  // 모래 바닥: 구덩이가 남는다
+  assert.ok(w.decals.some((d) => d.kind === 'crater'));
+  // 건물은 그대로 서 있다
+  assert.equal(w.obstacles.includes(wood) && w.obstacles.includes(adobe), true);
+});
+
+test('불은 닿은 사람을 다치게 하고, 시간이 지나면 재를 남기고 꺼진다', () => {
+  const w = make();
+  toOpenField(w);
+  quiet(w);
+  w.player.invuln = 0;
+  w.bushes = [{ id: w.nextId++, x: w.player.x + 10, y: w.player.y, size: 1, burnt: false }];
+  w.bombs.push({ sx: 0, sy: 0, tx: w.player.x + 10, ty: w.player.y, elapsed: 0, flight: 0, fuse: 0.05, radius: 30, damage: 1, owner: 'player' });
+  run(w, 0.2);
+  assert.equal(w.fires.length, 1);
+  assert.equal(w.player.hp, BASE_STATS.maxHp, '자기 폭탄의 폭발 자체에는 다치지 않는다');
+  run(w, 1.2);
+  assert.ok(w.player.hp < BASE_STATS.maxHp, '그러나 번진 불에는 덴다');
+  run(w, 3);
+  assert.equal(w.fires.length, 0);
+  assert.ok(w.decals.some((d) => d.kind === 'ash'));
+});
+
+test('물통이 터지면 물이 쏟아져 근처의 불을 끈다', () => {
+  const w = make();
+  toOpenField(w);
+  quiet(w);
+  const trough = place(w, 'trough', 150, 0, 40);
+  w.fires.push({ x: trough.x + 60, y: trough.y, r: 20, life: 30, maxLife: 30, tick: 99, lift: 0 });
+  w.fires.push({ x: trough.x + 400, y: trough.y, r: 20, life: 30, maxLife: 30, tick: 99, lift: 0 });
+  step(w, input({ aim: 0, aimDist: 170, bomb: true }), DT);
+  run(w, 0.8);
+  assert.equal(w.obstacles.includes(trough), false);
+  assert.ok(w.decals.some((d) => d.kind === 'puddle'));
+  assert.equal(w.fires.filter((f) => f.life > 20).length, 1, '가까운 불만 꺼진다');
+  assert.ok(w.particles.some((q) => q.shape === 'drop'));
 });
