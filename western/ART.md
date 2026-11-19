@@ -12,15 +12,42 @@
 
 레고에서 가져온 것은 "부품을 조합한다"는 방식뿐이다. 돌기나 미니피겨 같은 레고 고유의 모양은 쓰지 않는다.
 
+## 고증: 1881년 애리조나 준주의 개척 마을
+
+배경은 소노라 사막 저지대의 작은 마을이다. 아래 항목은 자료를 찾아 확인한 뒤 그림과 규칙에 반영했다.
+
+| 항목 | 실제 | 게임에 반영한 것 |
+|---|---|---|
+| 상점 건물 | 목조 1~2층에 길쪽으로 박공지붕을 두고, 그 앞에 지붕을 가리는 높은 가짜 정면을 세웠다. 작은 건물을 번듯해 보이게 하려는 것이었다 | 술집, 잡화점, 호텔은 박공지붕과 가짜 정면으로 그린다. 길을 등진 건물은 가짜 정면의 뒷면과 버팀목이 보인다 |
+| 건물 재료 | 툼스톤의 건물은 1~2층에 어도비, 나무, 벽돌이 섞여 있었다 | 보안관 사무소는 어도비, 은행은 벽돌, 나머지는 나무 |
+| 화재 | 툼스톤은 1881년과 1882년 큰불로 중심가가 탔고, 어도비 건물은 잘 타지 않았다 | 나무 건물은 폭발에 불이 붙고, 어도비와 벽돌은 그을리기만 한다 |
+| 폭약 | 그 시절 쓰인 것은 발파용 흑색 화약통과 다이너마이트다. TNT가 상업용으로 쓰인 것은 20세기 초부터다 | TNT 통을 화약통으로 바꿨다. 던지는 것은 다이너마이트 |
+| 식생 | 사와로는 해발 약 670~1,220m의 사막 관목 지대에 자라며 프리클리페어, 오코티요, 크레오소트, 메스키트와 함께 난다 | 이 다섯 가지와 마른 풀을 심었다 |
+| 마을 시설 | 진흙 길보다 높인 나무 보도, 말 매는 가로대와 물통, 전신주, 풍차와 물탱크, 뒷마당의 뒷간, 마을 끝의 묘지 | 모두 배치했다 |
+| 총 | 6연발 리볼버, 레버액션 소총, 2연발 산탄총, 품에 숨기는 2연발 데린저 | 장탄수 6발. 장탄수를 늘리는 능력의 이름을 데린저로 바꿨다 |
+
+고증과 다르게 둔 것도 있다. 길 폭과 건물 크기는 실제 비례가 아니라 게임 화면에 맞췄고, 은행 금고는 건물 안이 아니라 문 앞에 나와 있다. TNT의 연대는 검색으로 확인한 것이 아니라 일반적으로 알려진 내용에 근거했다.
+
+출처:
+
+- [Western false front architecture (Wikipedia)](https://en.wikipedia.org/wiki/Western_false_front_architecture)
+- [False Front Commercial (History Colorado)](https://www.historycolorado.org/node/3911)
+- [Tombstone historic district nomination text (NPS)](https://npgallery.nps.gov/NRHP/GetAsset/NHLS/66000171_text)
+- [Historical Fires (Tombstone Travel Tips)](https://www.tombstonetraveltips.com/?p=2271)
+- [Giant Powder Company (Wikipedia)](https://en.wikipedia.org/wiki/Giant_Powder_Company)
+- [Black powder and nitroglycerin (Linda Hall Library)](https://www.lindahall.org/experience/digital-exhibitions/the-transcontinental-railroad/01-black-powder-nitroglycerin/)
+- [Saguaro National Park handbook, life zones (NPS)](https://www.nps.gov/parkhistory/online_books/natural/4a/nh4af.htm)
+- [Tombstone ecology (Arizona State Parks)](https://azstateparks.com/tombstone/explore/science-Ecology)
+
 ## 재질
 
 | 재질 | 쓰이는 곳 | 총알에 맞으면 | 폭발에 휘말리면 |
 |---|---|---|---|
 | 나무 | 건물, 상자, 통, 마차, 물통 | 나뭇조각, 총알구멍 | 건물은 그을리고 불이 붙음. 소품은 부서짐 |
-| 흙벽 | 은행 같은 건물 | 흙먼지와 파편 | 그을리기만 함 |
+| 어도비·벽돌 | 보안관 사무소, 은행 | 흙먼지와 파편 | 그을리기만 함 |
 | 돌 | 바위, 굴뚝 | 파편과 불꽃 | 흠집만 남음 |
 | 금속 | 금고 | 불꽃 | 금고는 열림 |
-| 식물 | 선인장, 덤불 | 잎이 날림. 덤불은 관통 | 덤불은 불타 재가 됨. 선인장은 조각남 |
+| 식물 | 사와로, 덤불, 건초, 메스키트 | 잎이 날림. 덤불은 관통 | 덤불과 건초는 불탐. 사와로는 조각남. 나무는 잎에 불이 붙음 |
 | 화약 | 화약통 | 터짐 | 연쇄 폭발 |
 | 사람 | 주인공, 추격대 | 피가 튀고 밀려남 | 날아가고 그을린 시체가 남음 |
 | 모래 | 바닥 | 먼지 | 구덩이 |
@@ -31,8 +58,8 @@
 
 | 추가할 것 | 고칠 곳 |
 |---|---|
-| 새 소품 | `src/game/map.ts`의 `PROP_KIT`에 재질·내구도·높이 한 줄, `src/render.ts`의 `drawObstacle`에 블록 조합 |
-| 새 건물 | `src/game/map.ts`의 `BUILDINGS`에 위치·재질·지붕색·부품 한 줄 |
+| 새 소품 | `src/game/map.ts`의 `PROP_KIT`에 재질·내구도·높이 한 줄, `src/town.ts`의 `drawProp`에 블록 조합 |
+| 새 건물 | `src/game/map.ts`의 `BUILDINGS`에 위치·재질·형태·층수·가게 종류 한 줄. 새 가게 종류의 문과 창은 `src/town.ts`의 `front` |
 | 새 인물 | `src/kit.ts`의 `ENEMY_KITS`에 색·모자·무기 한 줄, `src/game/sim.ts`의 적 수치표에 한 줄 |
 | 새 재질 | `src/game/types.ts`의 `Material`, `src/kit.ts`의 `MATERIAL`, `src/game/sim.ts`의 `spray` |
 

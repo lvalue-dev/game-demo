@@ -60,7 +60,7 @@ export const BASE_STATS: Stats = {
 export const PERKS: Perk[] = [
   { id: 'quickdraw', name: '속사', text: '발사 간격 20% 감소', price: 40, max: 3, apply: (s) => { s.fireInterval *= 0.8; } },
   { id: 'fasthands', name: '빠른 손', text: '재장전 시간 30% 감소', price: 30, max: 2, apply: (s) => { s.reloadTime *= 0.7; } },
-  { id: 'cylinder', name: '긴 탄창', text: '장탄수 +2', price: 30, max: 3, apply: (s) => { s.maxAmmo += 2; } },
+  { id: 'cylinder', name: '품속의 데린저', text: '장탄수 +2. 숨겨 둔 2연발 권총', price: 30, max: 3, apply: (s) => { s.maxAmmo += 2; } },
   { id: 'heavy', name: '대구경 탄', text: '총알 피해 +1', price: 70, max: 1, apply: (s) => { s.damage += 1; } },
   { id: 'pierce', name: '관통탄', text: '총알이 적 1명을 더 뚫는다', price: 45, max: 2, apply: (s) => { s.pierce += 1; } },
   { id: 'shotgun', name: '산탄 개조', text: '한 번에 나가는 총알 +2 (부채꼴)', price: 60, max: 2, apply: (s) => { s.pellets += 2; } },

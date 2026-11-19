@@ -415,7 +415,7 @@ test('바위는 부서지지 않고, 총알은 덤불을 뚫고 지나간다', (
   toOpenField(w);
   quiet(w);
   const rock = place(w, 'rock', 200);
-  w.bushes.push({ id: w.nextId++, x: w.player.x + 90, y: w.player.y, size: 1, burnt: false });
+  w.bushes.push({ id: w.nextId++, x: w.player.x + 90, y: w.player.y, size: 1, kind: 'creosote', burnt: false });
   run(w, 0.3, input({ aim: 0, fire: true }));
   assert.ok(w.particles.some((q) => q.shape === 'leaf'), '덤불에서 잎이 날려야 한다');
   assert.ok(rock.marks.length > 0, '덤불을 지나 바위까지 닿아야 한다');
@@ -427,8 +427,8 @@ test('화약통은 쏘면 터지고, 옆의 통도 따라 터진다', () => {
   const w = make();
   toOpenField(w);
   quiet(w);
-  const first = place(w, 'tnt', 220, 0, 22);
-  const second = place(w, 'tnt', 290, 0, 22);
+  const first = place(w, 'powder', 220, 0, 22);
+  const second = place(w, 'powder', 290, 0, 22);
   const victim = spawnEnemy(w, 'deputy', { x: w.player.x + 330, y: w.player.y + 30 });
   victim.cooldown = 99;
   step(w, input({ aim: 0, fire: true }), DT);
@@ -450,7 +450,7 @@ test('화약통 곁에 있으면 주인공도 다친다', () => {
   const w = make();
   toOpenField(w);
   quiet(w);
-  const tnt = place(w, 'tnt', 40, 0, 22);
+  const tnt = place(w, 'powder', 40, 0, 22);
   tnt.hp = 0.5;
   step(w, input({ aim: 0, fire: true }), DT);
   run(w, 0.6);
@@ -467,7 +467,7 @@ test('폭발 하나가 사람, 덤불, 나무 건물, 흙벽 건물, 상자에 �
   const adobe = makeObstacle(w.nextId++, 'building', at.x - 40, at.y - 110, 80, 60, { material: 'adobe' });
   const crate = makeObstacle(w.nextId++, 'crate', at.x + 50, at.y - 15, 30, 30);
   w.obstacles = [wood, adobe, crate];
-  const bush = { id: w.nextId++, x: at.x - 60, y: at.y, size: 1, burnt: false };
+  const bush = { id: w.nextId++, x: at.x - 60, y: at.y, size: 1, kind: 'creosote' as const, burnt: false };
   w.bushes = [bush];
   const man = spawnEnemy(w, 'deputy', { x: at.x - 20, y: at.y + 10 });
   man.cooldown = 99;
@@ -499,7 +499,7 @@ test('불은 닿은 사람을 다치게 하고, 시간이 지나면 재를 남�
   toOpenField(w);
   quiet(w);
   w.player.invuln = 0;
-  w.bushes = [{ id: w.nextId++, x: w.player.x + 10, y: w.player.y, size: 1, burnt: false }];
+  w.bushes = [{ id: w.nextId++, x: w.player.x + 10, y: w.player.y, size: 1, kind: 'creosote', burnt: false }];
   w.bombs.push({ sx: 0, sy: 0, tx: w.player.x + 10, ty: w.player.y, elapsed: 0, flight: 0, fuse: 0.05, radius: 30, damage: 1, owner: 'player' });
   run(w, 0.2);
   assert.equal(w.fires.length, 1);

@@ -4,9 +4,11 @@ export interface Vec {
 }
 
 /** 물체의 재질. 색과, 총알이나 폭발에 대한 반응이 여기서 정해진다. */
-export type Material = 'wood' | 'adobe' | 'stone' | 'metal' | 'plant' | 'tnt';
+export type Material = 'wood' | 'adobe' | 'brick' | 'stone' | 'metal' | 'plant' | 'powder';
 
-export type ObstacleKind = 'building' | 'crate' | 'barrel' | 'tnt' | 'trough' | 'wagon' | 'cactus' | 'rock';
+export type ObstacleKind =
+  | 'building' | 'crate' | 'barrel' | 'powder' | 'trough' | 'wagon' | 'cactus' | 'rock'
+  | 'outhouse' | 'hay' | 'tree' | 'well' | 'windmill';
 
 /** 물체 표면에 남는 흔적. dx, dy는 물체 왼쪽 위에서의 위치, u는 옆면에서의 높이(0~1). */
 export interface Mark {
@@ -17,12 +19,31 @@ export interface Mark {
   size: number;
 }
 
-/** 건물을 이루는 부품 조합. */
+/** 건물을 이루는 부품 조합. 실제 서부 개척 마을의 건물 유형을 따른다. */
 export interface BuildingStyle {
-  roof: 'red' | 'brown' | 'olive' | 'tan';
+  /**
+   * falsefront: 박공지붕 앞에 높은 가짜 정면을 세운 목조 상점.
+   * flat: 난간벽을 두른 평지붕. 벽돌 은행과 어도비 건물.
+   * barn: 박공 벽이 그대로 드러나는 마구간.
+   * cabin: 가짜 정면이 없는 작은 집과 작업장.
+   */
+  form: 'falsefront' | 'flat' | 'barn' | 'cabin';
+  stories: 1 | 2;
+  roof: 'shingle' | 'tin' | 'tar';
+  /** 가게 종류. 문과 창, 딸린 물건이 달라진다. */
+  trade: 'saloon' | 'bank' | 'store' | 'jail' | 'livery' | 'smithy' | 'hotel' | 'shop';
+  /** 보도 위를 덮는 차양. 2층 건물에서는 발코니가 된다. */
+  awning: boolean;
   chimney: boolean;
-  /** 길 쪽을 향한 면에 문과 창, 나무 보도를 단다. */
-  front: boolean;
+}
+
+/** 길을 막지 않는 마을 시설물. */
+export interface Decor {
+  kind: 'pole' | 'rail' | 'grave' | 'woodpile';
+  x: number;
+  y: number;
+  /** 가로대의 길이처럼 종류마다 뜻이 다른 치수. */
+  size: number;
 }
 
 /** 길을 막는 물체. 사각형 바닥을 차지한다. */
@@ -47,6 +68,8 @@ export interface Rect {
 /** 지나다닐 수 있는 덤불. 총알은 통과하고, 불에는 탄다. */
 export interface Bush {
   id: number;
+  /** creosote: 크레오소트 덤불, pear: 프리클리페어 선인장, grass: 마른 풀, ocotillo: 오코티요. */
+  kind: 'creosote' | 'pear' | 'grass' | 'ocotillo';
   x: number;
   y: number;
   size: number;
@@ -259,6 +282,7 @@ export interface World {
   particles: Particle[];
   obstacles: Rect[];
   bushes: Bush[];
+  decor: Decor[];
   decals: Decal[];
   fires: Fire[];
   horse: Vec;

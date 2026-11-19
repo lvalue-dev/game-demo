@@ -98,6 +98,7 @@ export function createWorld(
     particles: [],
     obstacles: map.obstacles,
     bushes: map.bushes,
+    decor: map.decor,
     decals: [],
     fires: [],
     horse: { ...HORSE },
@@ -295,6 +296,11 @@ function spray(w: World, o: Rect, at: Vec, amount: number): void {
       burst(w, at.x, at.y, '#e6cfa6', 3 * amount, 60, 7, 'smoke');
       emit(w, 'hitStone');
       break;
+    case 'brick':
+      burst(w, at.x, at.y, '#b4614a', 4 * amount, 140, 4, 'chunk');
+      burst(w, at.x, at.y, '#c98a76', 3 * amount, 60, 7, 'smoke');
+      emit(w, 'hitStone');
+      break;
     case 'stone':
       burst(w, at.x, at.y, '#a39c90', 3 * amount, 150, 3.5, 'chunk');
       burst(w, at.x, at.y, '#fff1b8', 3 * amount, 240, 2, 'spark');
@@ -308,7 +314,7 @@ function spray(w: World, o: Rect, at: Vec, amount: number): void {
       burst(w, at.x, at.y, '#6a9a55', 5 * amount, 140, 5, 'leaf');
       emit(w, 'hitPlant');
       break;
-    case 'tnt':
+    case 'powder':
       burst(w, at.x, at.y, '#fff1b8', 6 * amount, 260, 2, 'spark');
       break;
   }
@@ -334,7 +340,7 @@ function destroyObstacle(w: World, o: Rect): void {
   w.obstacles.splice(index, 1);
   const c = centerOf(o);
   switch (o.kind) {
-    case 'tnt':
+    case 'powder':
       // 화약통은 주인 없는 폭발을 일으킨다. 곁에 있으면 누구든 다치고, 옆의 통도 따라 터진다.
       w.bombs.push({
         sx: c.x, sy: c.y, tx: c.x, ty: c.y, elapsed: 0, flight: 0, fuse: 0.12, radius: 92, damage: 3, owner: 'neutral',
@@ -347,6 +353,12 @@ function destroyObstacle(w: World, o: Rect): void {
       // 쏟아진 물이 근처의 불을 끈다.
       w.fires = w.fires.filter((f) => dist(f, c) > 95);
       emit(w, 'splash');
+      emit(w, 'break');
+      break;
+    case 'hay':
+      // 건초는 흩어지며 불이 붙는다.
+      burst(w, c.x, c.y, '#dcbc5c', 22, 200, 7, 'shard');
+      ignite(w, c.x, c.y, 24, 4);
       emit(w, 'break');
       break;
     case 'cactus':
@@ -870,6 +882,10 @@ function explode(w: World, b: Bomb): void {
       o.hp -= 6;
       if (o.hp <= 0) destroyObstacle(w, o);
       else addMark(w, o, near, 'scorch', 8);
+    } else if (o.kind === 'tree') {
+      // 나무는 쓰러지지 않지만 잎에 불이 붙는다.
+      burst(w, near.x, near.y - 20, '#6a9a55', 10, 160, 5, 'leaf');
+      ignite(w, near.x, near.y, 24, 4, 24);
     }
   }
   // 식물: 덤불은 불타 재가 된다.

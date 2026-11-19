@@ -15,13 +15,18 @@ export interface Tone {
 export const INK = '#2a1a10';
 export const SHADOW = 'rgba(52, 30, 16, 0.3)';
 
-export const MATERIAL: Record<Material | 'water' | 'cloth' | 'gold' | 'dark' | 'glass', Tone> = {
+export const MATERIAL: Record<Material | 'water' | 'cloth' | 'gold' | 'dark' | 'glass' | 'red' | 'straw' | 'paint', Tone> = {
   wood: { top: '#a8794a', side: '#7a5230', light: '#c79a66' },
   adobe: { top: '#dcb98e', side: '#b38c61', light: '#efd6b0' },
   stone: { top: '#a8a195', side: '#7d776d', light: '#c6c0b4' },
   metal: { top: '#737a83', side: '#4c5158', light: '#a5acb5' },
   plant: { top: '#6f9f58', side: '#48733e', light: '#8fbd76' },
-  tnt: { top: '#c23a2e', side: '#861f18', light: '#e3675a' },
+  powder: { top: '#5b4636', side: '#3b2b20', light: '#7a6150' },
+  brick: { top: '#b4614a', side: '#8f4332', light: '#cf7f66' },
+  red: { top: '#c23a2e', side: '#861f18', light: '#e3675a' },
+  straw: { top: '#dcbc5c', side: '#b29038', light: '#f0d884' },
+  // 가짜 정면에 칠한 흰 회칠. 세월에 바랜 색이다.
+  paint: { top: '#e6dcc6', side: '#cfc2a6', light: '#f6efdf' },
   water: { top: '#78b3c4', side: '#4d8696', light: '#a6d6e2' },
   cloth: { top: '#ecdfc4', side: '#c4b594', light: '#fbf3e0' },
   gold: { top: '#dea320', side: '#a86a00', light: '#f6d67a' },
@@ -29,12 +34,65 @@ export const MATERIAL: Record<Material | 'water' | 'cloth' | 'gold' | 'dark' | '
   glass: { top: '#ffd978', side: '#e0a93a', light: '#fff1c2' },
 };
 
-export const ROOF: Record<'red' | 'brown' | 'olive' | 'tan', Tone> = {
-  red: { top: '#a94f38', side: '#7d3526', light: '#c66d54' },
-  brown: { top: '#8d6238', side: '#684625', light: '#a97d4f' },
-  olive: { top: '#84825a', side: '#5f5d3e', light: '#a19f74' },
-  tan: { top: '#b28b5c', side: '#86663f', light: '#cba878' },
+/** 지붕 재료: 나무 널(shingle), 골함석(tin), 타르를 바른 평지붕(tar). */
+export const ROOF: Record<'shingle' | 'tin' | 'tar', Tone> = {
+  shingle: { top: '#9a8162', side: '#6f5b43', light: '#b39a7a' },
+  tin: { top: '#a3abad', side: '#757e80', light: '#c3cacc' },
+  tar: { top: '#5c5149', side: '#3f3731', light: '#73675e' },
 };
+
+/**
+ * 박공지붕. 용마루가 남북으로 뻗으면(ns) 서쪽 경사면은 밝고 동쪽은 어둡게, 남쪽으로 박공 벽 삼각형이 보인다.
+ * 동서로 뻗으면(ew) 남쪽 경사면이 밝게 보인다. lift는 처마 높이, rise는 처마에서 용마루까지의 높이.
+ */
+export function gable(
+  ctx: Ctx, x: number, y: number, w: number, d: number, lift: number, rise: number,
+  roof: Tone, wall: Tone, axis: 'ns' | 'ew',
+): void {
+  const top = y - lift;
+  const poly = (points: [number, number][], fill: string): void => {
+    ctx.beginPath();
+    points.forEach(([px, py], i) => (i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)));
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    outline(ctx);
+    ctx.stroke();
+  };
+  ctx.save();
+  if (axis === 'ns') {
+    const mid = x + w / 2;
+    poly([[x, top], [mid, top - rise], [mid, top + d - rise], [x, top + d]], roof.top);
+    poly([[mid, top - rise], [x + w, top], [x + w, top + d], [mid, top + d - rise]], roof.side);
+    poly([[x, top + d], [mid, top + d - rise], [x + w, top + d]], wall.side);
+    // 지붕널 줄
+    ctx.strokeStyle = 'rgba(42, 26, 16, 0.22)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 1; i < 5; i++) {
+      const f = i / 5;
+      for (const sx of [x + (w / 2) * f, x + w - (w / 2) * f]) {
+        ctx.moveTo(sx, top - rise * f);
+        ctx.lineTo(sx, top + d - rise * f);
+      }
+    }
+    ctx.stroke();
+  } else {
+    const ridge = top + d / 2 - rise;
+    poly([[x, top], [x + w, top], [x + w, ridge], [x, ridge]], roof.side);
+    poly([[x, ridge], [x + w, ridge], [x + w, top + d], [x, top + d]], roof.top);
+    ctx.strokeStyle = 'rgba(42, 26, 16, 0.22)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 1; i < 5; i++) {
+      const sy = ridge + ((top + d - ridge) * i) / 5;
+      ctx.moveTo(x, sy);
+      ctx.lineTo(x + w, sy);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 
 const outline = (ctx: Ctx, width = 1.5): void => {
   ctx.strokeStyle = INK;
@@ -95,6 +153,8 @@ export function cylinder(ctx: Ctx, cx: number, cy: number, r: number, h: number,
   ctx.ellipse(cx, cy - h, r, ry, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
+  // 가는 원통에는 밝은 모서리를 그릴 자리가 없다.
+  if (r < 5) return;
   ctx.strokeStyle = tone.light;
   ctx.lineWidth = 1.5;
   ctx.beginPath();

@@ -1,11 +1,14 @@
 import { WORLD_H, WORLD_W } from './game/map.ts';
 import { ENEMY_DEFS, ESCAPE_TIME, HORSE_REACH, LOOT_REACH, PLAYER_R, heatLevel, quotaMet } from './game/sim.ts';
-import type { Bomb, Bush, Decal, Enemy, Loot, Particle, Pickup, Rect, Vec, World } from './game/types.ts';
+import type { Bomb, Decal, Enemy, Loot, Particle, Pickup, Rect, Vec, World } from './game/types.ts';
 import type { Stick } from './input.ts';
 import {
-  ENEMY_KITS, INK, MATERIAL, PLAYER_KIT, ROOF, SHADOW, box, cylinder, fallenFigure, figure, groundShadow,
+  ENEMY_KITS, INK, MATERIAL, PLAYER_KIT, SHADOW, box, cylinder, fallenFigure, figure, groundShadow,
 } from './kit.ts';
 import type { Ctx, Tone } from './kit.ts';
+import {
+  awningBaseY, buildingTop, drawAwning, drawBuilding, drawBush, drawDecor, drawProp, drawWires, hasAwning,
+} from './town.ts';
 
 // 캔버스 안의 색은 CSS 토큰과 같은 팔레트를 쓴다.
 const C = {
@@ -25,9 +28,6 @@ const C = {
 
 const SACK: Tone = { top: '#c9a36a', side: '#a07c48', light: '#e0c08c' };
 const HIDE: Tone = { top: '#8a5a36', side: '#5f3b20', light: '#a8744a' };
-const CHARRED: Tone = { top: '#3a302a', side: '#241d19', light: '#4d4038' };
-/** 지붕 두께. 건물 높이 위에 얹힌다. */
-const ROOF_H = 7;
 
 /** 조작부나 정보판이 덮고 있어서 게임 화면으로 쓰지 못하는 가장자리 폭. */
 export interface Insets {
@@ -129,7 +129,12 @@ export function draw(ctx: Ctx, view: View, world: World, sticks: Stick[], time: 
 
   // 서 있는 것들은 남쪽에 있는 것이 북쪽 것을 가리도록 아래쪽부터 차례로 그린다.
   const items: { y: number; paint: () => void }[] = [];
-  for (const o of world.obstacles) items.push({ y: o.y + o.h, paint: () => drawObstacle(ctx, o, time) });
+  for (const o of world.obstacles) {
+    items.push({ y: o.y + o.h, paint: () => drawObstacle(ctx, o, time) });
+    // 차양은 그 아래 선 사람보다 나중에 그려야 사람이 차양 밑에 들어간 것처럼 보인다.
+    if (hasAwning(o)) items.push({ y: awningBaseY(o), paint: () => drawAwning(ctx, o) });
+  }
+  for (const d of world.decor) items.push({ y: d.y + 2, paint: () => drawDecor(ctx, d) });
   for (const b of world.bushes) items.push({ y: b.y + 5, paint: () => drawBush(ctx, b) });
   for (const l of world.loots) if (!l.taken) items.push({ y: l.y + 11, paint: () => drawLoot(ctx, l, time) });
   for (const k of world.pickups) items.push({ y: k.y, paint: () => drawPickup(ctx, k, time) });
@@ -139,6 +144,7 @@ export function draw(ctx: Ctx, view: View, world: World, sticks: Stick[], time: 
   items.sort((a, b) => a.y - b.y);
   for (const item of items) item.paint();
   drawFence(ctx, WORLD_H - 4);
+  drawWires(ctx, world.decor);
 
   drawFireGlow(ctx, world);
   drawBullets(ctx, world);
@@ -285,11 +291,18 @@ function drawDecal(ctx: Ctx, d: Decal): void {
 
 function drawObstacle(ctx: Ctx, o: Rect, time: number): void {
   const cx = o.x + o.w / 2;
-  groundShadow(ctx, o.x, o.y, o.w, o.h, o.kind === 'building' ? o.tall + ROOF_H : o.tall);
+  if (o.kind === 'building') {
+    groundShadow(ctx, o.x, o.y, o.w, o.h, buildingTop(o));
+    drawBuilding(ctx, o, time);
+    drawMarks(ctx, o, buildingTop(o));
+    return;
+  }
+  if (o.kind !== 'tree' && o.kind !== 'windmill') groundShadow(ctx, o.x, o.y, o.w, o.h, o.tall);
+  if (drawProp(ctx, o, time)) {
+    drawMarks(ctx, o, o.tall);
+    return;
+  }
   switch (o.kind) {
-    case 'building':
-      drawBuilding(ctx, o, time);
-      return;
     case 'crate':
       box(ctx, o.x, o.y, o.w, o.h, o.tall, MATERIAL.wood);
       ctx.strokeStyle = INK;
@@ -303,31 +316,17 @@ function drawObstacle(ctx: Ctx, o: Rect, time: number): void {
       ctx.lineTo(o.x + o.w / 2, o.y + o.h);
       ctx.stroke();
       break;
-    case 'barrel':
-    case 'tnt': {
-      const tone = o.kind === 'tnt' ? MATERIAL.tnt : MATERIAL.wood;
+    case 'barrel': {
       const cy = o.y + o.h / 2;
       const r = o.w / 2;
-      cylinder(ctx, cx, cy, r, o.tall, tone);
+      cylinder(ctx, cx, cy, r, o.tall, MATERIAL.wood);
       // 통을 조이는 쇠테
-      ctx.strokeStyle = o.kind === 'tnt' ? INK : MATERIAL.metal.side;
+      ctx.strokeStyle = MATERIAL.metal.side;
       ctx.lineWidth = 2;
       for (const t of [0.3, 0.72]) {
         ctx.beginPath();
         ctx.ellipse(cx, cy - o.tall * t, r, r * 0.62, 0, 0.05, Math.PI - 0.05);
         ctx.stroke();
-      }
-      if (o.kind === 'tnt') {
-        ctx.fillStyle = C.paper;
-        ctx.font = '700 8px "IBM Plex Sans KR", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('TNT', cx, cy - o.tall * 0.42 + r * 0.5);
-        // 도화선 불씨
-        ctx.fillStyle = Math.floor(time * 6) % 2 === 0 ? C.goldLight : C.fire;
-        ctx.beginPath();
-        ctx.arc(cx + 3, cy - o.tall - 3, 2.2, 0, Math.PI * 2);
-        ctx.fill();
       }
       break;
     }
@@ -350,92 +349,12 @@ function drawObstacle(ctx: Ctx, o: Rect, time: number): void {
       lifted(ctx, 5, () => box(ctx, o.x, o.y, o.w, o.h, o.tall - 5, MATERIAL.wood, 16));
       lifted(ctx, o.tall, () => box(ctx, o.x + 8, o.y + 4, o.w - 30, o.h - 8, 13, MATERIAL.cloth, 14));
       break;
-    case 'cactus':
-      lifted(ctx, 8, () => box(ctx, o.x - 5, o.y + 3, 6, 6, 9, MATERIAL.plant));
-      box(ctx, o.x + 2, o.y + 2, 8, 8, o.tall, MATERIAL.plant, 8);
-      lifted(ctx, 5, () => box(ctx, o.x + 11, o.y + 3, 6, 6, 11, MATERIAL.plant));
-      break;
     case 'rock':
       box(ctx, o.x, o.y, o.w, o.h, o.tall, MATERIAL.stone);
       lifted(ctx, o.tall, () => box(ctx, o.x + 4, o.y + 3, o.w - 11, o.h - 6, 5, MATERIAL.stone));
       break;
   }
   drawMarks(ctx, o, o.tall);
-}
-
-function drawBuilding(ctx: Ctx, o: Rect, time: number): void {
-  const style = o.style ?? { roof: 'brown', chimney: false, front: false };
-  const walls = o.material === 'adobe' ? MATERIAL.adobe : MATERIAL.wood;
-  const cx = o.x + o.w / 2;
-  const faceTop = o.y + o.h - o.tall;
-
-  // 벽
-  box(ctx, o.x, o.y, o.w, o.h, o.tall, walls, o.material === 'adobe' ? 0 : 13);
-
-  // 남쪽 벽의 창과 문
-  const windows = Math.max(2, Math.floor(o.w / 64));
-  for (let i = 0; i < windows; i++) {
-    const wx = o.x + ((i + 0.5) * o.w) / windows - 8;
-    if (style.front && Math.abs(wx + 8 - cx) < 22) continue;
-    ctx.fillStyle = MATERIAL.glass.top;
-    ctx.fillRect(wx, faceTop + 7, 16, 12);
-    ctx.fillStyle = MATERIAL.glass.light;
-    ctx.fillRect(wx + 2, faceTop + 9, 5, 3);
-    ctx.strokeStyle = INK;
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(wx, faceTop + 7, 16, 12);
-    ctx.beginPath();
-    ctx.moveTo(wx + 8, faceTop + 7);
-    ctx.lineTo(wx + 8, faceTop + 19);
-    ctx.stroke();
-  }
-  if (style.front) {
-    // 나무 보도, 문, 기둥, 등불
-    box(ctx, o.x + 6, o.y + o.h, o.w - 12, 16, 3, MATERIAL.wood, 14);
-    ctx.fillStyle = MATERIAL.dark.top;
-    ctx.fillRect(cx - 10, faceTop + 6, 20, o.tall - 6);
-    ctx.strokeStyle = INK;
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(cx - 10, faceTop + 6, 20, o.tall - 6);
-    ctx.fillStyle = MATERIAL.gold.top;
-    ctx.fillRect(cx + 4, faceTop + 18, 3, 3);
-    for (const px of [o.x + 10, o.x + o.w - 15]) box(ctx, px, o.y + o.h + 9, 5, 5, 22, MATERIAL.wood);
-    const glow = ctx.createRadialGradient(cx, o.y + o.h + 6, 0, cx, o.y + o.h + 6, 38);
-    glow.addColorStop(0, 'rgba(255, 214, 110, ' + (0.42 + Math.sin(time * 9 + o.x) * 0.05) + ')');
-    glow.addColorStop(1, 'rgba(255, 214, 110, 0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(cx - 40, o.y + o.h - 34, 80, 80);
-  }
-
-  // 지붕과 그 위의 부품
-  const roof = ROOF[style.roof];
-  lifted(ctx, o.tall, () => {
-    box(ctx, o.x - 5, o.y - 5, o.w + 10, o.h + 10, ROOF_H, roof);
-    // 지붕널과 용마루
-    ctx.strokeStyle = 'rgba(42, 26, 16, 0.22)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let y = o.y + 6; y < o.y + o.h + 5; y += 12) {
-      ctx.moveTo(o.x - 5, y - ROOF_H);
-      ctx.lineTo(o.x + o.w + 5, y - ROOF_H);
-    }
-    ctx.stroke();
-    ctx.fillStyle = roof.side;
-    ctx.fillRect(o.x - 5, o.y + o.h / 2 - ROOF_H - 2, o.w + 10, 4);
-    if (style.chimney) lifted(ctx, ROOF_H, () => box(ctx, o.x + o.w - 44, o.y + 18, 16, 16, 12, MATERIAL.stone, 8));
-    if (o.label) {
-      lifted(ctx, ROOF_H, () => {
-        const sy = o.y + o.h - 30;
-        box(ctx, cx - 44, sy, 88, 22, 4, MATERIAL.cloth);
-        ctx.fillStyle = INK;
-        ctx.font = '700 15px "IBM Plex Sans KR", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(o.label!, cx, sy + 8);
-      });
-    }
-  });
-  drawMarks(ctx, o, o.tall + ROOF_H);
 }
 
 /** 총알구멍과 그을음. 남쪽 가장자리에 맞은 것은 옆면에, 나머지는 윗면에 그린다. */
@@ -459,18 +378,6 @@ function drawMarks(ctx: Ctx, o: Rect, topLift: number): void {
       ctx.fill();
     }
   }
-}
-
-function drawBush(ctx: Ctx, b: Bush): void {
-  const s = b.size;
-  if (b.burnt) {
-    box(ctx, b.x - 5 * s, b.y - 2, 5 * s, 4 * s, 3, CHARRED);
-    box(ctx, b.x + 1, b.y, 4 * s, 4 * s, 4, CHARRED);
-    return;
-  }
-  box(ctx, b.x - 10 * s, b.y - 3, 9 * s, 7 * s, 6 * s, MATERIAL.plant);
-  box(ctx, b.x + 3 * s, b.y, 8 * s, 6 * s, 5 * s, MATERIAL.plant);
-  box(ctx, b.x - 3 * s, b.y - 5, 11 * s, 8 * s, 9 * s, MATERIAL.plant);
 }
 
 // ---------- 돈, 말 ----------
@@ -566,7 +473,7 @@ function drawHorse(ctx: Ctx, world: World, time: number): void {
   lifted(ctx, 9, () => {
     box(ctx, h.x - 30 + sway * 0.3, h.y - 2, 8, 4, 8, MATERIAL.dark);
     box(ctx, h.x - 22, h.y - 8, 42, 16, 13, HIDE);
-    lifted(ctx, 13, () => box(ctx, h.x - 8, h.y - 8, 16, 16, 3, MATERIAL.tnt));
+    lifted(ctx, 13, () => box(ctx, h.x - 8, h.y - 8, 16, 16, 3, MATERIAL.red));
     lifted(ctx, 5, () => {
       box(ctx, h.x + 18, h.y - 6, 15, 12, 14, HIDE);
       lifted(ctx, 14, () => box(ctx, h.x + 16, h.y - 2, 12, 4, 3, MATERIAL.dark));
@@ -730,12 +637,12 @@ function drawBomb(ctx: Ctx, b: Bomb, time: number): void {
   ctx.save();
   ctx.translate(x, y - height - 4);
   ctx.rotate(t < 1 ? time * 14 : 0.4);
-  ctx.fillStyle = MATERIAL.tnt.top;
+  ctx.fillStyle = MATERIAL.red.top;
   ctx.strokeStyle = INK;
   ctx.lineWidth = 1.5;
   ctx.fillRect(-9, -4, 18, 8);
   ctx.strokeRect(-9, -4, 18, 8);
-  ctx.fillStyle = MATERIAL.tnt.side;
+  ctx.fillStyle = MATERIAL.red.side;
   ctx.fillRect(-9, 1, 18, 3);
   ctx.fillStyle = Math.floor(time * 30) % 2 === 0 ? C.goldLight : C.fire;
   ctx.beginPath();
