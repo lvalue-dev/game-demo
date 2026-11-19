@@ -16,7 +16,7 @@ export interface PackedModel {
   textures: PackedTexture[];
   /** auto면 생김새를 보고 방향을 맞추고, manual이면 turn과 shift만 따른다. */
   fit: 'auto' | 'manual';
-  /** 가장 긴 쪽의 길이(미터). */
+  /** 총구에서 손잡이 뒤끝까지의 길이(미터). manual일 때는 가장 긴 쪽의 길이. */
   size: number;
   /** 맞춘 뒤 더 돌릴 각도(도)와 옮길 거리(미터). */
   turn: [number, number, number];
@@ -74,8 +74,6 @@ export async function loadModel(packed: PackedModel, env: THREE.Texture | null):
   });
   return gltf.scene;
 }
-
-const AXES = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
 
 /** 모델의 꼭짓점들을 지금 놓인 자세 그대로 모은다. 많으면 솎아 낸다. */
 function points(model: THREE.Object3D): THREE.Vector3[] {
@@ -136,70 +134,69 @@ export function fitGun(model: THREE.Object3D, packed: PackedModel, front: number
   holder.add(pivot);
   if (packed.fit === 'auto') {
     // 모델이 비스듬히 놓여 있어도 되도록, 상자가 아니라 꼭짓점들이 퍼진 모양에서 축을 찾는다.
-    const [wide, deep] = spread(points(model));
-    const flat = points(model).map((p) => [p.dot(wide), p.dot(deep)] as const);
-    // 옆모습을 가장 꼭 맞게 감싸는 직사각형의 긴 변이 총열 방향이다.
-    let best = { area: Infinity, angle: 0, long: true };
-    for (let deg = 0; deg < 180; deg++) {
+    const cloud = points(model);
+    const [wide, deep] = spread(cloud);
+    const flat = cloud.map((p) => [p.dot(wide), p.dot(deep)] as const);
+    // 총열은 한쪽 끝으로 길고 가늘게 뻗어 있다. 옆모습을 한 바퀴 돌려 가며,
+    // 그 방향 끝자락 30%가 가장 가늘고 전체는 가장 긴 방향을 찾는다. 그쪽이 총구다.
+    let best = { score: 0, angle: 0 };
+    for (let deg = 0; deg < 360; deg++) {
       const c = Math.cos((deg * Math.PI) / 180);
       const sn = Math.sin((deg * Math.PI) / 180);
-      let lo1 = Infinity;
-      let hi1 = -Infinity;
-      let lo2 = Infinity;
-      let hi2 = -Infinity;
-      for (const [u, v] of flat) {
-        const a1 = u * c + v * sn;
-        const a2 = -u * sn + v * c;
-        lo1 = Math.min(lo1, a1);
-        hi1 = Math.max(hi1, a1);
-        lo2 = Math.min(lo2, a2);
-        hi2 = Math.max(hi2, a2);
-      }
-      const area = (hi1 - lo1) * (hi2 - lo2);
-      if (area < best.area) best = { area, angle: (deg * Math.PI) / 180, long: hi1 - lo1 >= hi2 - lo2 };
-    }
-    const first = wide.clone().multiplyScalar(Math.cos(best.angle)).addScaledVector(deep, Math.sin(best.angle));
-    const second = wide.clone().multiplyScalar(-Math.sin(best.angle)).addScaledVector(deep, Math.cos(best.angle));
-    // 긴 쪽 → z, 그다음 → y, 얇은 쪽 → x.
-    const z = best.long ? first : second;
-    const y = best.long ? second : first;
-    const x = new THREE.Vector3().crossVectors(y, z);
-    pivot.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z)).invert();
-    let cloud = points(pivot);
-    let bounds = new THREE.Box3().setFromPoints(cloud);
-    const mid = (bounds.min.z + bounds.max.z) / 2;
-    const span = (side: (p: THREE.Vector3) => boolean): { height: number; centre: number } => {
       let lo = Infinity;
       let hi = -Infinity;
-      let sum = 0;
-      let n = 0;
-      for (const p of cloud) {
-        if (!side(p)) continue;
-        lo = Math.min(lo, p.y);
-        hi = Math.max(hi, p.y);
-        sum += p.y;
-        n++;
+      for (const [u, v] of flat) {
+        const t = u * c + v * sn;
+        lo = Math.min(lo, t);
+        hi = Math.max(hi, t);
       }
-      return { height: hi - lo, centre: n > 0 ? sum / n : 0 };
-    };
-    // 키가 큰 절반(손잡이 쪽)이 뒤(+z)로 가야 한다.
-    if (span((p) => p.z < mid).height > span((p) => p.z >= mid).height) {
-      pivot.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(AXES[1]!, Math.PI));
-      cloud = points(pivot);
+      const edge = hi - (hi - lo) * 0.3;
+      let thinLo = Infinity;
+      let thinHi = -Infinity;
+      for (const [u, v] of flat) {
+        if (u * c + v * sn < edge) continue;
+        const side = -u * sn + v * c;
+        thinLo = Math.min(thinLo, side);
+        thinHi = Math.max(thinHi, side);
+      }
+      const score = (hi - lo) / (thinHi - thinLo + (hi - lo) * 0.01);
+      if (score > best.score) best = { score, angle: (deg * Math.PI) / 180 };
     }
-    // 손잡이는 아래로 처진다: 뒤쪽 절반의 무게중심이 앞쪽(총열)보다 낮아야 한다.
-    bounds = new THREE.Box3().setFromPoints(cloud);
-    const middle = (bounds.min.z + bounds.max.z) / 2;
-    if (span((p) => p.z >= middle).centre > span((p) => p.z < middle).centre) {
-      pivot.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(AXES[2]!, Math.PI));
+    const muzzle = wide.clone().multiplyScalar(Math.cos(best.angle)).addScaledVector(deep, Math.sin(best.angle));
+    const up = wide.clone().multiplyScalar(-Math.sin(best.angle)).addScaledVector(deep, Math.cos(best.angle));
+    // 손잡이는 아래로 처진다: 뒤쪽 절반의 무게중심이 총열보다 낮아야 한다.
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const p of cloud) {
+      lo = Math.min(lo, p.dot(muzzle));
+      hi = Math.max(hi, p.dot(muzzle));
     }
+    let rear = 0;
+    let rearCount = 0;
+    let tip = 0;
+    let tipCount = 0;
+    for (const p of cloud) {
+      const t = (p.dot(muzzle) - lo) / (hi - lo);
+      if (t < 0.5) {
+        rear += p.dot(up);
+        rearCount++;
+      } else if (t > 0.7) {
+        tip += p.dot(up);
+        tipCount++;
+      }
+    }
+    if (rear / Math.max(1, rearCount) > tip / Math.max(1, tipCount)) up.negate();
+    // 총구 → -z, 위 → +y.
+    const z = muzzle.clone().negate();
+    const x = new THREE.Vector3().crossVectors(up, z);
+    pivot.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, up, z)).invert();
   }
   const rad = packed.turn.map((d) => (d * Math.PI) / 180) as [number, number, number];
   holder.quaternion.setFromEuler(new THREE.Euler(rad[0], rad[1], rad[2]));
   // 크기를 맞추고, 총구 끝과 윗면을 제자리에 댄다.
   let box = new THREE.Box3().setFromPoints(points(holder));
   const size = box.getSize(new THREE.Vector3());
-  holder.scale.setScalar(packed.size / Math.max(size.x, size.y, size.z));
+  holder.scale.setScalar(packed.size / (packed.fit === 'auto' ? size.z : Math.max(size.x, size.y, size.z)));
   box = new THREE.Box3().setFromPoints(points(holder));
   holder.position.set(
     -(box.min.x + box.max.x) / 2 + packed.shift[0],

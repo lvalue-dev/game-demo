@@ -1,4 +1,4 @@
 {
-  "revolver": { "file": "revolver.glb", "fit": "auto", "size": 0.264, "turn": [0, 0, 0], "shift": [0, 0, 0] },
-  "hold": { "file": "hold.glb", "fit": "auto", "size": 0.5, "turn": [0, 0, 0], "shift": [0, 0, 0] }
+  "revolver": { "file": "revolver-old.glb", "fit": "auto", "size": 0.264, "turn": [0, 0, 0], "shift": [0, 0, 0] },
+  "hold": { "file": "hold.glb", "fit": "manual", "size": 0.5, "turn": [0, 0, 0], "shift": [0, 0, 0] }
 }

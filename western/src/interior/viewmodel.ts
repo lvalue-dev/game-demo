@@ -699,6 +699,7 @@ export function createViewmodel(renderer: THREE.WebGLRenderer): Viewmodel {
 
   // 밖에서 만든 모델로 갈아 끼운다. hold는 팔과 손이 총을 쥔 채로 한 덩어리인 모델이고,
   // revolver는 총만 있는 모델이다. 총구 끝과 윗면을 코드로 깎은 총의 자리에 맞춘다.
+  // 모델을 풀지 못하면 코드로 깎은 총이 그대로 남는다.
   const models = packedModels();
   const FRONT = -0.19;
   const TOP = 0.037;
@@ -708,13 +709,13 @@ export function createViewmodel(renderer: THREE.WebGLRenderer): Viewmodel {
       parts.visible = false;
       right.group.visible = false;
       gun.add(fitGun(model, { ...packed, fit: 'manual' }, FRONT, TOP));
-    });
+    }).catch(() => undefined);
   } else if (models.revolver) {
     const packed = models.revolver;
     void loadModel(packed, env).then((model) => {
       parts.visible = false;
       gun.add(fitGun(model, packed, FRONT, TOP));
-    });
+    }).catch(() => undefined);
   }
 
   const blend = (a: THREE.Vector3[], b: THREE.Vector3[], t: number): THREE.Vector3[] => a.map((p, i) => p.clone().lerp(b[i]!, t));

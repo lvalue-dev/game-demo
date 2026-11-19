@@ -11,6 +11,8 @@ import { dedup, prune, simplify, textureCompress, weld } from '@gltf-transform/f
 import { MeshoptDecoder, MeshoptSimplifier } from 'meshoptimizer';
 import sharp from 'sharp';
 
+/** 줄이는 방식을 바꾸면 올린다. 예전 방식으로 줄여 둔 결과를 다시 쓰지 않게 한다. */
+const PACK_VERSION = 2;
 const DEFAULTS = { fit: 'auto', size: 0.264, turn: [0, 0, 0], shift: [0, 0, 0], triangles: 40000, texture: 1024 };
 /** 재질의 질감 칸. 게임 쪽 이름과 짝을 맞춘다. */
 const SLOTS = [
@@ -56,7 +58,8 @@ async function pack(path, opts) {
       clear(material);
     }
   });
-  await doc.transform(prune());
+  // 질감을 뗐다고 해서 질감 좌표까지 지워지면 안 된다.
+  await doc.transform(prune({ keepAttributes: true }));
   const glb = Buffer.from(await io.writeBinary(doc)).toString('base64');
   return { glb, textures, fit: opts.fit, size: opts.size, turn: opts.turn, shift: opts.shift, from: Math.round(triangles) };
 }
@@ -72,7 +75,7 @@ export async function packModels(projectRoot) {
     const path = `${dir}/${opts.file}`;
     if (!(await exists(path))) continue;
     const info = await stat(path);
-    const key = createHash('sha1').update(JSON.stringify([opts, info.size, info.mtimeMs])).digest('hex');
+    const key = createHash('sha1').update(JSON.stringify([PACK_VERSION, opts, info.size, info.mtimeMs])).digest('hex');
     const cached = `${dir}/.cache/${name}.json`;
     if (await exists(cached)) {
       const hit = JSON.parse(await readFile(cached, 'utf8'));
