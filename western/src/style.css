@@ -115,9 +115,9 @@ p, h1, dl, dd { margin: 0; }
 
 .pad {
   position: absolute;
-  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
-  width: 68px;
-  height: 68px;
+  bottom: calc(196px + env(safe-area-inset-bottom, 0px));
+  width: 64px;
+  height: 64px;
   border: 3px solid var(--ink);
   border-radius: 50%;
   background: rgb(243 227 191 / 0.85);
@@ -128,8 +128,12 @@ p, h1, dl, dd { margin: 0; }
   -webkit-user-select: none;
 }
 .pad:active { background: var(--gold-bright); }
-.pad-dash { left: calc(50% + 6px); }
-.pad-bomb { right: calc(50% + 6px); background: rgb(179 38 30 / 0.85); color: var(--paper); }
+.pad-dash { right: max(16px, env(safe-area-inset-right, 0px)); }
+.pad-bomb {
+  right: calc(max(16px, env(safe-area-inset-right, 0px)) + 76px);
+  background: rgb(179 38 30 / 0.85);
+  color: var(--paper);
+}
 .pad-bomb.is-waiting { background: rgb(243 227 191 / 0.5); color: var(--ink-soft); border-style: dashed; }
 
 .hud-foot { gap: 10px; }

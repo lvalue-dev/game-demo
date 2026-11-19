@@ -69,8 +69,9 @@ function beginJob(): void {
 
 function setScreen(next: Screen): void {
   screen = next;
+  controls.reset();
   const playing = next === 'play';
-  const touch = controls.usesTouch() || matchMedia('(pointer: coarse)').matches;
+  const touch = controls.usesTouch();
   hud.hidden = !(playing || next === 'perk');
   panel.hidden = playing;
   dashButton.hidden = !(playing && touch);
@@ -100,7 +101,7 @@ function titlePanel(): string {
       <h1>먼지골 한탕</h1>
       <p class="poster-lead">마을 곳곳의 돈을 털어 상납금을 채우고, 말에게 돌아가 달아나라. 오래 머물수록 수배 등급이 올라 추격대가 늘어난다.</p>
       <dl class="howto">
-        <div><dt>폰</dt><dd>화면 왼쪽을 끌어 이동, 오른쪽을 끌어 조준하면 바로 쏜다. 아래 버튼으로 구르고 폭탄을 던진다.</dd></div>
+        <div><dt>폰</dt><dd>왼쪽 스틱으로 이동한다. 쏘고 싶은 곳을 화면에서 누르거나, 오른쪽 스틱을 밀면 그 방향으로 쏜다. 오른쪽 버튼으로 구르고 폭탄을 던진다.</dd></div>
         <div><dt>PC</dt><dd>WASD 이동, 마우스 조준과 사격, 스페이스 구르기, 오른쪽 클릭이나 E로 다이너마이트, R 재장전.</dd></div>
         <div><dt>요령</dt><dd>적은 가는 방향을 앞질러 쏜다. 붉은 선이 굵어지는 순간 방향을 틀거나 굴러라. 다이너마이트는 금고도 터뜨린다.</dd></div>
       </dl>

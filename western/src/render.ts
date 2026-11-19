@@ -922,15 +922,24 @@ function drawArrows(ctx: CanvasRenderingContext2D, view: View, world: World, tim
 }
 
 function drawSticks(ctx: CanvasRenderingContext2D, sticks: Stick[]): void {
+  ctx.font = '700 13px "IBM Plex Sans KR", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
   for (const s of sticks) {
-    ctx.strokeStyle = 'rgba(42, 26, 16, 0.45)';
-    ctx.lineWidth = 2;
+    ctx.fillStyle = 'rgba(243, 227, 191, 0.35)';
+    ctx.strokeStyle = s.active ? 'rgba(42, 26, 16, 0.75)' : 'rgba(42, 26, 16, 0.45)';
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.arc(s.originX, s.originY, s.radius, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(42, 26, 16, 0.4)';
-    ctx.beginPath();
-    ctx.arc(s.originX + s.dx * s.radius, s.originY + s.dy * s.radius, 20, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = s.active ? 'rgba(42, 26, 16, 0.6)' : 'rgba(42, 26, 16, 0.3)';
+    ctx.beginPath();
+    ctx.arc(s.originX + s.dx * s.radius, s.originY + s.dy * s.radius, 22, 0, Math.PI * 2);
+    ctx.fill();
+    if (!s.active) {
+      ctx.fillStyle = 'rgba(42, 26, 16, 0.8)';
+      ctx.fillText(s.side === 'move' ? '이동' : '조준', s.originX, s.originY);
+    }
   }
 }
