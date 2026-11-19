@@ -1,0 +1,19 @@
+{
+  "name": "hantang-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "한탕(가제) 덱빌딩 로그라이크 규칙 검증용 웹 프로토타입",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --serve",
+    "test": "node --test \"tests/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "sim": "node scripts/sim.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.8.0"
+  }
+}
