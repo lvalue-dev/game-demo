@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PLAYER_KIT } from '../kit.ts';
+import { fitGun, loadModel, packedModels } from './models.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 const ease = (t: number): number => t * t * (3 - 2 * t);
@@ -490,9 +491,12 @@ export function createViewmodel(renderer: THREE.WebGLRenderer): Viewmodel {
 
   const gun = new THREE.Group();
   root.add(gun);
+  // 코드로 깎은 총. 밖에서 만든 모델이 있으면 이것 대신 그 모델을 보여 준다.
+  const parts = new THREE.Group();
+  gun.add(parts);
 
   // 몸통: 얇은 윗띠, 탄창이 들어가는 창, 앞으로 둥글게 말린 아래턱, 뒤로 흘러내리는 등
-  gun.add(profile(
+  parts.add(profile(
     [
       [0.048, 0.0355], [-0.01, 0.0358], [-0.017, 0.035], [-0.023, 0.032], [-0.028, 0.027], [-0.032, 0.02], [-0.0345, 0.01],
       [-0.036, 0], [-0.0365, -0.011], [-0.018, -0.022], [0.034, -0.022], [0.04, -0.0205], [0.0445, -0.017], [0.047, -0.011], [0.048, -0.004],
@@ -506,37 +510,37 @@ export function createViewmodel(renderer: THREE.WebGLRenderer): Viewmodel {
   const gateNub = new THREE.Mesh(new THREE.SphereGeometry(0.003, 10, 8), cased);
   gateNub.scale.set(0.8, 1.6, 1);
   gateNub.position.set(0.0205, 0.012, 0.014);
-  gun.add(shield, gateNub);
+  parts.add(shield, gateNub);
 
   // 총열: 총구로 갈수록 살짝 가늘다. 끝에 총구 구멍과 둥글린 테두리.
-  gun.add(tube(0.008, 0.0069, 0.142, blued, 0, 0.021, -0.119, 32));
-  gun.add(tube(0.0092, 0.0086, 0.006, blued, 0, 0.021, -0.05, 32));
+  parts.add(tube(0.008, 0.0069, 0.142, blued, 0, 0.021, -0.119, 32));
+  parts.add(tube(0.0092, 0.0086, 0.006, blued, 0, 0.021, -0.05, 32));
   const bore = new THREE.Mesh(new THREE.CircleGeometry(0.0047, 20), hole);
   bore.position.set(0, 0.021, -0.1903);
   bore.rotation.y = Math.PI;
   const crown = new THREE.Mesh(new THREE.TorusGeometry(0.0058, 0.0011, 8, 24), blued);
   crown.position.set(0, 0.021, -0.19);
-  gun.add(bore, crown);
+  parts.add(bore, crown);
   // 가늠쇠와 윗띠를 따라 판 가늠자 홈
-  gun.add(profile([[0.17, 0.0272], [0.187, 0.0272], [0.1855, 0.0345], [0.181, 0.0372], [0.177, 0.0372]], 0.0022, blued, { bevel: 0.0004 }));
+  parts.add(profile([[0.17, 0.0272], [0.187, 0.0272], [0.1855, 0.0345], [0.181, 0.0372], [0.177, 0.0372]], 0.0022, blued, { bevel: 0.0004 }));
   const notch = new THREE.Mesh(new THREE.BoxGeometry(0.0026, 0.0016, 0.05), dark);
   notch.position.set(0, 0.0352, -0.014);
-  gun.add(notch);
+  parts.add(notch);
   // 총열 오른쪽 아래의 탄피 밀대 집과 손잡이, 탄창 축의 머리
-  gun.add(tube(0.0046, 0.0046, 0.098, blued, 0.0088, 0.0098, -0.097, 18));
+  parts.add(tube(0.0046, 0.0046, 0.098, blued, 0.0088, 0.0098, -0.097, 18));
   const rodTip = new THREE.Mesh(new THREE.SphereGeometry(0.0046, 12, 10), blued);
   rodTip.position.set(0.0088, 0.0098, -0.146);
   const rodHead = new THREE.Mesh(new THREE.SphereGeometry(0.0055, 14, 10), blued);
   rodHead.scale.set(0.45, 1, 1.25);
   rodHead.position.set(0.0138, 0.0098, -0.128);
-  gun.add(rodTip, rodHead);
-  gun.add(tube(0.0031, 0.0031, 0.014, blued, 0, 0.009, -0.052, 14));
+  parts.add(rodTip, rodHead);
+  parts.add(tube(0.0031, 0.0031, 0.014, blued, 0, 0.009, -0.052, 14));
   const pinHead = new THREE.Mesh(new THREE.SphereGeometry(0.0038, 12, 10), blued);
   pinHead.position.set(0, 0.009, -0.06);
-  gun.add(pinHead);
+  parts.add(pinHead);
   // 몸통의 나사
   for (const [y, z] of [[-0.013, -0.03], [-0.004, 0.026], [-0.015, 0.004], [0.004, -0.043]] as const) {
-    gun.add(stud(0.0021, blued, -0.0081, y, z), stud(0.0021, blued, 0.0081, y, z));
+    parts.add(stud(0.0021, blued, -0.0081, y, z), stud(0.0021, blued, 0.0081, y, z));
   }
 
   // 탄창: 앞쪽 절반에 홈 여섯 줄이 파여 있고, 앞면에 약실 구멍, 뒷면에 탄피 바닥이 보인다.
@@ -572,7 +576,7 @@ export function createViewmodel(renderer: THREE.WebGLRenderer): Viewmodel {
     stop.rotation.z = b - Math.PI / 2;
     cylinder.add(chamber, tube(0.0059, 0.0059, 0.0012, brass, cx, cy, 0.0214, 16), tube(0.0022, 0.0022, 0.0014, cased, cx, cy, 0.0215, 10), stop);
   }
-  gun.add(cylinder);
+  parts.add(cylinder);
 
   // 공이치기: 아래의 축을 중심으로 뒤로 젖혀진다. 엄지가 걸리는 돌기에는 미끄럼 방지 홈이 있다.
   const hammer = new THREE.Group();
@@ -590,7 +594,7 @@ export function createViewmodel(renderer: THREE.WebGLRenderer): Viewmodel {
     groove.rotation.x = -0.437;
     hammer.add(groove);
   }
-  gun.add(hammer);
+  parts.add(hammer);
 
   // 방아쇠울(넓적한 띠)과 방아쇠
   const guard = new THREE.Mesh(new THREE.TorusGeometry(0.0165, 0.0019, 10, 30, Math.PI), blued);
@@ -600,18 +604,18 @@ export function createViewmodel(renderer: THREE.WebGLRenderer): Viewmodel {
   const trigger = new THREE.Group();
   trigger.position.set(0, -0.021, 0.006);
   trigger.add(profile([[0.002, 0], [0.0046, -0.006], [0.0038, -0.0125], [0.0012, -0.0135], [0.0018, -0.006], [-0.001, 0]], 0.0046, blued, { bevel: 0.0006 }));
-  gun.add(guard, trigger);
+  parts.add(guard, trigger);
 
   // 손잡이: 쇠 뼈대 양옆에 호두나무 판을 댄다. 아래로 갈수록 뒤로 휜다.
   const gripOutline: P2[] = [
     [-0.016, -0.022], [-0.036, -0.011], [-0.047, -0.03], [-0.06, -0.06], [-0.074, -0.092],
     [-0.06, -0.105], [-0.04, -0.104], [-0.03, -0.08], [-0.022, -0.05],
   ];
-  gun.add(profile(gripOutline, 0.0135, blued, { smooth: true, bevel: 0.0012 }));
+  parts.add(profile(gripOutline, 0.0135, blued, { smooth: true, bevel: 0.0012 }));
   const inset = gripOutline.map(([a, b]): P2 => [-0.043 + (a + 0.043) * 0.86, -0.064 + (b + 0.064) * 0.88]);
-  gun.add(profile(inset, 0.0275, walnut, { smooth: true, bevel: 0.0048 }));
+  parts.add(profile(inset, 0.0275, walnut, { smooth: true, bevel: 0.0048 }));
   for (const x of [-0.0142, 0.0142]) {
-    gun.add(stud(0.0034, brass, x, -0.035, 0.04), stud(0.0022, blued, x, -0.064, 0.05));
+    parts.add(stud(0.0034, brass, x, -0.035, 0.04), stud(0.0022, blued, x, -0.064, 0.05));
   }
 
   // ---------- 손 ----------
@@ -692,6 +696,26 @@ export function createViewmodel(renderer: THREE.WebGLRenderer): Viewmodel {
   root.traverse((n) => {
     if ((n as THREE.Mesh).isMesh) n.castShadow = false;
   });
+
+  // 밖에서 만든 모델로 갈아 끼운다. hold는 팔과 손이 총을 쥔 채로 한 덩어리인 모델이고,
+  // revolver는 총만 있는 모델이다. 총구 끝과 윗면을 코드로 깎은 총의 자리에 맞춘다.
+  const models = packedModels();
+  const FRONT = -0.19;
+  const TOP = 0.037;
+  if (models.hold) {
+    const packed = models.hold;
+    void loadModel(packed, null).then((model) => {
+      parts.visible = false;
+      right.group.visible = false;
+      gun.add(fitGun(model, { ...packed, fit: 'manual' }, FRONT, TOP));
+    });
+  } else if (models.revolver) {
+    const packed = models.revolver;
+    void loadModel(packed, env).then((model) => {
+      parts.visible = false;
+      gun.add(fitGun(model, packed, FRONT, TOP));
+    });
+  }
 
   const blend = (a: THREE.Vector3[], b: THREE.Vector3[], t: number): THREE.Vector3[] => a.map((p, i) => p.clone().lerp(b[i]!, t));
   let lastIndex = -1;

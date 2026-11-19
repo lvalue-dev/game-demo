@@ -6,6 +6,7 @@ import { context } from 'esbuild';
 import { createServer } from 'node:http';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
+import { packModels } from './models.mjs';
 
 // 저장소 안의 게임별 설정. `--project western`처럼 폴더 이름으로 고른다.
 const PROJECTS = {
@@ -45,7 +46,10 @@ async function assemble(js) {
     `<link rel="stylesheet" href="${FONTS}">`,
     `<style>\n${css}</style>`,
   ].join('\n');
-  const script = `<script>\n${js}</script>`;
+  // 넣어 둔 3D 모델이 있으면 가볍게 줄여 페이지에 함께 싣는다.
+  const models = await packModels(root);
+  const data = Object.keys(models).length > 0 ? `<script>window.__MODELS=${JSON.stringify(models)}</script>\n` : '';
+  const script = `${data}<script>\n${js}</script>`;
 
   const page = `${head}\n${body}${script}\n`;
   const full = `<!doctype html>
