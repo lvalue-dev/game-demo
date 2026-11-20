@@ -145,13 +145,35 @@ button {
 
 .board__row {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
+  align-items: center;
+  gap: 12px;
+}
+
+.crest {
+  flex: none;
+  display: block;
+}
+
+.crest__edge {
+  stroke: var(--ink);
+  stroke-opacity: 0.55;
+  stroke-width: 1.4;
+}
+
+.board .crest__edge {
+  stroke: var(--on-board);
+  stroke-opacity: 0.8;
+}
+
+.team {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .board__club {
   min-width: 0;
+  flex: 1;
 }
 
 .board__kicker {
@@ -411,6 +433,17 @@ button {
   text-align: center;
   align-items: center;
   padding-block: 14px;
+}
+
+.choice--club {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  align-items: center;
+}
+
+.choice--club .crest {
+  grid-row: span 2;
 }
 
 .choice--danger .choice__label {

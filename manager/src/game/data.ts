@@ -13,6 +13,10 @@ export interface LeagueMeta {
   money: number;
   up: ClubLeagueId | null;
   down: ClubLeagueId | null;
+  /** 한 시즌에 윗리그로 올라가는 팀 수. 그만큼 윗리그에서 내려온다. */
+  promote: number;
+  /** 다음 시즌 대륙 클럽 대회에 나가는 팀 수. */
+  conti: number;
   /** 우승 트로피의 무게. 커리어 점수에 쓴다. */
   weight: number;
   blurb: string;
@@ -20,24 +24,81 @@ export interface LeagueMeta {
 
 export const CLUB_LEAGUES: ClubLeagueId[] = ['kr5', 'kr4', 'kr3', 'kr2', 'kr1', 'eu2', 'eu1'];
 
+// 리그의 이름과 참가 구단은 2026년(잉글랜드는 2026-27 시즌) 실제 구성을 따른다.
+// 일정 방식은 단순화했다: 모든 팀이 홈과 원정으로 한 번씩 만나고, 승격과 강등은 정해진 수만큼 바로 이뤄진다.
+// K5리그는 전국에 수백 팀이 있는 동호인 리그라서 가상의 권역 하나를 지어냈다.
 export const LEAGUES: Record<ClubLeagueId, LeagueMeta> = {
-  kr5: { name: '동네 리그', short: '5부', region: 'kr', level: 32, rep: 0, money: 3, up: 'kr4', down: null, weight: 1, blurb: '주말 아침 운동장을 빌려 뛰는 아마추어 리그' },
-  kr4: { name: '지역 리그', short: '4부', region: 'kr', level: 42, rep: 10, money: 30, up: 'kr3', down: 'kr5', weight: 2, blurb: '직장과 축구를 병행하는 선수들의 리그' },
-  kr3: { name: '전국 리그', short: '3부', region: 'kr', level: 51, rep: 22, money: 150, up: 'kr2', down: 'kr4', weight: 4, blurb: '세미프로. 버스로 전국을 돈다' },
-  kr2: { name: '챌린저스 리그', short: '2부', region: 'kr', level: 60, rep: 36, money: 800, up: 'kr1', down: 'kr3', weight: 7, blurb: '프로의 문턱. 중계 카메라가 온다' },
-  kr1: { name: '프리미어 디비전', short: '1부', region: 'kr', level: 69, rep: 50, money: 4000, up: null, down: 'kr2', weight: 15, blurb: '국내 최고 무대' },
-  eu2: { name: '유럽 2부 리그', short: '유럽 2부', region: 'eu', level: 74, rep: 62, money: 15000, up: 'eu1', down: null, weight: 12, blurb: '유럽 무대의 입구' },
-  eu1: { name: '유럽 엘리트 리그', short: '유럽 1부', region: 'eu', level: 85, rep: 76, money: 60000, up: null, down: 'eu2', weight: 40, blurb: '세계에서 가장 강한 리그' },
+  kr5: { name: 'K5리그', short: 'K5', region: 'kr', level: 32, rep: 0, money: 3, up: 'kr4', down: null, promote: 2, conti: 0, weight: 1, blurb: '주말 아침 운동장을 빌려 뛰는 동호인 리그' },
+  kr4: { name: 'K4리그', short: 'K4', region: 'kr', level: 42, rep: 10, money: 30, up: 'kr3', down: 'kr5', promote: 2, conti: 0, weight: 2, blurb: '직장과 축구를 병행하는 선수가 많은 세미프로 리그' },
+  kr3: { name: 'K3리그', short: 'K3', region: 'kr', level: 51, rep: 22, money: 150, up: 'kr2', down: 'kr4', promote: 2, conti: 0, weight: 4, blurb: '세미프로 최상위. 버스로 전국을 돈다' },
+  kr2: { name: 'K리그2', short: 'K리그2', region: 'kr', level: 60, rep: 36, money: 800, up: 'kr1', down: 'kr3', promote: 2, conti: 0, weight: 7, blurb: '프로 2부. 승격 경쟁이 가장 치열한 무대' },
+  kr1: { name: 'K리그1', short: 'K리그1', region: 'kr', level: 69, rep: 50, money: 4000, up: null, down: 'kr2', promote: 0, conti: 2, weight: 15, blurb: '국내 최고 무대' },
+  eu2: { name: 'EFL 챔피언십', short: '잉글랜드 2부', region: 'eu', level: 74, rep: 62, money: 15000, up: 'eu1', down: null, promote: 3, conti: 0, weight: 12, blurb: '46경기를 치르는 잉글랜드 2부. 유럽 무대의 입구' },
+  eu1: { name: '프리미어리그', short: '잉글랜드 1부', region: 'eu', level: 85, rep: 76, money: 60000, up: null, down: 'eu2', promote: 0, conti: 4, weight: 40, blurb: '세계에서 가장 치열한 리그' },
 };
 
-export const CLUB_NAMES: Record<ClubLeagueId, string[]> = {
-  kr5: ['새벽 조기회', '삼거리 정육점 FC', '행복 부동산 유나이티드', '퇴근 후 FC', '무릎 조심 FC', '월요병 시티', '명진 철물 FC', '동네 형들 FC', '주말만 FC', '숙취 유나이티드'],
-  kr4: ['솔밭 시민구단', '강나루 FC', '은행골 유나이티드', '큰바위 FC', '달맞이 시티', '버들 FC', '새터 유나이티드', '물안개 FC', '느티 SC', '갯마을 FC'],
-  kr3: ['한빛 FC', '가람 유나이티드', '노을 SC', '다온 FC', '마루 시티', '누리 FC', '바람개비 FC', '온새미 유나이티드', '푸른솔 FC', '해오름 시티'],
-  kr2: ['미르 FC', '청운 유나이티드', '백호 FC', '서라벌 시티', '한울 FC', '아리 유나이티드', '금강 FC', '두물 시티', '새별 FC', '가온 SC'],
-  kr1: ['한성 유나이티드', '동해 아이언즈', '남도 FC', '중앙 시티', '서해 웨이브', '태백 마운틴', '한라 FC', '수도 레인저스', '달구벌 FC', '빛고을 유나이티드'],
-  eu2: ['FC 그라우베르크', '유니온 생클레르', '애슬레틱 던모어', 'SC 블라우하임', 'AS 포르토피노', 'CD 알메이라', 'FK 스벤보르', '로코모티브 카르파', 'RKS 비스와', '하버 로버스'],
-  eu1: ['FC 발렌토', '노르트하펜 SV', 'AC 몬테비앙카', '레알 카스텔로', '올림피크 마르소', '로열 켄싱턴', '디나모 벨그라브', '스포르팅 리베이라', 'FC 바젤란트', '아틀레티코 솔라나'],
+export interface ClubSeed {
+  name: string;
+  /** 리그 평균 대비 전력. +6이면 우승 후보, -5면 강등 후보. */
+  edge: number;
+  /** 팀 색 두 가지. 비어 있으면 이름에서 정해진다. 문장(배지)을 그릴 때만 쓴다. */
+  colors: [string, string] | null;
+  /** 문장의 무늬. 0 띠, 1 반반, 2 세로 줄무늬, 3 가로 줄무늬, 4 사선, 5 꺾쇠. */
+  pattern?: number;
+}
+
+const c = (name: string, edge: number, a?: string, b?: string, pattern?: number): ClubSeed =>
+  ({ name, edge, colors: a && b ? [a, b] : null, pattern });
+
+export const CLUB_SEEDS: Record<ClubLeagueId, ClubSeed[]> = {
+  // 가상의 동호인 팀들.
+  kr5: [
+    c('새벽 조기회', 5), c('동네 형들 FC', 4), c('명진 철물 FC', 2), c('삼거리 정육점 FC', 1), c('퇴근 후 FC', 0),
+    c('행복 부동산 유나이티드', -1), c('주말만 FC', -2), c('무릎 조심 FC', -3), c('월요병 시티', -4), c('숙취 유나이티드', -5),
+  ],
+  kr4: [
+    c('연천FC', 3), c('서울중랑축구단', 3), c('남양주시민축구단', 2), c('평창유나이티드', 2), c('진주시민축구단', 1),
+    c('거제시민축구단', 1), c('평택시티즌', 0), c('기장군민축구단', -1), c('서산FC', -2), c('제천시민축구단', -2),
+    c('금산인삼FC', -3), c('진천HR FC', -3), c('함안군민축구단', -4),
+  ],
+  kr3: [
+    c('시흥시민축구단', 4), c('대전코레일', 4), c('경주한수원', 3), c('부산교통공사', 2), c('포천시민축구단', 2),
+    c('창원FC', 1), c('FC강릉', 0), c('춘천시민축구단', 0), c('울산시민축구단', -1), c('FC목포', -1),
+    c('전북 현대 N', -1, '#0a8a4a', '#12325c'), c('양평FC', -2), c('여주FC', -3), c('당진시민축구단', -3),
+  ],
+  kr2: [
+    c('수원 삼성', 5, '#1458a8', '#d21f2b', 1), c('대구FC', 4, '#6fb1e4', '#123a6e'), c('수원FC', 4, '#d21f2b', '#1c3f94', 4),
+    c('서울 이랜드', 3, '#14284f', '#c7a03a'), c('부산 아이파크', 2, '#d21f2b', '#ffffff'), c('전남 드래곤즈', 2, '#f6c800', '#1a1a1a'),
+    c('성남FC', 1, '#1a1a1a', '#ffffff'), c('김포FC', 0, '#0e7a3f', '#f2c200'), c('경남FC', 0, '#c8102e', '#1a1a1a'),
+    c('충남아산', 0, '#0d3ea3', '#f6c800'), c('천안시티', -2, '#5cbfe6', '#0d3d9c'), c('충북청주', -2, '#1c2d6e', '#c7a03a'),
+    c('화성FC', -2, '#f26a1b', '#1a1a1a'), c('안산 그리너스', -3, '#0e8f4d', '#ffffff'), c('김해FC2008', -3),
+    c('용인FC', -3), c('파주 프런티어', -4),
+  ],
+  kr1: [
+    c('FC서울', 4, '#b5191a', '#1a1a1a', 2), c('전북 현대', 4, '#0a8a4a', '#12325c'), c('울산 HD', 4, '#0f4fa3', '#f5b100'),
+    c('포항 스틸러스', 2, '#d21f2b', '#1a1a1a', 3), c('강원FC', 2, '#f27d1b', '#0f6b3a'), c('대전하나시티즌', 2, '#7a1f3d', '#0e9c93'),
+    c('인천 유나이티드', 0, '#0d4a9a', '#1a1a1a', 2), c('김천 상무', 0, '#d21f2b', '#1b3668'), c('제주SK', -1, '#f26a1b', '#d21f2b'),
+    c('FC안양', -2, '#5f2a9c', '#ffffff'), c('광주FC', -3, '#f6c800', '#b5121b'), c('부천FC 1995', -4, '#b31b1b', '#1a1a1a'),
+  ],
+  eu2: [
+    c('웨스트햄', 5, '#7a263a', '#3bb3e6'), c('울버햄프턴', 4, '#f9b413', '#231f20'), c('번리', 4, '#6c1d45', '#99d6ea'),
+    c('사우샘프턴', 3, '#d71920', '#ffffff', 2), c('미들즈브러', 3, '#e11b22', '#ffffff'), c('셰필드 유나이티드', 2, '#ee2737', '#ffffff', 2),
+    c('버밍엄 시티', 2, '#183b90', '#ffffff'), c('밀월', 2, '#001d5e', '#ffffff'), c('노리치 시티', 1, '#fff200', '#00a650'),
+    c('웨스트브롬', 1, '#122f67', '#ffffff', 2), c('렉섬', 1, '#d71920', '#ffffff'), c('왓퍼드', 0, '#fbee23', '#ed2127'),
+    c('스토크 시티', 0, '#e03a3e', '#ffffff', 2), c('스완지 시티', 0, '#ffffff', '#1a1a1a'), c('브리스틀 시티', 0, '#e21a23', '#ffffff'),
+    c('QPR', -1, '#1d5ba4', '#ffffff', 3), c('더비 카운티', -1, '#ffffff', '#1a1a1a'), c('블랙번', -1, '#009ee0', '#ffffff', 1),
+    c('프레스턴', -2, '#ffffff', '#000055'), c('포츠머스', -2, '#001489', '#ffffff'), c('찰턴', -2, '#d4021d', '#ffffff'),
+    c('카디프 시티', -3, '#0070b5', '#ffffff'), c('볼턴', -4, '#ffffff', '#263c7e'), c('링컨 시티', -4, '#d6001c', '#ffffff', 2),
+  ],
+  eu1: [
+    c('맨체스터 시티', 6, '#6cabdd', '#1c2c5b'), c('아스널', 6, '#ef0107', '#ffffff'), c('리버풀', 6, '#c8102e', '#00b2a9'),
+    c('첼시', 4, '#034694', '#ffffff'), c('뉴캐슬', 3, '#241f20', '#ffffff', 2), c('토트넘', 3, '#ffffff', '#132257'),
+    c('맨체스터 유나이티드', 3, '#da291c', '#fbe122'), c('애스턴 빌라', 3, '#670e36', '#95bfe5'), c('브라이턴', 1, '#0057b8', '#ffffff', 2),
+    c('노팅엄 포리스트', 1, '#dd0000', '#ffffff'), c('본머스', 1, '#da291c', '#1a1a1a', 2), c('크리스털 팰리스', 1, '#1b458f', '#c4122e', 2),
+    c('브렌트퍼드', 0, '#e30613', '#ffffff', 2), c('풀럼', 0, '#ffffff', '#1a1a1a'), c('에버턴', 0, '#003399', '#ffffff'),
+    c('리즈 유나이티드', -2, '#ffffff', '#1d428a'), c('선덜랜드', -2, '#eb172b', '#ffffff', 2), c('코번트리 시티', -4, '#59cbe8', '#ffffff'),
+    c('입스위치 타운', -4, '#3a64a3', '#ffffff'), c('헐 시티', -5, '#f5a12d', '#1a1a1a', 2),
+  ],
 };
 
 /** 국가대표팀. 첫 줄이 감독이 맡을 수 있는 팀이다. 전력 수치는 게임용으로 정한 것이다. */
@@ -136,6 +197,6 @@ export function won(m: number): string {
   return `${Math.round(v * 100).toLocaleString('ko-KR')}만 원`;
 }
 
-export const START_YEAR = 2027;
+export const START_YEAR = 2026;
 export const START_AGE = 35;
 export const RETIRE_AGE = 65;

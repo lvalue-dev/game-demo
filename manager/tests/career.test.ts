@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { act, createGame, legacyScore } from '../src/game/career.ts';
-import { LINEUP } from '../src/game/data.ts';
+import { CLUB_LEAGUES, CLUB_SEEDS, LINEUP } from '../src/game/data.ts';
 import { rand } from '../src/game/rng.ts';
 import { roundRobin, sortTable } from '../src/game/world.ts';
 import type { Game } from '../src/game/types.ts';
@@ -35,12 +35,26 @@ test('일정은 모든 팀이 서로 홈과 원정으로 한 번씩 만나게 �
   assert.ok([...seen.values()].every((n) => n === 1));
 });
 
+test('팀 수가 홀수면 라운드마다 한 팀이 쉬고, 그래도 모두가 서로 두 번 만난다', () => {
+  const ids = Array.from({ length: 17 }, (_, i) => i);
+  const rounds = roundRobin(ids, true);
+  assert.equal(rounds.length, 34);
+  const played = new Map<number, number>();
+  for (const round of rounds) {
+    assert.equal(round.length, 8);
+    for (const id of round.flat()) played.set(id, (played.get(id) ?? 0) + 1);
+  }
+  assert.ok(ids.every((id) => played.get(id) === 32), 'K리그2처럼 17팀이면 팀당 32경기다');
+});
+
 test('커리어는 첫 팀을 고르는 장면에서 시작한다', () => {
   const g = createGame(1, '테스트', 'analyst');
   assert.equal(g.phase, 'offers');
   assert.equal(g.scene.choices.length, 3);
   assert.equal(g.manager.attrs.tactics, 10);
-  assert.equal(g.clubs.filter((c) => !c.nation).length, 70);
+  const sizes = Object.fromEntries(CLUB_LEAGUES.map((l) => [l, g.leagues[l].length]));
+  assert.deepEqual(sizes, { kr5: 10, kr4: 13, kr3: 14, kr2: 17, kr1: 12, eu2: 24, eu1: 20 }, '2026년 실제 리그 구성');
+  assert.ok(g.scene.choices.every((c) => g.clubs[c.club!]!.league === 'kr5'), '첫 제안은 동호인 리그에서 온다');
 });
 
 test('같은 시드와 같은 선택이면 같은 커리어가 나온다', () => {
@@ -62,9 +76,9 @@ test('끝까지 돌려도 상태가 망가지지 않는다', () => {
       assert.ok(h.job.budget >= 0, `예산이 음수다: ${h.job.budget}`);
       assert.ok(h.morale >= 0 && h.morale <= 100 && h.cohesion >= 0 && h.cohesion <= 100);
       assert.ok(h.manager.rep >= 0 && h.manager.rep <= 100);
-      for (const league of ['kr5', 'kr4', 'kr3', 'kr2', 'kr1', 'eu2', 'eu1'] as const) {
-        assert.equal(h.leagues[league].length, 10, `${league}의 팀 수가 10이 아니다`);
-        assert.equal(h.tables[league].length, 10);
+      for (const league of CLUB_LEAGUES) {
+        assert.equal(h.leagues[league].length, CLUB_SEEDS[league].length, `${league}의 팀 수가 달라졌다`);
+        assert.equal(h.tables[league].length, CLUB_SEEDS[league].length);
       }
     });
     assert.equal(g.history.length, 30, '35세에 시작해 65세에 정년을 맞는다');

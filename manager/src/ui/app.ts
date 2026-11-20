@@ -5,7 +5,7 @@ import {
 } from '../game/data.ts';
 import { potentialText, ratings } from '../game/squad.ts';
 import { legacyTitle } from '../game/talk.ts';
-import { sortTable, zone } from '../game/world.ts';
+import { dropCount, sortTable, zone } from '../game/world.ts';
 import type { BackgroundId, Block, Club, ClubLeagueId, Game, LeagueId, MatchLine, Phase, Pos } from '../game/types.ts';
 
 type Tab = 'play' | 'table' | 'squad' | 'record';
@@ -61,7 +61,7 @@ export function snapshot(): { game: Game | null } {
 export function start(data: { game?: unknown }): void {
   root = document.getElementById('app') as HTMLElement;
   const saved = (data.game as Game | undefined) ?? load<Game>(SAVE_KEY);
-  game = saved && saved.version === 1 ? saved : null;
+  game = saved && saved.version === 2 ? saved : null;
   root.addEventListener('click', onClick);
   root.addEventListener('input', (e) => {
     const input = e.target as HTMLInputElement;
@@ -144,7 +144,32 @@ function onClick(e: Event): void {
 
 // ---------- 그리기 ----------
 
+let crestCount = 0;
+
+/**
+ * 구단의 문장. 실제 엠블럼이 아니라 팀 색 두 가지와 무늬 번호로 직접 그린 방패다.
+ * 무늬: 0 띠, 1 반반, 2 세로 줄무늬, 3 가로 줄무늬, 4 사선, 5 꺾쇠.
+ */
+function crest(club: Club, size: number): string {
+  const [a, b] = club.colors;
+  const id = `crest${crestCount++}`;
+  const marks = [
+    `<rect x="0" y="0" width="24" height="8" fill="${b}"/>`,
+    `<rect x="12" y="0" width="12" height="28" fill="${b}"/>`,
+    `<rect x="5" y="0" width="4" height="28" fill="${b}"/><rect x="15" y="0" width="4" height="28" fill="${b}"/>`,
+    `<rect x="0" y="6" width="24" height="4.5" fill="${b}"/><rect x="0" y="15" width="24" height="4.5" fill="${b}"/>`,
+    `<path d="M-2 22 L18 -2 L26 -2 L26 4 L4 30 L-2 30 Z" fill="${b}"/>`,
+    `<path d="M0 9 L12 19 L24 9 L24 15 L12 25 L0 15 Z" fill="${b}"/>`,
+  ][club.pattern % 6] as string;
+  return `<svg class="crest" width="${size}" height="${Math.round((size * 28) / 24)}" viewBox="0 0 24 28" aria-hidden="true">
+    <clipPath id="${id}"><path d="M2 2 H22 V14 C22 21 17 25 12 27 C7 25 2 21 2 14 Z"/></clipPath>
+    <g clip-path="url(#${id})"><rect width="24" height="28" fill="${a}"/>${marks}</g>
+    <path class="crest__edge" d="M2 2 H22 V14 C22 21 17 25 12 27 C7 25 2 21 2 14 Z" fill="none"/>
+  </svg>`;
+}
+
 function render(): void {
+  crestCount = 0;
   root.innerHTML = game ? renderGame(game) : renderStart();
 }
 
@@ -154,7 +179,7 @@ function renderStart(): string {
     <header class="board board--start">
       <p class="board__kicker">감독 커리어 시뮬레이션</p>
       <h1 class="brand">터치라인</h1>
-      <p class="board__lede">주말 아침 동네 운동장에서 월드컵 결승 벤치까지. 한 시즌에 열 번쯤 결정하고, 서른 시즌이 지나면 은퇴한다.</p>
+      <p class="board__lede">K5 동호인 팀에서 K리그와 프리미어리그를 거쳐 월드컵 결승 벤치까지. 한 시즌에 열 번쯤 결정하고, 서른 시즌이 지나면 은퇴한다.</p>
     </header>
     <main class="page">
       <form class="create" autocomplete="off">
@@ -185,17 +210,20 @@ function renderStart(): string {
           <li class="hall__row"><span class="hall__score">${h.score}</span><span class="hall__body"><strong>${esc(h.name)}</strong> · ${esc(h.title)}<br><span class="muted">${esc(h.years)} · ${esc(h.best)}</span></span></li>`).join('')}
         </ol>
       </section>` : ''}
-      <p class="fine">구단, 대회, 매체의 이름은 모두 지어낸 것이다. 진행 상황은 이 기기의 브라우저에 저장된다.</p>
+      <p class="fine">K리그와 잉글랜드 리그의 구단은 2026년 실제 구성을 따랐다. 어느 구단이나 리그와도 공식 제휴한 것이 아니며, 문장은 실제 엠블럼이 아니라 팀 색으로 직접 그린 것이다. 게임 속 성적, 사건, 기사, 댓글은 모두 지어낸 것이고, K5리그 팀과 선수, 매체 이름도 가상이다.</p>
+      <p class="fine">진행 상황은 이 기기의 브라우저에 저장된다.</p>
     </main>`;
 }
 
 function renderGame(g: Game): string {
   const club = g.job ? (g.clubs[g.job.club] as Club) : null;
-  const where = club ? (club.nation ? '국가대표팀' : `${LEAGUES[club.league as ClubLeagueId].name} · ${LEAGUES[club.league as ClubLeagueId].short}`) : '무소속';
+  const meta = club && !club.nation ? LEAGUES[club.league as ClubLeagueId] : null;
+  const where = club ? (meta ? (meta.short === meta.name || meta.name.startsWith(meta.short) ? meta.name : `${meta.name} · ${meta.short}`) : '국가대표팀') : '무소속';
   const step = STEPS.findIndex((s) => s.phases.includes(g.phase));
   return `
     <header class="board">
       <div class="board__row">
+        ${club ? crest(club, 40) : ''}
         <div class="board__club">
           <p class="board__kicker">${esc(where)} · ${g.year}</p>
           <h1 class="board__name">${esc(club ? club.name : '터치라인')}</h1>
@@ -223,7 +251,8 @@ function renderScene(g: Game): string {
       ${s.blocks.map((b) => renderBlock(g, b)).join('')}
       <div class="choices">
         ${s.choices.map((c) => `
-          <button type="button" class="choice${c.tone === 'primary' ? ' choice--primary' : c.tone === 'danger' ? ' choice--danger' : ''}${s.choices.length === 1 ? ' choice--solo' : ''}" data-act="${esc(c.id)}"${c.disabled ? ' disabled' : ''}>
+          <button type="button" class="choice${c.tone === 'primary' ? ' choice--primary' : c.tone === 'danger' ? ' choice--danger' : ''}${s.choices.length === 1 ? ' choice--solo' : ''}${c.club !== undefined ? ' choice--club' : ''}" data-act="${esc(c.id)}"${c.disabled ? ' disabled' : ''}>
+            ${c.club !== undefined ? crest(g.clubs[c.club] as Club, 30) : ''}
             <span class="choice__label">${esc(c.label)}</span>
             ${c.detail ? `<span class="choice__detail">${esc(c.detail)}</span>` : ''}
             ${c.disabled ? '<span class="choice__detail">예산이 모자란다</span>' : ''}
@@ -256,7 +285,7 @@ function renderTable(g: Game, league: LeagueId): string {
           const z = zone(league, i + 1, rows.length);
           const gd = r.gf - r.ga;
           return `<tr class="${r.club === mine ? 'is-mine' : ''}${z === 1 ? ' is-up' : z === -1 ? ' is-down' : ''}">
-            <td class="num table__pos">${i + 1}</td><td class="table__team">${esc((g.clubs[r.club] as Club).name)}</td>
+            <td class="num table__pos">${i + 1}</td><td class="table__team"><span class="team">${crest(g.clubs[r.club] as Club, 14)}${esc((g.clubs[r.club] as Club).name)}</span></td>
             <td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td>
             <td class="num">${gd > 0 ? '+' : ''}${gd}</td><td class="num table__pts">${r.pts}</td></tr>`;
         }).join('')}</tbody>
@@ -290,14 +319,21 @@ function renderTables(g: Game): string {
   const label = (id: LeagueId): string => (id === 'intl' ? '대표팀 조' : LEAGUES[id].short);
   return `
     <section class="section">
-      <p class="eyebrow">${g.year} 시즌 · ${g.round}라운드까지</p>
+      <p class="eyebrow">${g.year} 시즌${g.round === 0 ? ' · 개막 전' : g.round === 1 ? ' · 전반기 종료' : ' · 시즌 종료'}</p>
       <h2 class="scene__title">${current === 'intl' ? '대표팀 조별 순위' : esc(LEAGUES[current as ClubLeagueId].name)}</h2>
       <div class="chips" role="group" aria-label="리그 고르기">
         ${options.map((id) => `<button type="button" class="chip${id === current ? ' is-on' : ''}" data-league="${id}" aria-pressed="${id === current}">${esc(label(id))}</button>`).join('')}
       </div>
       ${renderTable(g, current)}
-      ${current !== 'intl' ? `<p class="fine">${esc(LEAGUES[current as ClubLeagueId].blurb)}. 위 두 팀은 ${LEAGUES[current as ClubLeagueId].up ? '승격' : '대륙 대회 진출'}${LEAGUES[current as ClubLeagueId].down ? ', 아래 두 팀은 강등' : ''}.</p>` : ''}
+      ${current !== 'intl' ? `<p class="fine">${esc(zoneNote(current as ClubLeagueId))}</p>` : ''}
     </section>`;
+}
+
+function zoneNote(league: ClubLeagueId): string {
+  const meta = LEAGUES[league];
+  const top = meta.promote > 0 ? `위 ${meta.promote}팀은 ${LEAGUES[meta.up as ClubLeagueId].name}로 승격` : `위 ${meta.conti}팀은 다음 시즌 대륙 대회 진출`;
+  const drop = dropCount(league);
+  return `${meta.blurb}. ${top}${drop > 0 ? `, 아래 ${drop}팀은 강등` : ''}.`;
 }
 
 function renderSquad(g: Game): string {

@@ -93,7 +93,8 @@ const troublemaker = (g: Game): Player => g.squad.find((p) => p.trait === 'rebel
 const keeper = (g: Game): Player => g.squad.find((p) => p.pos === 'GK') as Player;
 const isClub = (g: Game): boolean => !myClub(g).nation;
 const league = (g: Game): ClubLeagueId => myClub(g).league as ClubLeagueId;
-const amateur = (g: Game): boolean => isClub(g) && (league(g) === 'kr5' || league(g) === 'kr4');
+// 가상의 동호인 팀(K5)에서만 동네 축구다운 사건이 일어난다.
+const amateur = (g: Game): boolean => isClub(g) && league(g) === 'kr5';
 const boss = (g: Game): string => (myClub(g).nation ? '협회장' : amateur(g) ? '회장님' : '구단주');
 const money = (g: Game): number => stage(g).money;
 
@@ -327,11 +328,9 @@ export const EVENTS: GameEvent[] = [
   },
   {
     id: 'wages', weight: 3,
-    when: (g) => isClub(g) && ['kr5', 'kr4', 'kr3'].includes(league(g)) && myClub(g).wealth <= 0,
+    when: (g) => isClub(g) && league(g) === 'kr5' && myClub(g).wealth <= 0,
     title: () => '비어 가는 통장',
-    text: (g) => amateur(g)
-      ? '총무가 조용히 다가왔다. 운동장 대관료를 석 달째 못 냈다고 한다. 다음 달부터 구장을 못 쓸 수도 있다.'
-      : '선수들 급여가 두 달째 밀렸다. 고참들이 대표로 감독실에 왔다. "감독님은 아셨습니까?"',
+    text: () => '총무가 조용히 다가왔다. 운동장 대관료를 석 달째 못 냈다고 한다. 다음 달부터 구장을 못 쓸 수도 있다.',
     choices: (g) => [
       {
         id: 'pocket', label: '이적 예산을 헐어 메운다', detail: `예산 ${won(Math.min(g.job!.budget, money(g) * 0.3))}`,
@@ -417,7 +416,7 @@ export const EVENTS: GameEvent[] = [
   },
   {
     id: 'tv', weight: 2,
-    when: (g) => isClub(g) && !amateur(g) && league(g) !== 'kr3',
+    when: (g) => isClub(g) && ['kr2', 'kr1', 'eu2', 'eu1'].includes(league(g)),
     title: () => '다큐멘터리 제안',
     text: () => '방송사가 한 시즌 밀착 다큐멘터리를 찍자고 한다. 제작비 일부가 구단에 들어오고, 라커룸까지 카메라가 들어온다.',
     choices: (g) => [

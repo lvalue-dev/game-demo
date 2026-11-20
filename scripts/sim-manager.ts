@@ -41,7 +41,7 @@ function choose(g: Game, dice: { rng: number }): string {
 
 const gaps: number[][] = [[], [], []];
 const stats = { seasons: 0, sacked: 0, titles: 0, promotions: 0, score: [] as number[], peak: [] as number[], top: {} as Record<string, number>, nation: 0, wc: 0, firstTop: [] as number[] };
-const order = ['5부', '4부', '3부', '2부', '1부', '유럽 2부', '유럽 1부'];
+const order = ['K5', 'K4', 'K3', 'K리그2', 'K리그1', '잉글랜드 2부', '잉글랜드 1부'];
 for (let i = 0; i < runs; i++) {
   const dice = { rng: 9000 + i };
   const g = createGame(1000 + i * 7919, `봇${i}`, BACKGROUND_IDS[i % BACKGROUND_IDS.length]!);
@@ -62,7 +62,7 @@ for (let i = 0; i < runs; i++) {
   stats.top[label] = (stats.top[label] ?? 0) + 1;
   if (g.history.some((h) => h.club.endsWith('대표팀'))) stats.nation++;
   if (g.trophies.some((t) => t.name === '월드컵 우승')) stats.wc++;
-  const idx = g.history.findIndex((h) => h.league === '1부');
+  const idx = g.history.findIndex((h) => h.league === 'K리그1');
   if (idx >= 0) stats.firstTop.push(idx + 1);
 }
 const med = (a: number[]): number => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)] ?? 0;

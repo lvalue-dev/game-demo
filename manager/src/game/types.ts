@@ -39,6 +39,9 @@ export interface Club {
   /** 재정 형편. -5(가난)에서 +5(부자). */
   wealth: number;
   lastPos: number;
+  /** 문장(배지)에 쓰는 두 색과 무늬 번호. */
+  colors: [string, string];
+  pattern: number;
   /** 지난 시즌 성적으로 대륙 클럽 대회 출전권을 땄는지. */
   conti: boolean;
   /** 국가대표팀이면 true. */
@@ -168,6 +171,8 @@ export type Block =
 
 export interface Choice {
   id: string;
+  /** 구단을 고르는 선택지면 그 구단 번호. 문장을 함께 보여 준다. */
+  club?: number;
   label: string;
   detail?: string;
   tone?: 'primary' | 'danger';
@@ -196,7 +201,7 @@ export interface Game {
   leagues: Record<LeagueId, number[]>;
   tables: Record<LeagueId, Row[]>;
   fixtures: Record<LeagueId, [number, number][][]>;
-  /** 지금까지 치른 라운드 수. */
+  /** 이번 시즌에 치른 절반의 수(0, 1, 2). */
   round: number;
   job: Job | null;
   squad: Player[];

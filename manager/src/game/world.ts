@@ -1,5 +1,5 @@
 // 리그와 경기. 모든 구단의 경기를 실제로 돌려 순위표를 만든다.
-import { CLUB_LEAGUES, CLUB_NAMES, LEAGUES, NATIONS, STYLE_IDS } from './data.ts';
+import { CLUB_LEAGUES, CLUB_SEEDS, LEAGUES, NATIONS, STYLE_IDS } from './data.ts';
 import { chance, int, pick, poisson, shuffle, spread } from './rng.ts';
 import type { Club, ClubLeagueId, Game, LeagueId, MatchLine, Row } from './types.ts';
 
@@ -10,16 +10,18 @@ export interface Side {
 
 export const emptyRow = (club: number): Row => ({ club, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0, form: [] });
 
-/** 모든 팀이 서로 한 번(또는 홈과 원정 두 번) 만나는 일정. 팀 수는 짝수여야 한다. */
+/** 모든 팀이 서로 한 번(또는 홈과 원정 두 번) 만나는 일정. 팀 수가 홀수면 라운드마다 한 팀이 쉰다. */
 export function roundRobin(ids: number[], double: boolean): [number, number][][] {
-  const n = ids.length;
-  const ring = [...ids];
+  const REST = -1;
+  const ring = ids.length % 2 === 0 ? [...ids] : [...ids, REST];
+  const n = ring.length;
   const rounds: [number, number][][] = [];
   for (let r = 0; r < n - 1; r++) {
     const round: [number, number][] = [];
     for (let i = 0; i < n / 2; i++) {
       const a = ring[i] as number;
       const b = ring[n - 1 - i] as number;
+      if (a === REST || b === REST) continue;
       // 홈과 원정이 한쪽으로 몰리지 않게 번갈아 배정한다.
       round.push((i === 0 ? r % 2 === 0 : i % 2 === 0) ? [a, b] : [b, a]);
     }
@@ -63,27 +65,45 @@ function apply(row: Row, gf: number, ga: number): void {
   if (row.form.length > 5) row.form.shift();
 }
 
+const PALETTE: [string, string][] = [
+  ['#1f5fa8', '#ffffff'], ['#c62828', '#ffffff'], ['#1b7a46', '#f2c200'], ['#f08a1c', '#1a1a1a'], ['#5b2a86', '#f2c200'],
+  ['#0f8f8f', '#12325c'], ['#1a1a1a', '#e0b400'], ['#8a1c3a', '#9fd3ea'], ['#2c3e75', '#e23b3b'], ['#3d7d1f', '#ffffff'],
+  ['#c7a03a', '#1c2d6e'], ['#e04b8a', '#1a1a1a'],
+];
+
+function hash(text: string): number {
+  let h = 7;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) >>> 0;
+  return h;
+}
+
 export function createClubs(g: Game): void {
   for (const league of CLUB_LEAGUES) {
     const meta = LEAGUES[league];
-    const names = shuffle(g, [...CLUB_NAMES[league]]);
-    g.leagues[league] = names.map((name, i) => {
-      // 리그 안에서도 강팀과 약팀이 고르게 갈린다.
-      const edge = 6 - (12 * i) / (names.length - 1);
+    const seeds = CLUB_SEEDS[league];
+    const ranked = [...seeds].sort((a, b) => b.edge - a.edge);
+    g.leagues[league] = seeds.map((seed) => {
+      const h = hash(seed.name);
       const club: Club = {
-        id: g.clubs.length, name, league,
-        att: meta.level + edge + spread(g, -2, 2), def: meta.level + edge + spread(g, -2, 2),
-        style: pick(g, STYLE_IDS), wealth: Math.round(edge * 0.6 + spread(g, -2, 2)), lastPos: i + 1, conti: false, nation: false, asia: false,
+        id: g.clubs.length, name: seed.name, league,
+        att: meta.level + seed.edge + spread(g, -1.5, 1.5), def: meta.level + seed.edge + spread(g, -1.5, 1.5),
+        style: pick(g, STYLE_IDS), wealth: Math.max(-5, Math.min(5, Math.round(seed.edge * 0.7 + spread(g, -1, 1)))),
+        lastPos: ranked.indexOf(seed) + 1, colors: seed.colors ?? (PALETTE[h % PALETTE.length] as [string, string]),
+        pattern: seed.pattern ?? (seed.colors ? 0 : (h >>> 8) % 6), conti: false, nation: false, asia: false,
       };
+      // 지난 시즌 상위 팀은 첫 시즌부터 대륙 대회에 나간다.
+      club.conti = club.lastPos <= meta.conti;
       g.clubs.push(club);
       return club.id;
     });
   }
   g.leagues.intl = [];
   for (const nation of NATIONS) {
+    const h = hash(nation.name);
     g.clubs.push({
       id: g.clubs.length, name: nation.name, league: 'intl', att: nation.level, def: nation.level,
-      style: pick(g, STYLE_IDS), wealth: 0, lastPos: 0, conti: false, nation: true, asia: nation.asia,
+      style: pick(g, STYLE_IDS), wealth: 0, lastPos: 0, colors: PALETTE[h % PALETTE.length] as [string, string], pattern: 0,
+      conti: false, nation: true, asia: nation.asia,
     });
   }
 }
@@ -166,7 +186,13 @@ export interface Move {
   to: ClubLeagueId;
 }
 
-/** 승격과 강등: 위아래로 이어진 리그끼리 상위 두 팀과 하위 두 팀이 자리를 바꾼다. */
+/** 한 리그에서 강등되는 팀 수. 아랫리그에서 올라오는 수와 같다. */
+export function dropCount(league: ClubLeagueId): number {
+  const down = LEAGUES[league].down;
+  return down ? LEAGUES[down].promote : 0;
+}
+
+/** 승격과 강등: 위아래로 이어진 리그끼리 정해진 수만큼 자리를 바꾼다. */
 export function applyMoves(g: Game): Move[] {
   const moves: Move[] = [];
   const order: Record<string, number[]> = {};
@@ -175,17 +201,16 @@ export function applyMoves(g: Game): Move[] {
     order[league]!.forEach((id, i) => {
       const club = g.clubs[id] as Club;
       club.lastPos = i + 1;
-      // 국내 1부 상위 두 팀과 유럽 1부 상위 세 팀은 다음 시즌 대륙 대회에 나간다.
-      club.conti = (league === 'kr1' && i < 2) || (league === 'eu1' && i < 3);
+      club.conti = i < LEAGUES[league].conti;
     });
   }
   for (const league of CLUB_LEAGUES) {
-    const up = LEAGUES[league].up;
-    if (!up) continue;
+    const meta = LEAGUES[league];
+    if (!meta.up) continue;
     const lower = order[league] as number[];
-    const upper = order[up] as number[];
-    for (const id of lower.slice(0, 2)) moves.push({ club: id, from: league, to: up });
-    for (const id of upper.slice(-2)) moves.push({ club: id, from: up, to: league });
+    const upper = order[meta.up] as number[];
+    for (const id of lower.slice(0, meta.promote)) moves.push({ club: id, from: league, to: meta.up });
+    for (const id of upper.slice(-meta.promote)) moves.push({ club: id, from: meta.up, to: league });
   }
   for (const move of moves) {
     const club = g.clubs[move.club] as Club;
@@ -203,7 +228,7 @@ export function applyMoves(g: Game): Move[] {
 export function zone(league: LeagueId, pos: number, size: number): 1 | 0 | -1 {
   if (league === 'intl') return pos <= 2 ? 1 : 0;
   const meta = LEAGUES[league];
-  if (pos <= 2 && (meta.up || league === 'kr1' || league === 'eu1')) return 1;
-  if (pos > size - 2 && meta.down) return -1;
+  if (pos <= Math.max(meta.promote, meta.conti)) return 1;
+  if (pos > size - dropCount(league)) return -1;
   return 0;
 }

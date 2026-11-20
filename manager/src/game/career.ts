@@ -14,7 +14,7 @@ import {
 import { legacyTitle, reactions } from './talk.ts';
 import type { Mood } from './talk.ts';
 import {
-  applyMoves, createClubs, evolveClubs, playRound, playTie, positionOf, sortTable, startGroup, startLeagues, zone,
+  applyMoves, createClubs, dropCount, evolveClubs, playRound, playTie, positionOf, sortTable, startGroup, startLeagues, zone,
 } from './world.ts';
 import type { Side } from './world.ts';
 import type {
@@ -28,8 +28,9 @@ const round1 = (v: number): number => Math.round(v * 10) / 10;
 /** 평범한 감독이 팀에 더하는 전력. */
 const AVERAGE_MANAGER = 3.5;
 
-const ASIA_CLUBS = ['FC 요코하라', '알 사파 SC', '시드니 하버 FC', '상하이 드래곤', '방콕 타이거스', '테헤란 스타즈', '도하 SC', '멜버른 코스트'];
-const EURO_CLUBS = ['FC 발렌토', '노르트하펜 SV', 'AC 몬테비앙카', '레알 카스텔로', '올림피크 마르소', '로열 켄싱턴', '디나모 벨그라브', '스포르팅 리베이라'];
+// 대륙 대회에서 만나는 상대. 이름만 빌려 쓰고 전력은 라운드에 따라 정한다.
+const ASIA_CLUBS = ['비셀 고베', '가와사키 프론탈레', '산프레체 히로시마', '요코하마 F. 마리노스', '알힐랄', '알나스르', '알아흘리', '알사드', '조호르 다룰 탁짐', '부리람 유나이티드', '상하이 하이강', '멜버른 시티'];
+const EURO_CLUBS = ['레알 마드리드', 'FC 바르셀로나', '아틀레티코 마드리드', '바이에른 뮌헨', '도르트문트', '레버쿠젠', '파리 생제르맹', '인테르', 'AC 밀란', '유벤투스', '나폴리', '벤피카', '포르투', '아약스'];
 
 function blankSeason(): SeasonState {
   return {
@@ -42,7 +43,7 @@ export function createGame(seed: number, name: string, background: BackgroundId)
   const attrs: Record<AttrId, number> = { tactics: 6, lead: 6, youth: 6, deal: 6, eye: 6 };
   for (const [key, value] of Object.entries(BACKGROUNDS[background].bonus)) attrs[key as AttrId] += value as number;
   const g: Game = {
-    rng: seed | 0, version: 1, year: START_YEAR, nextId: 1,
+    rng: seed | 0, version: 2, year: START_YEAR, nextId: 1,
     manager: { name: name.trim() || '김감독', age: START_AGE, background, attrs, rep: 2, peakRep: 2 },
     clubs: [],
     leagues: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
@@ -210,10 +211,10 @@ function beginSeason(g: Game): void {
     const ids = g.leagues[club.league];
     const power = (id: number): number => (g.clubs[id] as Club).att + (g.clubs[id] as Club).def;
     const rank = 1 + ids.filter((id) => id !== club.id && power(id) > power(club.id)).length;
-    job.objective = clamp(rank - (club.wealth >= 3 ? 1 : 0), 1, ids.length - 2);
+    job.objective = clamp(rank - (club.wealth >= 3 ? 1 : 0), 1, ids.length - Math.max(1, dropCount(club.league as ClubLeagueId)));
     job.budget = round1(job.budget + meta.money * (1 + club.wealth * 0.12));
-    g.season.cup = newKnockout(meta.region === 'kr' ? '전국 컵' : '리그 컵', ['32강', '16강', '8강', '4강', '결승']);
-    if (club.conti) g.season.conti = newKnockout(meta.region === 'kr' ? '아시아 챔피언스컵' : '유럽 챔피언스컵', ['16강', '8강', '4강', '결승']);
+    g.season.cup = newKnockout(meta.region === 'kr' ? '코리아컵' : 'FA컵', ['32강', '16강', '8강', '4강', '결승']);
+    if (club.conti) g.season.conti = newKnockout(meta.region === 'kr' ? '아시아 챔피언스리그' : '유럽 챔피언스리그', ['16강', '8강', '4강', '결승']);
   }
   enterStyle(g);
 }
@@ -329,14 +330,16 @@ function recordOf(lines: MatchLine[]): { w: number; d: number; l: number; text: 
 function playHalf(g: Game, half: 1 | 2): MatchLine[] {
   const club = myClub(g);
   const mine: MatchLine[] = [];
-  const from = half === 1 ? 0 : 9;
-  for (let r = from; r < from + 9; r++) {
-    for (const league of CLUB_LEAGUES) {
+  // 리그마다 팀 수가 달라 라운드 수도 다르다. 각 리그의 일정을 절반씩 치른다.
+  for (const league of CLUB_LEAGUES) {
+    const total = g.fixtures[league].length;
+    const split = Math.ceil(total / 2);
+    for (let r = half === 1 ? 0 : split; r < (half === 1 ? split : total); r++) {
       const line = playRound(g, league, r, club.nation ? -1 : club.id, (opp) => side(g, opp, half, false));
       if (line) mine.push(line);
     }
   }
-  g.round = from + 9;
+  g.round = half;
   if (club.nation) {
     const total = g.fixtures.intl.length;
     const kind = g.season.nationYear as NationYear;
@@ -394,7 +397,7 @@ function enterHalf1(g: Game): void {
       : `예선 절반을 치렀다. ${rec.text}, 조 ${pos}위.` });
   } else {
     const gap = job.objective - pos;
-    job.confidence = clamp(job.confidence + clamp(gap * 2, -10, 10), 0, 100);
+    job.confidence = clamp(job.confidence + clamp((gap * 20) / g.leagues[club.league].length, -10, 10), 0, 100);
     blocks.push({ kind: 'text', text: `시즌의 절반이 지났다. ${rec.text}, 리그 ${pos}위. 목표는 ${job.objective}위 이내${gap >= 0 ? '이고, 지금까지는 순조롭다.' : '인데 뒤처져 있다.'}` });
     const cups = [knockoutNote(g.season.cup), knockoutNote(g.season.conti)].filter(Boolean);
     if (cups.length > 0) blocks.push({ kind: 'note', text: cups.join(' · '), tone: 'plain' });
@@ -467,6 +470,8 @@ function finishClubSeason(g: Game, midSack: boolean): void {
   const promoted = z === 1 && !!meta.up;
   const relegated = z === -1;
   const gap = job.objective - pos;
+  // 팀이 많은 리그에서는 한두 계단 차이가 덜 무겁다. 10팀 리그 기준으로 환산한다.
+  const rel = (gap * 10) / size;
   const s = g.season;
   const blocks: Block[] = [];
   let repBonus = 0;
@@ -477,7 +482,7 @@ function finishClubSeason(g: Game, midSack: boolean): void {
     if (s.conti?.won) addTrophy(g, `${s.conti.name} 우승`, meta.region === 'kr' ? 25 : 60);
     if (promoted) g.promotions++;
     const cupRounds = (s.cup?.next ?? 0) + (s.conti?.next ?? 0) * 2;
-    const delta = clamp(gap * 7, -30, 30) + (title ? 25 : 0) + (promoted ? 20 : 0) - (relegated ? 35 : 0) + (s.cup?.won ? 15 : 0) + (s.conti?.won ? 25 : 0) + Math.max(0, cupRounds - 2) * 2;
+    const delta = clamp(rel * 7, -30, 30) + (title ? 25 : 0) + (promoted ? 20 : 0) - (relegated ? 35 : 0) + (s.cup?.won ? 15 : 0) + (s.conti?.won ? 25 : 0) + Math.max(0, cupRounds - 2) * 2;
     job.confidence = clamp(job.confidence + delta, 0, 100);
     g.sacked = job.confidence < 22 || (relegated && job.confidence < 45);
     repBonus = (title ? 3 : 0) + (promoted ? 2 : 0) + (s.cup?.won ? 3 : 0) + (s.conti?.won ? 8 : 0) + Math.max(0, cupRounds - 3) * 0.5 - (g.sacked ? 4 : 0);
@@ -490,7 +495,7 @@ function finishClubSeason(g: Game, midSack: boolean): void {
   const scorer = [...g.squad].sort((a, b) => b.goals - a.goals)[0] as Player;
 
   const outcome = title ? 'title' : g.sacked ? 'sacked' : promoted ? 'up' : relegated ? 'down' : 'plain';
-  const mood: Mood = g.sacked ? 'sacked' : title ? 'title' : promoted ? 'promoted' : relegated ? 'relegated' : gap >= 2 ? 'over' : gap >= -1 ? 'par' : 'under';
+  const mood: Mood = g.sacked ? 'sacked' : title ? 'title' : promoted ? 'promoted' : relegated ? 'relegated' : rel >= 2 ? 'over' : rel >= -1 ? 'par' : 'under';
   const cupText = [knockoutNote(s.cup), knockoutNote(s.conti)].filter(Boolean).join(' · ');
   const lead = midSack
     ? ko`시즌 도중 ${club.name}은 감독 교체를 발표했다. 팀은 결국 ${pos}위로 시즌을 마쳤다.`
@@ -500,7 +505,7 @@ function finishClubSeason(g: Game, midSack: boolean): void {
     : `${row.w}승 ${row.d}무 ${row.l}패, ${pos}위로 시즌을 마쳤다. 목표는 ${job.objective}위 이내였다.`;
   blocks.push({ kind: 'text', text: lead });
   if (g.sacked && !midSack) blocks.push({ kind: 'note', text: ko`시즌이 끝나고 ${club.name}은 계약 해지를 통보했다.`, tone: 'bad' });
-  if (!g.sacked && (title || gap >= 4)) blocks.push({ kind: 'note', text: `${g.manager.name} 감독이 ${meta.name} 올해의 감독상을 받았다.`, tone: 'good' });
+  if (!g.sacked && (title || rel >= 4)) blocks.push({ kind: 'note', text: `${g.manager.name} 감독이 ${meta.name} 올해의 감독상을 받았다.`, tone: 'good' });
   blocks.push({
     kind: 'stats', rows: [
       { label: '최종 순위', value: `${pos}위 / ${size}팀`, tone: gap >= 0 ? 'good' : 'bad' },
@@ -511,7 +516,7 @@ function finishClubSeason(g: Game, midSack: boolean): void {
       { label: '평판', value: `${Math.round(g.manager.rep)}` },
     ],
   });
-  blocks.push({ kind: 'table', league }, reactions(g, mood, club.name, league === 'kr5' || league === 'kr4'));
+  blocks.push({ kind: 'table', league }, reactions(g, mood, club.name, league === 'kr5'));
 
   if (!g.sacked) {
     const nextLevel = LEAGUES[promoted ? (meta.up as ClubLeagueId) : relegated ? (meta.down as ClubLeagueId) : league].level;
@@ -530,7 +535,7 @@ function finishClubSeason(g: Game, midSack: boolean): void {
     year: g.year, age: g.manager.age, club: club.name, league: meta.short, pos, size,
     record: `${row.w}승 ${row.d}무 ${row.l}패`, cup: cupText, note: g.sacked ? '경질' : title ? '우승' : promoted ? '승격' : relegated ? '강등' : '', outcome,
   });
-  g.points = 1 + (!g.sacked && (title || promoted || gap >= 3) ? 1 : 0);
+  g.points = 1 + (!g.sacked && (title || promoted || rel >= 3) ? 1 : 0);
   g.phase = 'end';
   g.scene = { eyebrow: seasonLabel(g), title: title ? '우승!' : g.sacked ? '경질' : promoted ? '승격!' : relegated ? '강등' : '시즌 결산', blocks, choices: [{ id: 'next', label: '계속', tone: 'primary' }] };
 }
@@ -680,7 +685,7 @@ function enterOffers(g: Game): void {
   const first = g.history.length === 0;
   const blocks: Block[] = [];
   if (first) {
-    blocks.push({ kind: 'text', text: `${g.manager.name}, ${g.manager.age}세. ${BACKGROUNDS[g.manager.background].name}. 지도자 자격증을 따고 처음 받은 연락은 동네 리그 팀 세 곳이다. 월급은 없고, 회식비는 회비에서 나온다.` });
+    blocks.push({ kind: 'text', text: `${g.manager.name}, ${g.manager.age}세. ${BACKGROUNDS[g.manager.background].name}. 지도자 자격증을 따고 처음 받은 연락은 K5리그 동호인 팀 세 곳이다. 월급은 없고, 회식비는 회비에서 나온다.` });
   } else if (g.sacked) {
     blocks.push({ kind: 'text', text: '짐을 싸서 나왔다. 그래도 전화는 온다.' });
   } else {
@@ -689,7 +694,7 @@ function enterOffers(g: Game): void {
   blocks.push({ kind: 'stats', rows: [{ label: '평판', value: `${Math.round(g.manager.rep)}` }, { label: '나이', value: `${g.manager.age}세` }] });
   const choices = g.offers.map((o, i): Choice => {
     const club = g.clubs[o.club] as Club;
-    return { id: `offer${i}`, label: o.stay ? `${club.name}에 남는다` : `${club.name}${o.kind === 'nation' ? ' 대표팀' : ''}`, detail: o.pitch, tone: o.stay ? 'primary' : undefined };
+    return { id: `offer${i}`, club: club.id, label: o.stay ? `${club.name}에 남는다` : `${club.name}${o.kind === 'nation' ? ' 대표팀' : ''}`, detail: o.pitch, tone: o.stay ? 'primary' : undefined };
   });
   if (!first && g.manager.age >= 45) choices.push({ id: 'retire', label: '지휘봉을 내려놓는다', detail: '커리어를 마치고 기록을 남긴다', tone: 'danger' });
   g.scene = { eyebrow: `${g.year} · 새 시즌을 앞두고`, title: first ? '첫 팀을 고르세요' : '어디에서 지휘할까요?', blocks, choices };
@@ -772,8 +777,11 @@ export function act(g: Game, id: string): void {
       // 전반기 성적이 처참하면 시즌 도중에 잘린다.
       if (!nation && g.job!.confidence < 10) {
         const club = myClub(g);
-        for (let r = 9; r < 18; r++) for (const league of CLUB_LEAGUES) playRound(g, league, r, -1, () => ({ att: club.att, def: club.def }));
-        g.round = 18;
+        for (const league of CLUB_LEAGUES) {
+          const total = g.fixtures[league].length;
+          for (let r = Math.ceil(total / 2); r < total; r++) playRound(g, league, r, -1, () => ({ att: club.att, def: club.def }));
+        }
+        g.round = 2;
         finishClubSeason(g, true);
         return;
       }
