@@ -9,9 +9,12 @@
     "dev": "node scripts/build.mjs --serve",
     "build:western": "node scripts/build.mjs --project western",
     "dev:western": "node scripts/build.mjs --project western --serve",
-    "test": "node --test \"tests/*.test.ts\" \"western/tests/*.test.ts\"",
+    "test": "node --test \"tests/*.test.ts\" \"western/tests/*.test.ts\" \"manager/tests/*.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "sim": "node scripts/sim.ts"
+    "sim": "node scripts/sim.ts",
+    "build:manager": "node scripts/build.mjs --project manager",
+    "dev:manager": "node scripts/build.mjs --project manager --serve",
+    "sim:manager": "node scripts/sim-manager.ts"
   },
   "devDependencies": {
     "@gltf-transform/core": "^4.5.1",

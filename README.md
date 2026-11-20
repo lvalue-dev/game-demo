@@ -12,6 +12,16 @@
 - 규칙과 카드 목록: [docs/prototype-rules.md](docs/prototype-rules.md)
 - 시장 조사 리포트: [reports/첫 게임 타겟 시장 분석.md](reports/첫%20게임%20타겟%20시장%20분석.md)
 
+## 터치라인 (감독 커리어 게임)
+
+`manager/` 폴더에 있는 별도의 게임이다. 동네 5부 리그 감독에서 시작해 월드컵까지 가는 글과 숫자 중심의 커리어 시뮬레이션으로, 그림이 필요 없다. 규칙은 `manager/RULES.md`에 있다.
+
+```bash
+npm run dev:manager      # 고치면서 보기 (포트 5175)
+npm run build:manager    # manager/dist/index.html 한 파일로 묶기
+npm run sim:manager -- 200 smart   # 봇 200명으로 균형 확인
+```
+
 ## 실행
 
 Node.js 22.18 이상이 필요하다.

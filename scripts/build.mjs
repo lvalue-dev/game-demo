@@ -20,6 +20,11 @@ const PROJECTS = {
     fonts: 'https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&family=Rye&display=swap',
     port: 5174,
   },
+  manager: {
+    title: '터치라인',
+    fonts: 'https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap',
+    port: 5175,
+  },
 };
 
 const serve = process.argv.includes('--serve');
