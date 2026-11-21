@@ -1,9 +1,10 @@
 // 화면. 게임 규칙은 game/에 있고, 여기서는 game.scene을 그리고 누른 선택지를 act()에 넘긴다.
-import { act, createGame, legacyScore } from '../game/career.ts';
+import { act, createGame, legacyScore, migrate } from '../game/career.ts';
 import {
-  ATTRS, ATTR_IDS, BACKGROUNDS, BACKGROUND_IDS, CLUB_LEAGUES, LEAGUES, POS_NAME, STYLES, TRAITS, won,
+  ATTRS, ATTR_IDS, BACKGROUNDS, BACKGROUND_IDS, CLUB_LEAGUES, LEAGUES, POS_NAME, STYLES, won,
 } from '../game/data.ts';
-import { potentialText, ratings } from '../game/squad.ts';
+import { potentialText, ratings, stage, valueOf } from '../game/squad.ts';
+import { playerCard, playerRow } from './cards.ts';
 import { legacyTitle } from '../game/talk.ts';
 import { dropCount, sortTable, zone } from '../game/world.ts';
 import { isLive, mountLive, onLiveClick, pauseLive, renderLive, unmountLive } from './live.ts';
@@ -62,7 +63,7 @@ export function snapshot(): { game: Game | null } {
 export function start(data: { game?: unknown }): void {
   root = document.getElementById('app') as HTMLElement;
   const saved = (data.game as Game | undefined) ?? load<Game>(SAVE_KEY);
-  game = saved && saved.version === 3 ? saved : null;
+  game = saved && migrate(saved) ? saved : null;
   root.addEventListener('click', onClick);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) pauseLive();
@@ -219,7 +220,7 @@ function renderStart(): string {
         <button type="submit" class="choice choice--primary choice--solo"><span class="choice__label">커리어 시작</span></button>
       </form>
       <section class="section">
-        <h2 class="section__title">능력치 다섯 가지</h2>
+        <h2 class="section__title">지도자 역량 다섯 가지</h2>
         <dl class="stats">${ATTR_IDS.map((id) => `<div class="stats__row"><dt>${esc(ATTRS[id].name)}</dt><dd class="stats__text">${esc(ATTRS[id].desc)}</dd></div>`).join('')}</dl>
       </section>
       ${hall.length > 0 ? `
@@ -248,7 +249,7 @@ function renderGame(g: Game): string {
           <h1 class="board__name">${esc(club ? club.name : '터치라인')}</h1>
         </div>
         <dl class="board__nums">
-          <div><dt>평판</dt><dd>${Math.round(g.manager.rep)}</dd></div>
+          <div><dt>명성</dt><dd>${Math.round(g.manager.rep)}</dd></div>
           <div><dt>나이</dt><dd>${g.manager.age}</dd></div>
         </dl>
       </div>
@@ -256,7 +257,7 @@ function renderGame(g: Game): string {
     </header>
     <main class="page">${tab === 'play' ? (isLive(g) ? renderLive(g) : renderScene(g)) : tab === 'table' ? renderTables(g) : tab === 'squad' ? renderSquad(g) : renderRecord(g)}</main>
     <nav class="tabs" aria-label="화면 전환">
-      ${([['play', '진행'], ['table', '순위'], ['squad', '선수단'], ['record', '기록']] as [Tab, string][]).map(([id, label]) =>
+      ${([['play', '진행'], ['table', '순위'], ['squad', '스쿼드'], ['record', '기록']] as [Tab, string][]).map(([id, label]) =>
         `<button type="button" class="tabs__item${tab === id ? ' is-on' : ''}" data-tab="${id}"${tab === id ? ' aria-current="page"' : ''}>${label}</button>`).join('')}
     </nav>`;
 }
@@ -269,7 +270,7 @@ function renderScene(g: Game): string {
       <h2 class="scene__title">${esc(s.title)}</h2>
       ${s.blocks.map((b) => renderBlock(g, b)).join('')}
       <div class="choices">
-        ${s.choices.map((c) => `
+        ${s.choices.map((c, i) => `${c.group && c.group !== s.choices[i - 1]?.group ? `<p class="choices__group">${esc(c.group.trim())}</p>` : ''}
           <button type="button" class="choice${c.tone === 'primary' ? ' choice--primary' : c.tone === 'danger' ? ' choice--danger' : ''}${s.choices.length === 1 ? ' choice--solo' : ''}${c.club !== undefined ? ' choice--club' : ''}" data-act="${esc(c.id)}"${c.disabled ? ' disabled' : ''}>
             ${c.club !== undefined ? crest(g.clubs[c.club] as Club, 30) : ''}
             <span class="choice__label">${esc(c.label)}</span>
@@ -280,7 +281,6 @@ function renderScene(g: Game): string {
     </article>`;
 }
 
-const POS_SHORT: Record<Pos, string> = { GK: 'GK', DF: 'DF', MF: 'MF', FW: 'FW' };
 
 function renderMatches(items: MatchLine[]): string {
   return `<ul class="matches">${items.map((m) => `
@@ -328,13 +328,8 @@ function renderBlock(g: Game, b: Block): string {
     case 'stats': return `<dl class="stats">${b.rows.map((r) => `<div class="stats__row"><dt>${esc(r.label)}</dt><dd class="${r.tone ? `is-${r.tone}` : ''}">${esc(r.value)}</dd></div>`).join('')}</dl>`;
     case 'matches': return renderMatches(b.items);
     case 'table': return renderTable(g, b.league);
-    case 'players': return `<ul class="players">${b.items.map((p) => `
-      <li class="players__row">
-        <span class="pos pos--${p.pos}">${POS_SHORT[p.pos]}</span>
-        <span class="players__name">${esc(p.name)}<span class="muted"> ${p.age}세${p.note ? ` · ${esc(p.note)}` : ''}</span></span>
-        ${p.delta ? `<span class="delta delta--${p.delta > 0 ? 'up' : 'down'}">${p.delta > 0 ? '▲' : '▼'}${Math.abs(p.delta)}</span>` : ''}
-        <span class="players__ovr">${p.ovr}</span>
-      </li>`).join('')}</ul>`;
+    case 'players': return `<ul class="plist">${b.items.map((it) => playerRow(it.player, { note: it.note, delta: it.delta })).join('')}</ul>`;
+    case 'card': return playerCard(b.player, { price: b.price, note: b.note, compare: b.compare });
     case 'feed': return `<ul class="feed">${b.items.map((f) => `
       <li class="feed__item feed__item--${f.tone}"><p class="feed__text">${esc(f.text)}</p><p class="feed__who">${esc(f.who)} · ${esc(f.where)}</p></li>`).join('')}</ul>`;
   }
@@ -368,27 +363,37 @@ function renderSquad(g: Game): string {
   if (!g.job) return '<p class="prose">아직 맡은 팀이 없다.</p>';
   const r = ratings(g.squad, g.depth + g.season.depthMod);
   const a = g.manager.attrs;
+  const { level, money } = stage(g);
+  const nation = (g.clubs[g.job.club] as Club).nation;
+  const lines = ['GK', 'DF', 'MF', 'FW'] as Pos[];
   return `
     <section class="section">
       <p class="eyebrow">${esc((g.clubs[g.job.club] as Club).name)}</p>
-      <h2 class="scene__title">선수단</h2>
-      <dl class="stats">
-        <div class="stats__row"><dt>공격력</dt><dd>${r.att.toFixed(1)}</dd></div>
-        <div class="stats__row"><dt>수비력</dt><dd>${r.def.toFixed(1)}</dd></div>
-        <div class="stats__row"><dt>선수층</dt><dd>${(g.depth + g.season.depthMod).toFixed(1)}</dd></div>
-        <div class="stats__row"><dt>전술</dt><dd>${g.lastStyle ? esc(STYLES[g.lastStyle].name) : '미정'} · 숙련도 ${Math.round(g.cohesion)}</dd></div>
-        <div class="stats__row"><dt>사기</dt><dd>${Math.round(g.morale)}</dd></div>
-        ${g.job.kind === 'club' ? `<div class="stats__row"><dt>예산</dt><dd>${esc(won(g.job.budget))}</dd></div>` : ''}
+      <h2 class="scene__title">스쿼드</h2>
+      <dl class="teamrate" aria-label="팀 지표">
+        <div><dt>ATT</dt><dd>${Math.round(r.att)}</dd></div>
+        <div><dt>MID</dt><dd>${Math.round(r.mid)}</dd></div>
+        <div><dt>DEF</dt><dd>${Math.round(r.def)}</dd></div>
+        <div><dt>뎁스</dt><dd>${Math.round(g.depth + g.season.depthMod)}</dd></div>
       </dl>
-      <ul class="players">${g.squad.map((p) => `
-        <li class="players__row players__row--tall">
-          <span class="pos pos--${p.pos}">${POS_SHORT[p.pos]}</span>
-          <span class="players__name">${esc(p.name)}<br><span class="muted">${POS_NAME[p.pos]} · ${p.age}세 · ${esc(potentialText(g, p))}${p.trait ? ` · ${esc(TRAITS[p.trait].name)}` : ''}${p.goals > 0 ? ` · ${p.goals}골` : ''}</span></span>
-          <span class="players__ovr">${p.ovr + p.temp}</span>
-        </li>`).join('')}</ul>
+      <dl class="stats">
+        <div class="stats__row"><dt>전술</dt><dd>${g.lastStyle ? esc(STYLES[g.lastStyle].name) : '미정'} · 전술 완성도 ${Math.round(g.cohesion)}</dd></div>
+        <div class="stats__row"><dt>라커룸 분위기</dt><dd>${Math.round(g.morale)}</dd></div>
+        ${g.job.kind === 'club' ? `<div class="stats__row"><dt>이적 예산</dt><dd>${esc(won(g.job.budget))}</dd></div>` : ''}
+      </dl>
+      <p class="fine">선수를 누르면 세부 능력치가 펼쳐진다. 실시간 경기에서는 주전 일곱 명 말고 네 자리를 스쿼드 뎁스 수준의 후보가 채운다.</p>
+      ${lines.map((pos) => `
+        <h3 class="section__sub">${esc(POS_NAME[pos])}</h3>
+        <ul class="plist">${g.squad.filter((p) => p.pos === pos).map((p) => playerRow(p, {
+          note: potentialText(g, p),
+          extra: [
+            ...(nation ? [] : [`시장가|${won(valueOf(p, level, money))}`]),
+            `이번 시즌|${p.goals}골 · 팀에서 ${p.years + 1}번째 시즌${p.homegrown ? ' · 유스 출신' : ''}`,
+          ],
+        })).join('')}</ul>`).join('')}
     </section>
     <section class="section">
-      <h2 class="section__title">${esc(g.manager.name)} 감독</h2>
+      <h2 class="section__title">${esc(g.manager.name)} 감독의 지도자 역량</h2>
       <dl class="stats">${ATTR_IDS.map((id) => `
         <div class="stats__row"><dt>${esc(ATTRS[id].name)}</dt><dd><span class="meter" aria-hidden="true"><span class="meter__fill" style="width:${a[id] * 5}%"></span></span>${a[id]}</dd></div>`).join('')}
       </dl>
@@ -404,7 +409,7 @@ function renderRecord(g: Game): string {
         <div class="stats__row"><dt>커리어 점수</dt><dd>${legacyScore(g)} · ${esc(legacyTitle(legacyScore(g)))}</dd></div>
         <div class="stats__row"><dt>트로피</dt><dd>${g.trophies.length}개</dd></div>
         <div class="stats__row"><dt>승격</dt><dd>${g.promotions}회</dd></div>
-        <div class="stats__row"><dt>최고 평판</dt><dd>${Math.round(g.manager.peakRep)}</dd></div>
+        <div class="stats__row"><dt>최고 명성</dt><dd>${Math.round(g.manager.peakRep)}</dd></div>
       </dl>
       ${g.trophies.length > 0 ? `<ul class="trophies">${g.trophies.map((t) => `<li><span class="trophies__year">${t.year}</span> ${esc(t.club)} · ${esc(t.name)}</li>`).join('')}</ul>` : ''}
     </section>

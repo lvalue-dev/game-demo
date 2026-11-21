@@ -1,7 +1,8 @@
 // 실시간 경기 화면. 위에서 내려다본 경기장을 캔버스에 그리고, 배속에 맞춰 liveTick을 부른다.
 // 경기장은 한 번만 만들고, 점수, 시계, 기록, 지시 패널만 바꿔 그린다.
-import { STYLES, STYLE_IDS, POS_NAME } from '../game/data.ts';
-import { PER_MIN, SLOTS } from '../game/live.ts';
+import { STYLES, STYLE_IDS } from '../game/data.ts';
+import { PER_MIN, SLOTS, slotSpot } from '../game/live.ts';
+import { FOOT_NAME, statNames, statsOf } from '../game/player.ts';
 import { liveAdvice, liveCommand, liveTick, staminaText } from '../game/match.ts';
 import { ROLES, SHAPES, SHAPE_IDS } from '../game/tactics.ts';
 import type { Club, Game, LivePlayer, LiveState, MatchState, Pos } from '../game/types.ts';
@@ -15,15 +16,15 @@ export interface LiveHost {
 
 type Panel = 'team' | 'players' | 'bench';
 
-/** 1배속에서 1초에 진행하는 틱 수. 1틱은 경기 시간 3초다. */
-const BASE_TPS = 6;
+/** 1배속에서 1초에 진행하는 틱 수. 1틱은 경기 시간 3초이고, 1배속이면 선수가 실제 달리기 속도로 보인다(한 경기 약 12분). */
+const BASE_TPS = 2.5;
 const SPEEDS = [1, 2, 4, 8];
 
 let game: Game | null = null;
 let host: LiveHost | null = null;
 let raf = 0;
 let paused = true;
-let speed = 2;
+let speed = 1;
 let panel: Panel = 'team';
 let selected = -1;
 let acc = 0;
@@ -33,6 +34,9 @@ let seenLog = 0;
 let flash: { text: string; until: number; good: boolean } | null = null;
 let canvas: HTMLCanvasElement | null = null;
 let colors: [string, string] = ['#ffffff', '#222222'];
+
+/** 이름표에 쓰는 짧은 이름. 외국 이름은 성만 쓴다. */
+const short = (name: string): string => (name.includes(' ') ? (name.split(' ').pop() as string) : name);
 
 const esc = (text: string | number): string => String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 const $ = <T extends HTMLElement>(sel: string): T | null => document.querySelector<T>(sel);
@@ -92,6 +96,7 @@ export function renderLive(g: Game): string {
         <canvas class="live__pitch" id="live-pitch" role="img" aria-label="경기장. 우리 팀은 오른쪽으로 공격한다"></canvas>
         <p class="live__flash" id="live-flash" aria-live="assertive"></p>
       </div>
+      <p class="live__call" id="live-call" aria-live="polite"></p>
       </div>
       <div class="live__controls">
         <button type="button" class="live__play" data-live-do="play" id="live-play"></button>
@@ -100,7 +105,8 @@ export function renderLive(g: Game): string {
         </div>
       </div>
       <dl class="live__stats" id="live-stats"></dl>
-      <ol class="log live__ticker" id="live-ticker" aria-live="polite"></ol>
+      <p class="live__label">중계</p>
+      <ol class="log live__ticker" id="live-ticker"></ol>
       <div class="live__tabs" role="tablist" aria-label="지시">
         ${([['team', '팀 전술'], ['players', '선수 지시'], ['bench', '교체 · 태세']] as [Panel, string][]).map(([id, label]) =>
           `<button type="button" role="tab" class="live__tab" data-live-do="panel:${id}" aria-selected="false">${label}</button>`).join('')}
@@ -258,7 +264,7 @@ function updateHud(full: boolean): void {
     stats.innerHTML = `
       <div><dt>점유율</dt><dd>${Math.round((a.possession / total) * 100)}<span class="muted"> : ${Math.round((b.possession / total) * 100)}</span></dd></div>
       <div><dt>슈팅(유효)</dt><dd>${a.shots}(${a.onTarget})<span class="muted"> : ${b.shots}(${b.onTarget})</span></dd></div>
-      <div><dt>패스 성공</dt><dd>${a.passes ? Math.round((a.passesOk / a.passes) * 100) : 0}%</dd></div>
+      <div><dt>기대 득점(xG)</dt><dd>${a.xg.toFixed(1)}<span class="muted"> : ${b.xg.toFixed(1)}</span></dd></div>
       <div><dt>우리 체력</dt><dd class="${m.me.stamina < 45 ? 'is-bad' : ''}"><span class="meter" aria-hidden="true"><span class="meter__fill" style="width:${Math.round(m.me.stamina)}%"></span></span>${Math.round(m.me.stamina)}</dd></div>`;
   }
   // 새 기록이 생겼으면 위로 쌓고, 골이면 경기장 위에 크게 띄운다.
@@ -269,13 +275,20 @@ function updateHud(full: boolean): void {
       }
     }
     seenLog = m.log.length;
-    const ticker = $('#live-ticker');
-    if (ticker) {
-      const recent = m.log.slice(-4).reverse();
-      ticker.innerHTML = recent.length === 0
-        ? '<li class="log__row"><span class="log__min">시작</span><span class="log__text muted">경기장을 보며 지시를 내린다. 아래 재생 버튼을 누르면 킥오프.</span></li>'
-        : recent.map((l) => `<li class="log__row log__row--${l.tone}"><span class="log__min">${l.min === 0 ? '시작' : `${Math.min(90, l.min)}'`}</span><span class="log__text">${esc(l.text)}</span></li>`).join('');
-    }
+  }
+  const last = L.calls[L.calls.length - 1];
+  const callEl = $('#live-call');
+  if (callEl) {
+    callEl.textContent = last ? `${Math.max(1, Math.ceil(last.tick / PER_MIN))}' ${last.text}` : (L.tick === 0 ? '재생 버튼을 누르면 킥오프. 언제든 멈추고 지시할 수 있다.' : '');
+    callEl.className = `live__call${last ? ` live__call--${last.tone}` : ''}`;
+  }
+  const ticker = $('#live-ticker');
+  if (ticker && (full || ticker.dataset.n !== String(L.calls.length) + ':' + (last?.tick ?? 0))) {
+    ticker.dataset.n = String(L.calls.length) + ':' + (last?.tick ?? 0);
+    const recent = [...L.calls].reverse().slice(0, 5);
+    ticker.innerHTML = recent.length === 0
+      ? '<li class="log__row"><span class="log__min">시작</span><span class="log__text muted">슈팅, 선방, 파울, 오프사이드가 여기에 쌓인다.</span></li>'
+      : recent.map((c) => `<li class="log__row log__row--${c.tone}"><span class="log__min">${Math.max(1, Math.ceil(c.tick / PER_MIN))}'</span><span class="log__text">${esc(c.text)}</span></li>`).join('');
   }
   updateControls();
 }
@@ -326,8 +339,8 @@ function updatePanel(): void {
       <p class="live__label">하프타임 라커룸</p>
       <p class="prose">${lead > 0 ? '앞선 채로 들어왔다. 선수들이 감독을 본다.' : lead < 0 ? '뒤진 채로 들어왔다. 라커룸이 조용하다.' : '팽팽한 채로 들어왔다. 선수들이 감독을 본다.'} 말을 마치면 후반이 시작된다. 전술과 지시는 후반 중에도 바꿀 수 있다.</p>
       <div class="choices">
-        <button type="button" class="choice" data-live="talk:praise"><span class="choice__label">잘하고 있다고 다독인다</span><span class="choice__detail">리더십 판정. 비기거나 한 골 뒤질 때 잘 통한다</span></button>
-        <button type="button" class="choice" data-live="talk:blast"><span class="choice__label">물병을 걷어찬다</span><span class="choice__detail">리더십 판정. 통하면 크게 살아나고, 안 통하면 얼어붙는다</span></button>
+        <button type="button" class="choice" data-live="talk:praise"><span class="choice__label">잘하고 있다고 다독인다</span><span class="choice__detail">장악력 판정. 비기거나 한 골 뒤질 때 잘 통한다</span></button>
+        <button type="button" class="choice" data-live="talk:blast"><span class="choice__label">물병을 걷어찬다</span><span class="choice__detail">장악력 판정. 통하면 크게 살아나고, 안 통하면 얼어붙는다</span></button>
         <button type="button" class="choice" data-live="talk:calm"><span class="choice__label">후반 계획만 짚는다</span><span class="choice__detail">확실한 작은 효과. 후반 초반의 전술 변경에 혼선이 없다</span></button>
       </div>`;
     return;
@@ -342,7 +355,7 @@ function updatePanel(): void {
       ${row('전술', STYLE_IDS.map((id) => {
         const h = advice.hints[id];
         return chip(`style:${id}`, STYLES[id].name, m.me.style === id, false, h && h !== '비슷' ? `<span class="chip__hint chip__hint--${h === '유리' ? 'good' : 'bad'}">${h}</span>` : '');
-      }).join(''), m.me.style === g.season.style ? '몸에 밴 전술' : '숙련도 절반')}
+      }).join(''), m.me.style === g.season.style ? '몸에 밴 전술' : '완성도 절반')}
       ${row('수비 라인', chip('line:-1', '내린다', d.line === -1) + chip('line:0', '보통', d.line === 0) + chip('line:1', '올린다', d.line === 1), '올리면 뒷공간이 빈다')}
       ${row('폭', chip('width:-1', '좁게', d.width === -1) + chip('width:0', '보통', d.width === 0) + chip('width:1', '넓게', d.width === 1))}
       ${row('템포', chip('tempo:-1', '느리게', d.tempo === -1) + chip('tempo:0', '보통', d.tempo === 0) + chip('tempo:1', '빠르게', d.tempo === 1), '빠르면 체력이 더 든다')}
@@ -358,15 +371,19 @@ function updatePanel(): void {
         const lp = players[i];
         const role = m.roles[p.id] ?? 'base';
         const slot = lp ? SLOTS[m.me.shape][lp.slot] : undefined;
-        const where = slot ? (slot.line === p.pos ? '' : ` · ${POS_NAME[slot.line]} 자리`) : '';
+        const at = slot ? slotSpot(slot) : null;
+        const where = at && at !== p.spot ? ` · 지금 ${at} 자리` : '';
+        const st = statsOf(p);
+        const { short: labels } = statNames(p.spot);
         return `
           <li class="live__person${i === selected ? ' is-picked' : ''}">
             <button type="button" class="live__who" data-live-do="pick:${i}" aria-pressed="${i === selected}">
               <span class="live__num" style="--kit:${colors[0]};--kit-ink:${light(colors[0]) ? '#111' : '#fff'}">${lp ? lp.n : '-'}</span>
-              <span class="live__name">${esc(p.name)}<span class="muted"> ${POS_NAME[p.pos]}${esc(where)}${lp?.off ? ' · 퇴장' : ''}</span></span>
+              <span class="live__name">${esc(p.name)}<span class="muted"> ${p.spot} · ${FOOT_NAME[p.foot]}${esc(where)}${lp?.off ? ' · 퇴장' : ''}</span></span>
               <span class="players__ovr">${p.ovr + p.temp}</span>
             </button>
             <div class="chips">${ROLES[p.pos as Pos].map((r) => chip(`role:${p.id}:${r.id}`, r.name, role === r.id, !!lp?.off)).join('')}</div>
+            <p class="live__statline">${st.map((v, k) => `<span>${labels[k]} <b>${v}</b></span>`).join('')}</p>
             <p class="fine">${esc(ROLES[p.pos as Pos].find((r) => r.id === role)?.desc ?? '')}</p>
           </li>`;
       }).join('')}</ul>`;
@@ -439,10 +456,32 @@ function draw(frac: number): void {
   ctx.font = `600 ${Math.max(10, s * 2.2)}px 'Barlow Condensed', system-ui, sans-serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText('공격 →', X(1.5), Y(1));
+  const mineName = (g.clubs[g.job!.club] as Club).name;
+  ctx.fillText(`${mineName} 공격 →`, X(1.5), Y(1));
+  ctx.textAlign = 'right';
+  ctx.fillText(`← ${m.oppName}`, X(103.5), Y(1));
+  // 골망.
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.fillRect(X(-2) , Y(30.34), 2 * s, 7.32 * s);
+  ctx.fillRect(X(105), Y(30.34), 2 * s, 7.32 * s);
+
+  // 공이 날아가는 길. 패스는 옅게, 슈팅은 노랗게.
+  const fl = L.flight;
+  if (fl) {
+    ctx.save();
+    ctx.setLineDash(fl.kind === 'shot' ? [] : [4, 4]);
+    ctx.strokeStyle = fl.kind === 'shot' ? 'rgba(255,225,74,0.9)' : 'rgba(255,255,255,0.45)';
+    ctx.lineWidth = fl.kind === 'shot' ? 2 : 1.2;
+    ctx.beginPath();
+    ctx.moveTo(X(fl.fromX), Y(fl.fromY));
+    ctx.lineTo(X(fl.toX), Y(fl.toY));
+    ctx.stroke();
+    ctx.restore();
+  }
 
   const lerp = (a: number, b: number): number => a + (b - a) * frac;
-  const r = Math.max(6.5, s * 1.75);
+  const r = Math.max(8, s * 2);
+  const tags: { x: number; y: number; text: string; mine: boolean }[] = [];
   const owner = L.owner;
   for (const t of [1, 0] as const) {
     const kit = colors[t] as string;
@@ -465,9 +504,13 @@ function draw(frac: number): void {
         ctx.lineWidth = 2;
         ctx.stroke();
       }
-      if (r >= 6) {
+      // 공을 가진 선수와 고른 선수에게는 이름표를 붙인다.
+      if ((owner && owner.team === t && owner.i === i) || (t === 0 && i === selected) || (L.next && L.next.team === t && L.next.i === i)) {
+        tags.push({ x, y, text: `${p.n} ${short(p.name)}`, mine: t === 0 });
+      }
+      {
         ctx.fillStyle = p.line === 'GK' ? '#111' : ink;
-        ctx.font = `700 ${Math.round(r * 1.15)}px 'Barlow Condensed', system-ui, sans-serif`;
+        ctx.font = `700 ${Math.round(r * 1.2)}px 'Barlow Condensed', system-ui, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(String(p.n), x, y + 0.5);
@@ -497,6 +540,22 @@ function draw(frac: number): void {
   ctx.lineWidth = 1;
   ctx.strokeStyle = '#111';
   ctx.stroke();
+
+  ctx.font = `700 ${Math.max(11, Math.round(s * 2.4))}px 'IBM Plex Sans KR', system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const tag of tags) {
+    const w = ctx.measureText(tag.text).width + 10;
+    const h = Math.max(16, s * 3.6);
+    const tx = Math.min(Math.max(tag.x, w / 2 + 2), cssW - w / 2 - 2);
+    const ty = tag.y - r - h / 2 - 3 < h / 2 ? tag.y + r + h / 2 + 3 : tag.y - r - h / 2 - 3;
+    ctx.fillStyle = tag.mine ? 'rgba(255,255,255,0.92)' : 'rgba(20,20,20,0.82)';
+    ctx.beginPath();
+    ctx.roundRect(tx - w / 2, ty - h / 2, w, h, h / 2);
+    ctx.fill();
+    ctx.fillStyle = tag.mine ? '#111' : '#fff';
+    ctx.fillText(tag.text, tx, ty + 0.5);
+  }
 
   const flashEl = $('#live-flash');
   if (flashEl) {

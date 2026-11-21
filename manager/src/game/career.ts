@@ -9,8 +9,10 @@ import {
 import { eventById, pickEvent } from './events.ts';
 import { chance, int, pick, shuffle, spread } from './rng.ts';
 import {
-  addPlayer, departures, develop, generateSquad, marketOptions, myClub, ratings, shareGoals, stage, valueOf,
+  departures, develop, generateSquad, myClub, ratings, shareGoals, stage,
 } from './squad.ts';
+import { ensureDetail } from './player.ts';
+import { actWindow, openWindow, windowScene } from './transfer.ts';
 import { legacyTitle, reactions } from './talk.ts';
 import type { Mood } from './talk.ts';
 import { actMatch, beginMatch } from './match.ts';
@@ -43,14 +45,14 @@ export function createGame(seed: number, name: string, background: BackgroundId)
   const attrs: Record<AttrId, number> = { tactics: 6, lead: 6, youth: 6, deal: 6, eye: 6 };
   for (const [key, value] of Object.entries(BACKGROUNDS[background].bonus)) attrs[key as AttrId] += value as number;
   const g: Game = {
-    rng: seed | 0, version: 3, year: START_YEAR, nextId: 1,
+    rng: seed | 0, version: 4, year: START_YEAR, nextId: 1,
     manager: { name: name.trim() || '김감독', age: START_AGE, background, attrs, rep: 2, peakRep: 2 },
     clubs: [],
     leagues: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
     tables: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
     fixtures: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
     round: 0, job: null, squad: [], depth: 0, morale: 60, cohesion: 25, season: blankSeason(), match: null, lastStyle: null,
-    phase: 'offers', scene: { eyebrow: '', title: '', blocks: [], choices: [] }, eventId: null, offers: [], market: [],
+    phase: 'offers', scene: { eyebrow: '', title: '', blocks: [], choices: [] }, eventId: null, offers: [], window: null,
     wcTicket: false, sacked: false, points: 0, history: [], trophies: [], promotions: 0,
   };
   createClubs(g);
@@ -187,7 +189,7 @@ function squadBlock(g: Game): Block {
   return {
     kind: 'players',
     items: g.squad.map((p) => ({
-      name: p.name, pos: p.pos, age: p.age, ovr: p.ovr + p.temp,
+      player: p,
       note: [p.trait ? TRAITS[p.trait].name : '', p.age <= 23 && g.manager.attrs.eye >= 8 && p.pot - p.ovr >= 5 ? '유망주' : ''].filter(Boolean).join(' · ') || undefined,
     })),
   };
@@ -199,8 +201,8 @@ function statusRows(g: Game): { label: string; value: string; tone?: Tone }[] {
   const rows: { label: string; value: string; tone?: Tone }[] = [];
   if (!club.nation) rows.push({ label: '예산', value: won(job.budget) });
   rows.push({ label: club.nation ? '협회 신뢰' : '이사회 신뢰', value: `${Math.round(job.confidence)}`, tone: job.confidence < 30 ? 'bad' : job.confidence >= 65 ? 'good' : 'plain' });
-  rows.push({ label: '사기', value: `${Math.round(g.morale)}` });
-  rows.push({ label: '전술 숙련도', value: `${Math.round(g.cohesion)}` });
+  rows.push({ label: '라커룸 분위기', value: `${Math.round(g.morale)}` });
+  rows.push({ label: '전술 완성도', value: `${Math.round(g.cohesion)}` });
   return rows;
 }
 
@@ -226,7 +228,7 @@ function enterStyle(g: Game): void {
     eyebrow: seasonLabel(g), title: '어떤 축구를 할까요?', blocks,
     choices: STYLE_IDS.map((id): Choice => ({
       id, label: STYLES[id].name,
-      detail: `${STYLES[id].desc}${g.lastStyle === id ? ' · 지난 시즌과 같음, 숙련도 +10' : g.lastStyle ? ' · 바꾸면 숙련도가 크게 깎임' : ''}`,
+      detail: `${STYLES[id].desc}${g.lastStyle === id ? ' · 지난 시즌과 같음, 전술 완성도 +10' : g.lastStyle ? ' · 바꾸면 전술 완성도가 크게 깎임' : ''}`,
       tone: g.lastStyle === id ? 'primary' : undefined,
     })),
   };
@@ -242,43 +244,29 @@ function enterFocus(g: Game): void {
 }
 
 function enterMarket(g: Game, window: 'summer' | 'winter'): void {
-  const nation = myClub(g).nation;
   g.phase = window === 'summer' ? 'market' : 'winter';
-  g.market = marketOptions(g, window);
-  g.scene = {
-    eyebrow: seasonLabel(g),
-    title: nation ? '누구를 부를까요?' : window === 'summer' ? '여름 이적 시장' : '겨울 이적 시장',
-    blocks: [
-      { kind: 'text', text: nation ? '소집 명단을 정한다. 한 자리만 바꿀 수 있다.' : `한 가지만 할 수 있다. 쓸 수 있는 돈은 ${won(g.job!.budget)}.` },
-      squadBlock(g),
-    ],
-    choices: g.market.map((o): Choice => ({ id: o.id, label: o.label, detail: o.detail, disabled: o.price > g.job!.budget })),
-  };
+  openWindow(g, window);
+  windowScene(g, seasonLabel(g));
 }
 
-function applyMarket(g: Game, id: string): void {
-  const option = g.market.find((o) => o.id === id);
-  if (!option) return;
-  const job = g.job!;
-  const nation = myClub(g).nation;
-  if (option.player) {
-    const out = addPlayer(g, option.player);
-    job.budget = round1(job.budget - option.price);
-    if (!nation) {
-      const { level, money } = stage(g);
-      const fee = round1(valueOf(out, level, money) * 0.3);
-      job.budget = round1(job.budget + fee);
-      g.season.notes.push(fee >= 0.1 ? ko`${option.player.name}이 합류했고, ${out.name}은 ${won(fee)}에 팀을 떠났다.` : ko`${option.player.name}이 합류했고, ${out.name}은 팀을 떠났다.`);
-    } else {
-      g.season.notes.push(ko`${option.player.name}이 처음 대표팀에 뽑혔다. ${out.name}은 명단에서 빠졌다.`);
+/** 이전 버전의 저장을 지금 버전에 맞춘다. 맞출 수 없으면 false. */
+export function migrate(g: Game): boolean {
+  if (g.version !== 3 && g.version !== 4) return false;
+  for (const p of g.squad) ensureDetail(p);
+  if (g.version === 3) {
+    g.version = 4;
+    delete (g as unknown as { market?: unknown }).market;
+    g.window = null;
+    // 이적 시장 한가운데서 저장했다면 새 시장으로 다시 연다.
+    if (g.phase === 'market' || g.phase === 'winter') enterMarket(g, g.phase === 'market' ? 'summer' : 'winter');
+    // 경기 중이었다면 실시간 화면에 필요한 값을 채운다.
+    const L = g.match?.live;
+    if (L) {
+      L.calls = [];
+      for (const team of L.teams) for (const p of team.players) Object.assign(p, { spot: p.spot ?? 'CM', foot: p.foot ?? 'R', dev: p.dev ?? [0, 0, 0, 0, 0, 0] });
     }
-  } else if (option.kind === 'depth') {
-    g.depth += 3;
-    job.budget = round1(job.budget - option.price);
-    g.season.notes.push('후보 선수들이 합류해 선수층이 두꺼워졌다.');
-  } else if (nation) {
-    g.cohesion = clamp(g.cohesion + 5, 0, 100);
   }
+  return true;
 }
 
 function recordOf(lines: MatchLine[]): { w: number; d: number; l: number; text: string } {
@@ -561,7 +549,7 @@ function finishClubSeason(g: Game, midSack: boolean): void {
       ...(cupText ? [{ label: '컵 대회', value: cupText }] : []),
       { label: '팀 내 최다 득점', value: `${scorer.name} ${scorer.goals}골` },
       { label: '이사회 신뢰', value: `${Math.round(job.confidence)}`, tone: (job.confidence < 30 ? 'bad' : 'plain') as Tone },
-      { label: '평판', value: `${Math.round(g.manager.rep)}` },
+      { label: '명성', value: `${Math.round(g.manager.rep)}` },
     ],
   });
   blocks.push({ kind: 'table', league }, reactions(g, mood, club.name, league === 'kr5'));
@@ -571,7 +559,7 @@ function finishClubSeason(g: Game, midSack: boolean): void {
     const changes = develop(g);
     if (changes.length > 0) {
       blocks.push({ kind: 'text', text: '한 시즌 사이 선수들이 달라졌다.' });
-      blocks.push({ kind: 'players', items: changes.map((c) => ({ name: c.player.name, pos: c.player.pos, age: c.player.age, ovr: c.player.ovr, delta: c.delta })) });
+      blocks.push({ kind: 'players', items: changes.map((c) => ({ player: c.player, delta: c.delta })) });
     }
     const moves = departures(g, nextLevel);
     for (const text of moves.lines) blocks.push({ kind: 'note', text, tone: 'plain' });
@@ -639,13 +627,13 @@ function finishNationYear(g: Game): void {
       { label: label.name, value: lead.replace(/\..*$/, ''), tone: delta >= 0 ? 'good' : 'bad' },
       { label: '올해 성적', value: rec.text },
       { label: '협회 신뢰', value: `${Math.round(job.confidence)}` },
-      { label: '평판', value: `${Math.round(g.manager.rep)}` },
+      { label: '명성', value: `${Math.round(g.manager.rep)}` },
     ],
   });
   blocks.push({ kind: 'matches', items: s.lines }, { kind: 'table', league: 'intl' }, reactions(g, mood, `${club.name} 대표팀`, false));
   if (!g.sacked) {
     const changes = develop(g);
-    if (changes.length > 0) blocks.push({ kind: 'players', items: changes.map((c) => ({ name: c.player.name, pos: c.player.pos, age: c.player.age, ovr: c.player.ovr, delta: c.delta })) });
+    if (changes.length > 0) blocks.push({ kind: 'players', items: changes.map((c) => ({ player: c.player, delta: c.delta })) });
     for (const text of departures(g, (club.att + club.def) / 2 - 1).lines) blocks.push({ kind: 'note', text, tone: 'plain' });
   }
   g.history.push({
@@ -662,7 +650,7 @@ function enterGrowth(g: Game): void {
   const a = g.manager.attrs;
   g.scene = {
     eyebrow: `${g.manager.name} · ${g.manager.age}세`, title: '한 해 동안 무엇을 배웠나요?',
-    blocks: [{ kind: 'text', text: `능력치를 ${g.points}번 올릴 수 있다. 좋은 시즌을 보내면 두 번 오른다.` }],
+    blocks: [{ kind: 'text', text: `지도자 역량을 ${g.points}번 올릴 수 있다. 좋은 시즌을 보내면 두 번 오른다.` }],
     choices: ATTR_IDS.map((id): Choice => ({ id, label: `${ATTRS[id].name} ${a[id]} → ${a[id] + 1}`, detail: ATTRS[id].desc, disabled: a[id] >= 20 })),
   };
 }
@@ -739,7 +727,7 @@ function enterOffers(g: Game): void {
   } else {
     blocks.push({ kind: 'text', text: g.offers.length > 1 ? '시즌이 끝나자 전화가 왔다. 남을 수도, 떠날 수도 있다.' : '올해는 다른 구단에서 연락이 없었다.' });
   }
-  blocks.push({ kind: 'stats', rows: [{ label: '평판', value: `${Math.round(g.manager.rep)}` }, { label: '나이', value: `${g.manager.age}세` }] });
+  blocks.push({ kind: 'stats', rows: [{ label: '명성', value: `${Math.round(g.manager.rep)}` }, { label: '나이', value: `${g.manager.age}세` }] });
   const choices = g.offers.map((o, i): Choice => {
     const club = g.clubs[o.club] as Club;
     return { id: `offer${i}`, club: club.id, label: o.stay ? `${club.name}에 남는다` : `${club.name}${o.kind === 'nation' ? ' 대표팀' : ''}`, detail: o.pitch, tone: o.stay ? 'primary' : undefined };
@@ -781,7 +769,7 @@ function retire(g: Game, why: string): void {
           { label: '커리어 점수', value: `${score}`, tone: 'good' },
           { label: '트로피', value: `${g.trophies.length}개` },
           { label: '승격', value: `${g.promotions}회` },
-          { label: '최고 평판', value: `${Math.round(g.manager.peakRep)}` },
+          { label: '최고 명성', value: `${Math.round(g.manager.peakRep)}` },
           { label: '경질', value: `${g.history.filter((h) => h.outcome === 'sacked').length}회` },
         ],
       },
@@ -818,8 +806,8 @@ export function act(g: Game, id: string): void {
       enterMarket(g, 'summer');
       return;
     case 'market':
-      applyMarket(g, id);
-      startHalf(g, 1);
+      if (actWindow(g, id)) startHalf(g, 1);
+      else windowScene(g, seasonLabel(g));
       return;
     case 'match':
       if (actMatch(g, id)) {
@@ -849,8 +837,8 @@ export function act(g: Game, id: string): void {
       else enterMarket(g, 'winter');
       return;
     case 'winter':
-      applyMarket(g, id);
-      enterPlan(g);
+      if (actWindow(g, id)) enterPlan(g);
+      else windowScene(g, seasonLabel(g));
       return;
     case 'plan':
       g.season.plan = id as PlanId;

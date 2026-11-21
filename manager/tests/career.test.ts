@@ -6,6 +6,12 @@ import { rand } from '../src/game/rng.ts';
 import { roundRobin, sortTable } from '../src/game/world.ts';
 import type { Game } from '../src/game/types.ts';
 
+/** 막히지 않은 첫 선택지. 이적 시장에서는 바로 마감한다(후보 보기와 돌아가기를 오가지 않게). */
+function firstChoice(g: Game): string {
+  if (g.phase === 'market' || g.phase === 'winter') return g.window?.view ? 'back' : 'done';
+  return g.scene.choices.find((c) => !c.disabled)!.id;
+}
+
 /** 정년까지 아무 선택지나 고르며 커리어를 끝까지 돌린다. 한 걸음마다 check를 부른다. */
 function playOut(g: Game, seed: number, check?: (g: Game) => void): string[] {
   const dice = { rng: seed };
@@ -162,7 +168,7 @@ test('직접 지휘한 라이벌전도 순위표에 반영되어 모든 팀의 �
 
 test('수석 코치에게 맡기면 선택 없이 경기가 끝난다', () => {
   const g = createGame(4242, '위임', 'pro');
-  while (g.phase !== 'match') act(g, g.scene.choices.find((c) => !c.disabled)!.id);
+  while (g.phase !== 'match') act(g, firstChoice(g));
   act(g, 'auto');
   assert.equal(g.match!.step, 'done');
   assert.equal(g.match!.seg, 6);
@@ -187,7 +193,7 @@ test('전술 상성: 맞춤 전술은 실제로 유리하고, 유불리는 서�
 async function liveGame(seed: number) {
   const { liveTick, liveCommand } = await import('../src/game/match.ts');
   const g = createGame(seed, '실시간', 'analyst');
-  while (g.phase !== 'match') act(g, g.scene.choices.find((c) => !c.disabled)!.id);
+  while (g.phase !== 'match') act(g, firstChoice(g));
   act(g, '433');
   act(g, g.season.style);
   assert.equal(g.match!.step, 'mode');
@@ -273,4 +279,85 @@ test('실시간 경기: 건너뛰면 지금 지시대로 끝까지 진행된다'
   act(g, 'skip');
   assert.equal(g.match!.step, 'done');
   assert.deepEqual(g.scene.choices.map((c) => c.id), ['next']);
+});
+
+/** 첫 여름 이적시장 목록 화면까지 간다. */
+function toMarket(seed: number): Game {
+  const g = createGame(seed, '시장', 'scout');
+  while (g.phase !== 'market') act(g, g.scene.choices.find((c) => !c.disabled)!.id);
+  return g;
+}
+
+test('이적시장: 한 시장에서 여러 명을 영입하고, 판매하고, 마감할 수 있다', () => {
+  const g = toMarket(808);
+  g.job!.budget = 1e6;
+  const w = g.window!;
+  assert.ok(w.list.length >= 6, '여름에는 후보가 여섯 명 넘게 나온다');
+  const before = g.squad.length;
+  for (let k = 0; k < 3; k++) {
+    const d = g.window!.list.find((x) => x.kind !== 'youth')!;
+    act(g, `view:${d.id}`);
+    assert.equal(g.scene.blocks[0]!.kind, 'card', '후보를 누르면 선수 카드가 보인다');
+    act(g, 'buy');
+    assert.ok(g.squad.some((p) => p.id === d.player.id));
+  }
+  assert.equal(g.window!.signed, 3);
+  assert.equal(g.squad.length, before, '주전은 언제나 일곱 명이다');
+  const budget = g.job!.budget;
+  const star = g.squad[5]!;
+  act(g, 'sellmenu');
+  act(g, `sell:${star.id}`);
+  assert.ok(!g.squad.some((p) => p.id === star.id));
+  assert.ok(g.job!.budget > budget, '팔면 이적료가 들어온다');
+  assert.equal(g.squad.length, before);
+  act(g, 'done');
+  assert.equal(g.window, null);
+  assert.ok(g.phase === 'half1' || g.phase === 'match', '시장이 닫히면 전반기가 시작된다');
+});
+
+test('이적시장: 깎아서 제안하면 싸게 사거나, 요구액이 오르거나, 선수가 떠난다', () => {
+  const outcomes = new Set<string>();
+  for (let seed = 0; seed < 40; seed++) {
+    const g = toMarket(9000 + seed);
+    g.job!.budget = 1e6;
+    const d = g.window!.list.find((x) => x.price > 0)!;
+    const price = d.price;
+    act(g, `view:${d.id}`);
+    act(g, 'haggle');
+    const w = g.window!;
+    if (g.squad.some((p) => p.id === d.player.id)) outcomes.add('signed');
+    else if (!w.list.some((x) => x.id === d.id)) outcomes.add('gone');
+    else {
+      assert.ok(w.list.find((x) => x.id === d.id)!.price > price);
+      outcomes.add('up');
+    }
+  }
+  assert.deepEqual([...outcomes].sort(), ['gone', 'signed', 'up']);
+});
+
+test('선수는 세부 포지션, 주발, 능력치 여섯 개를 가진다', async () => {
+  const { statsOf } = await import('../src/game/player.ts');
+  const g = createGame(55, '카드', 'pro');
+  act(g, g.scene.choices[0]!.id);
+  for (const p of g.squad) {
+    assert.ok(p.spot && ['R', 'L', 'B'].includes(p.foot));
+    assert.equal(statsOf(p).length, 6);
+    assert.ok(statsOf(p).every((v) => v >= 15 && v <= 99));
+  }
+});
+
+test('이전 버전(3)의 저장도 불러와 이어 할 수 있다', async () => {
+  const { migrate } = await import('../src/game/career.ts');
+  const g = toMarket(321);
+  const old = JSON.parse(JSON.stringify(g)) as Record<string, unknown> & Game;
+  old.version = 3;
+  for (const p of old.squad) for (const key of ['spot', 'foot', 'weak', 'height', 'dev']) delete (p as unknown as Record<string, unknown>)[key];
+  delete (old as unknown as Record<string, unknown>).window;
+  (old as unknown as Record<string, unknown>).market = [];
+  assert.ok(migrate(old));
+  assert.equal(old.version, 4);
+  assert.ok(old.squad.every((p) => p.spot && p.dev.length === 6));
+  assert.ok(old.window && old.window.list.length > 0, '시장 한가운데 저장이면 시장을 새로 연다');
+  act(old, 'done');
+  assert.ok(old.phase === 'half1' || old.phase === 'match');
 });

@@ -1166,3 +1166,318 @@ button {
 .live__stick .score__num {
   font-size: 2.25rem;
 }
+
+.live__call {
+  margin: 0;
+  min-height: 2.6em;
+  padding: 6px 12px;
+  background: var(--board);
+  color: var(--on-board);
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.live__call--good {
+  color: #9ff0bf;
+  font-weight: 700;
+}
+
+.live__call--bad {
+  color: #ffc2b5;
+  font-weight: 700;
+}
+
+.live__statline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  font-family: var(--font-num);
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.live__statline b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---------- 선수 카드 ---------- */
+
+.choices__group {
+  margin-top: 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.choices__group:first-child {
+  margin-top: 0;
+}
+
+.section__sub {
+  margin: 6px 0 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.teamrate {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.teamrate div {
+  padding: 8px 10px;
+  background: var(--board);
+  color: var(--on-board);
+  border-radius: 4px;
+}
+
+.teamrate dt {
+  font-family: var(--font-num);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  opacity: 0.75;
+}
+
+.teamrate dd {
+  margin: 0;
+  font-family: var(--font-num);
+  font-weight: 600;
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.plist {
+  border-top: 2px solid var(--ink);
+}
+
+.prow {
+  border-bottom: 1px solid var(--line);
+}
+
+.prow__sum {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.prow__sum::-webkit-details-marker {
+  display: none;
+}
+
+.prow__sum::after {
+  content: "▾";
+  color: var(--muted);
+  font-size: 0.75rem;
+  transition: transform 0.15s;
+}
+
+.prow__box[open] .prow__sum::after {
+  transform: rotate(180deg);
+}
+
+.prow__name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.prow__name .muted {
+  font-weight: 400;
+  font-size: 0.8125rem;
+}
+
+.prow__ovr {
+  font-family: var(--font-num);
+  font-weight: 600;
+  font-size: 1.5rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.prow__body {
+  display: grid;
+  gap: 10px;
+  padding: 2px 0 12px;
+}
+
+.spot {
+  flex: none;
+  min-width: 2.9em;
+  padding: 3px 4px;
+  border-radius: 3px;
+  text-align: center;
+  font-family: var(--font-num);
+  font-weight: 600;
+  font-size: 0.875rem;
+  letter-spacing: 0.03em;
+  color: #fff;
+  background: #6b7b72;
+}
+
+.spot--GK {
+  background: #b47a00;
+}
+
+.spot--DF {
+  background: #2f62b5;
+}
+
+.spot--MF {
+  background: #1b8a50;
+}
+
+.spot--FW {
+  background: #c23a27;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px 14px;
+  margin: 0;
+}
+
+.facts dt {
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.statgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 4px 18px;
+  margin: 0;
+}
+
+.statgrid__row {
+  display: grid;
+  grid-template-columns: 6.5em 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.statgrid__row dt {
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.statgrid__short {
+  display: inline-block;
+  width: 2.4em;
+  font-family: var(--font-num);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.statgrid__row dd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.statbar {
+  flex: 1;
+  height: 6px;
+  background: var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.statbar__fill {
+  display: block;
+  height: 100%;
+}
+
+.statbar__fill--hi {
+  background: #1b9a57;
+}
+
+.statbar__fill--mid {
+  background: #7cb342;
+}
+
+.statbar__fill--low {
+  background: #e0a800;
+}
+
+.statbar__fill--poor {
+  background: #d9534f;
+}
+
+.statgrid__val {
+  width: 1.8em;
+  text-align: right;
+  font-family: var(--font-num);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pcard {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.pcard__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pcard__head .spot {
+  font-size: 1.125rem;
+  padding: 6px 8px;
+}
+
+.pcard__who {
+  flex: 1;
+  min-width: 0;
+}
+
+.pcard__name {
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  line-height: 1.2;
+}
+
+.pcard__who .muted {
+  font-size: 0.8125rem;
+}
+
+.pcard__ovr {
+  display: grid;
+  justify-items: end;
+  font-family: var(--font-num);
+  font-weight: 600;
+  font-size: 2.25rem;
+  line-height: 1;
+}
+
+.pcard__ovr span {
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.pcard__price {
+  font-weight: 700;
+  color: var(--amber);
+}

@@ -131,35 +131,35 @@ export const STYLES: Record<StyleId, { name: string; desc: string }> = {
 export const STYLE_IDS: StyleId[] = ['press', 'possess', 'counter', 'direct', 'wide', 'park'];
 
 export const FOCUSES: Record<FocusId, { name: string; desc: string }> = {
-  attack: { name: '공격 전개', desc: '공격력이 조금 오른다' },
-  defense: { name: '수비 조직', desc: '수비력이 조금 오른다' },
+  attack: { name: '공격 전개', desc: '팀 ATT(공격 지표)가 조금 오른다' },
+  defense: { name: '수비 조직', desc: '팀 DEF(수비 지표)가 조금 오른다' },
   fitness: { name: '체력', desc: '후반기에 강해지고 전방 압박이 지치지 않는다' },
   youth: { name: '유망주 육성', desc: '23세 이하 선수가 더 빨리 큰다' },
 };
 export const FOCUS_IDS: FocusId[] = ['attack', 'defense', 'fitness', 'youth'];
 
 export const PLANS: Record<PlanId, { name: string; desc: string }> = {
-  allout: { name: '총력전', desc: '공격을 끌어올린다. 수비와 선수층이 얇아진다' },
+  allout: { name: '총력전', desc: '공격을 끌어올린다. 수비와 스쿼드 뎁스이 얇아진다' },
   steady: { name: '실리 운영', desc: '지지 않는 경기를 한다. 골은 줄어든다' },
   rotate: { name: '컵 대회에 집중', desc: '토너먼트에 주전을 아낀다. 리그는 조금 손해 본다' },
 };
 export const PLAN_IDS: PlanId[] = ['allout', 'steady', 'rotate'];
 
 export const ATTRS: Record<AttrId, { name: string; desc: string }> = {
-  tactics: { name: '전술', desc: '전술 숙련도가 주는 힘이 커진다' },
-  lead: { name: '리더십', desc: '사기를 지키고 선수와 팬을 설득한다' },
-  youth: { name: '육성', desc: '어린 선수가 더 크게 자란다' },
-  deal: { name: '수완', desc: '싸게 사고 비싸게 팔며 이사회를 달랜다' },
-  eye: { name: '안목', desc: '더 좋은 영입 후보가 나오고 잠재력이 보인다' },
+  tactics: { name: '전술 이해도', desc: '전술의 효과와 전술 완성도가 주는 힘이 커지고, 경기 중 전술 변경의 혼선이 줄어든다' },
+  lead: { name: '선수단 장악력', desc: '라커룸 분위기를 지키고 선수와 팬을 설득한다. 하프타임 대화가 잘 통한다' },
+  youth: { name: '유소년 지도', desc: '어린 선수가 더 크게 자란다' },
+  deal: { name: '협상력', desc: '이적료를 깎고 비싸게 팔며 이사회를 달랜다' },
+  eye: { name: '스카우팅', desc: '더 좋은 영입 후보가 나오고 상대 전술과 선수의 포텐셜이 보인다' },
 };
 export const ATTR_IDS: AttrId[] = ['tactics', 'lead', 'youth', 'deal', 'eye'];
 
 export const BACKGROUNDS: Record<BackgroundId, { name: string; desc: string; bonus: Partial<Record<AttrId, number>> }> = {
-  pro: { name: '은퇴한 프로 선수', desc: '리더십 +4, 전술 +2', bonus: { lead: 4, tactics: 2 } },
-  teacher: { name: '체육 교사', desc: '육성 +4, 리더십 +2', bonus: { youth: 4, lead: 2 } },
-  analyst: { name: '전력 분석관', desc: '전술 +4, 안목 +2', bonus: { tactics: 4, eye: 2 } },
-  scout: { name: '스카우터', desc: '안목 +4, 수완 +2', bonus: { eye: 4, deal: 2 } },
-  sales: { name: '영업 사원 출신 조기축구 회장', desc: '수완 +4, 리더십 +2', bonus: { deal: 4, lead: 2 } },
+  pro: { name: '은퇴한 프로 선수', desc: '선수단 장악력 +4, 전술 이해도 +2', bonus: { lead: 4, tactics: 2 } },
+  teacher: { name: '체육 교사', desc: '유소년 지도 +4, 선수단 장악력 +2', bonus: { youth: 4, lead: 2 } },
+  analyst: { name: '전력 분석관', desc: '전술 이해도 +4, 스카우팅 +2', bonus: { tactics: 4, eye: 2 } },
+  scout: { name: '스카우터', desc: '스카우팅 +4, 협상력 +2', bonus: { eye: 4, deal: 2 } },
+  sales: { name: '영업 사원 출신 조기축구 회장', desc: '협상력 +4, 선수단 장악력 +2', bonus: { deal: 4, lead: 2 } },
 };
 export const BACKGROUND_IDS: BackgroundId[] = ['pro', 'teacher', 'analyst', 'scout', 'sales'];
 
@@ -168,7 +168,7 @@ export const POS_NAME: Record<Pos, string> = { GK: '골키퍼', DF: '수비수',
 export const LINEUP: Pos[] = ['GK', 'DF', 'DF', 'MF', 'MF', 'FW', 'FW'];
 
 export const TRAITS: Record<TraitId, { name: string; desc: string }> = {
-  leader: { name: '리더', desc: '팀 사기가 덜 흔들린다' },
+  leader: { name: '리더', desc: '라커룸 분위기가 덜 흔들린다' },
   glass: { name: '유리몸', desc: '자주 다친다' },
   clutch: { name: '강심장', desc: '토너먼트에 강하다' },
   rebel: { name: '말썽꾼', desc: '사건의 중심에 선다' },

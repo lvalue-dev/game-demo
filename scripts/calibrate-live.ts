@@ -4,6 +4,7 @@
 import { writeFileSync } from 'node:fs';
 import { TICKS, createLive, lineup, stepLive } from '../manager/src/game/live.ts';
 import { tuning } from '../manager/src/game/live-tuning.ts';
+import { makeDetail } from '../manager/src/game/player.ts';
 import type { LiveEnv, LiveSide } from '../manager/src/game/live.ts';
 import type { Dials, Pos, RoleId, ShapeId, StyleId } from '../manager/src/game/types.ts';
 
@@ -47,7 +48,8 @@ export function run(a: Setup, b: Setup, n: number, seed = 1): Stat {
   for (let k = 0; k < n; k++) {
     const r = { rng: seed * 100003 + k * 7919 };
     const env: LiveEnv = { sides: [side(a), side(b)] };
-    const squad = (shape: ShapeId) => lineup(shape, KEYS.map((pos, i) => ({ name: `${pos}${i}`, pos, ovr: 60, key: i })), (pos) => ({ name: '후보', pos, ovr: 56, key: -1 }));
+    // 실제 경기처럼 선수마다 세부 포지션과 능력치 개인차를 준다.
+    const squad = (shape: ShapeId) => lineup(shape, KEYS.map((pos, i) => ({ name: `${pos}${i}`, pos, ovr: 60, key: i, ...makeDetail(r, pos) })), (pos, spot) => ({ name: '후보', pos, ovr: 56, key: -1, ...makeDetail(r, pos, spot) }));
     const L = createLive(squad(env.sides[0].shape), squad(env.sides[1].shape), [env.sides[0].shape, env.sides[1].shape]);
     let gf = 0;
     let ga = 0;

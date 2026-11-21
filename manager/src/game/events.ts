@@ -52,7 +52,7 @@ export function fx(g: Game, e: Fx): string[] {
   const sign = (v: number): string => (v > 0 ? `+${v}` : `${v}`);
   if (e.morale) {
     g.morale = clamp(g.morale + e.morale, 0, 100);
-    out.push(`사기 ${sign(e.morale)}`);
+    out.push(`분위기 ${sign(e.morale)}`);
   }
   if (e.confidence && g.job) {
     g.job.confidence = clamp(g.job.confidence + e.confidence, 0, 100);
@@ -64,7 +64,7 @@ export function fx(g: Game, e: Fx): string[] {
   }
   if (e.cohesion) {
     g.cohesion = clamp(g.cohesion + e.cohesion, 0, 100);
-    out.push(`전술 숙련도 ${sign(e.cohesion)}`);
+    out.push(`전술 완성도 ${sign(e.cohesion)}`);
   }
   if (e.att) {
     g.season.attMod += e.att;
@@ -76,11 +76,11 @@ export function fx(g: Game, e: Fx): string[] {
   }
   if (e.depth) {
     g.season.depthMod += e.depth;
-    out.push(`이번 시즌 선수층 ${sign(e.depth)}`);
+    out.push(`이번 시즌 스쿼드 뎁스 ${sign(e.depth)}`);
   }
   if (e.rep) {
     g.manager.rep = clamp(g.manager.rep + e.rep, 0, 100);
-    out.push(`평판 ${sign(e.rep)}`);
+    out.push(`명성 ${sign(e.rep)}`);
   }
   return out;
 }
@@ -103,23 +103,23 @@ export const EVENTS: GameEvent[] = [
     id: 'wantaway', weight: 3,
     when: (g) => isClub(g) && best(g).ovr >= stage(g).level + 5,
     title: () => '에이스의 이적 요청',
-    text: (g) => ko`실력 ${best(g).ovr}의 에이스 ${best(g).name}이 감독실 문을 두드렸다. 더 큰 무대에서 뛰고 싶다고 한다. 에이전트는 이미 다른 구단과 통화 중이라는 소문이다.`,
+    text: (g) => ko`OVR ${best(g).ovr}의 에이스 ${best(g).name}이 감독실 문을 두드렸다. 더 큰 무대에서 뛰고 싶다고 한다. 에이전트는 이미 다른 구단과 통화 중이라는 소문이다.`,
     choices: (g) => {
       const star = best(g);
       const fee = Math.round(valueOf(star, stage(g).level, money(g)) * 1.2);
       return [
         {
-          id: 'talk', label: '직접 설득한다', detail: '리더십 판정. 실패하면 마음이 떠난 채로 뛴다',
+          id: 'talk', label: '직접 설득한다', detail: '장악력 판정. 실패하면 마음이 떠난 채로 뛴다',
           run: (h) => roll(h, 'lead')
             ? { text: ko`한 시간 넘게 이야기했다. ${star.name}은 고개를 끄덕였다. "이번 시즌은 감독님과 끝까지 갑니다."`, tone: 'good', effects: fx(h, { morale: 6 }) }
-            : (star.temp -= 3, { text: ko`설득은 통하지 않았다. ${star.name}은 훈련장에 나오지만 눈빛이 예전 같지 않다.`, tone: 'bad', effects: [`${star.name} 실력 -3 (이번 시즌)`, ...fx(h, { morale: -5 })] }),
+            : (star.temp -= 3, { text: ko`설득은 통하지 않았다. ${star.name}은 훈련장에 나오지만 눈빛이 예전 같지 않다.`, tone: 'bad', effects: [`${star.name} OVR -3 (이번 시즌)`, ...fx(h, { morale: -5 })] }),
         },
         {
           id: 'sell', label: `${won(fee)}에 판다`, detail: '돈은 생기지만 전력이 빠진다',
           run: (h) => {
             const fill = makePlayer(h, star.pos, stage(h).level - 2, int(h, 21, 27), stage(h).region);
             h.squad = h.squad.map((p) => (p.id === star.id ? fill : p));
-            return { text: ko`${star.name}은 짐을 쌌다. 빈자리는 실력 ${fill.ovr}의 ${fill.name}이 맡는다. 팬들은 아쉬워하지만 통장은 두둑해졌다.`, tone: 'plain', effects: fx(h, { budget: fee, morale: -4 }) };
+            return { text: ko`${star.name}은 짐을 쌌다. 빈자리는 OVR ${fill.ovr}의 ${fill.name}이 맡는다. 팬들은 아쉬워하지만 통장은 두둑해졌다.`, tone: 'plain', effects: fx(h, { budget: fee, morale: -4 }) };
           },
         },
         {
@@ -138,7 +138,7 @@ export const EVENTS: GameEvent[] = [
       const rebel = troublemaker(g);
       return [
         {
-          id: 'dinner', label: '둘을 데리고 밥을 먹는다', detail: '리더십 판정',
+          id: 'dinner', label: '둘을 데리고 밥을 먹는다', detail: '장악력 판정',
           run: (h) => roll(h, 'lead', 0.1)
             ? { text: '고깃집에서 세 시간. 마지막엔 둘이 어깨동무를 하고 나왔다. 다음 날 훈련 분위기가 달라졌다.', tone: 'good', effects: fx(h, { morale: 8, cohesion: 4 }) }
             : { text: '식사 자리는 어색한 침묵으로 끝났다. 계산만 감독이 했다.', tone: 'bad', effects: fx(h, { morale: -5 }) },
@@ -151,7 +151,7 @@ export const EVENTS: GameEvent[] = [
           id: 'bench', label: ko`${rebel.name}을 명단에서 뺀다`, detail: '본보기. 당분간 전력이 빠진다',
           run: (h) => {
             rebel.temp -= 2;
-            return { text: ko`${rebel.name}은 두 경기를 관중석에서 봤다. 돌아온 뒤로는 조용하다. 조금 지나치게 조용하다.`, tone: 'plain', effects: [`${rebel.name} 실력 -2 (이번 시즌)`, ...fx(h, { morale: 2 })] };
+            return { text: ko`${rebel.name}은 두 경기를 관중석에서 봤다. 돌아온 뒤로는 조용하다. 조금 지나치게 조용하다.`, tone: 'plain', effects: [`${rebel.name} OVR -2 (이번 시즌)`, ...fx(h, { morale: 2 })] };
           },
         },
       ];
@@ -174,7 +174,7 @@ export const EVENTS: GameEvent[] = [
         run: (h: Game): Outcome => ({ text: '이적 시장 마감 직전에 임대 계약 두 건을 성사시켰다. 급한 불은 껐다.', tone: 'plain' as Tone, effects: fx(h, { budget: -Math.min(h.job!.budget, money(h) * 0.15), depth: 2 }) }),
       }] : []),
       {
-        id: 'grit', label: '있는 선수로 버틴다', detail: '선수층이 얇아진다',
+        id: 'grit', label: '있는 선수로 버틴다', detail: '스쿼드 뎁스이 얇아진다',
         run: (h) => ({ text: '남은 선수들이 이를 악물었다. 하지만 일정은 사정을 봐주지 않는다.', tone: 'bad', effects: fx(h, { depth: -3, morale: 2 }) }),
       },
     ],
@@ -192,7 +192,7 @@ export const EVENTS: GameEvent[] = [
         run: (h) => ({ text: '명단이 발표되자 라커룸이 술렁였다. 윗선은 흡족해했다.', tone: 'plain', effects: fx(h, { confidence: 8, morale: -7 }) }),
       },
       {
-        id: 'refuse', label: '명단은 감독이 짠다고 말한다', detail: '수완 판정. 실패하면 미운털이 박힌다',
+        id: 'refuse', label: '명단은 감독이 짠다고 말한다', detail: '협상력 판정. 실패하면 미운털이 박힌다',
         run: (h) => roll(h, 'deal')
           ? { text: '정중하지만 분명하게 말했다. 수화기 너머에서 잠시 침묵이 흐르더니 웃음소리가 들렸다. "그래, 그게 감독이지."', tone: 'good', effects: fx(h, { morale: 6, confidence: 2 }) }
           : { text: '전화는 차갑게 끊겼다. 선수들은 감독 편이지만, 윗선은 그렇지 않다.', tone: 'bad', effects: fx(h, { morale: 5, confidence: -8 }) },
@@ -208,7 +208,7 @@ export const EVENTS: GameEvent[] = [
       : '큰 경기를 앞둔 기자회견. 상대 감독이 먼저 "저 팀 축구는 10년 전 축구"라고 말했다. 기자들이 답을 기다린다.',
     choices: () => [
       {
-        id: 'fire', label: '맞받아친다', detail: '리더십 판정. 선수단이 불타거나, 역풍을 맞거나',
+        id: 'fire', label: '맞받아친다', detail: '장악력 판정. 선수단이 불타거나, 역풍을 맞거나',
         run: (h) => roll(h, 'lead')
           ? { text: '"경기장에서 봅시다. 90분이면 충분합니다." 선수들이 그 영상을 돌려 봤다. 훈련장 공기가 달라졌다.', tone: 'good', effects: fx(h, { morale: 10 }) }
           : { text: '말이 조금 지나쳤다. 발언은 종일 화제가 됐고, 선수들은 괜한 부담을 안고 뛰게 됐다.', tone: 'bad', effects: fx(h, { morale: -6 }) },
@@ -233,7 +233,7 @@ export const EVENTS: GameEvent[] = [
             const gemPlayer = makePlayer(h, weakest(h.squad, 'FW').ovr < weakest(h.squad, 'DF').ovr ? 'FW' : 'DF', level + 1, int(h, 19, 21), region);
             gemPlayer.pot = Math.min(99, gemPlayer.ovr + int(h, 8, 14) + Math.round(h.manager.attrs.eye / 3));
             const out = addPlayer(h, gemPlayer);
-            return { text: ko`${gemPlayer.name}이 합류했다. ${gemPlayer.age}세, 실력 ${gemPlayer.ovr}, ${potentialText(h, gemPlayer)}. ${out.name} 대신 주전으로 뛴다. 첫 훈련을 본 코치들이 서로 얼굴을 쳐다봤다.`, tone: 'good', effects: fx(h, { budget: -Math.min(h.job!.budget, money(h) * 0.12) }) };
+            return { text: ko`${gemPlayer.name}이 합류했다. ${gemPlayer.age}세, OVR ${gemPlayer.ovr}, ${potentialText(h, gemPlayer)}. ${out.name} 대신 주전으로 뛴다. 첫 훈련을 본 코치들이 서로 얼굴을 쳐다봤다.`, tone: 'good', effects: fx(h, { budget: -Math.min(h.job!.budget, money(h) * 0.12) }) };
           },
         },
         { id: 'pass', label: '지금 선수단을 믿는다', run: (h) => ({ text: '고맙지만 사양했다. 그 선수는 한 달 뒤 다른 팀 유니폼을 입었다.', tone: 'plain', effects: fx(h, { cohesion: 3 }) }) },
@@ -249,13 +249,13 @@ export const EVENTS: GameEvent[] = [
       : `경기장 밖에 현수막이 걸렸다. "이대로는 안 된다." 순위는 ${positionOf(g, myClub(g).league, myClub(g).id)}위, 목표는 ${g.job!.objective}위 이내였다.`,
     choices: () => [
       {
-        id: 'meet', label: '팬들 앞에 직접 선다', detail: '리더십 판정',
+        id: 'meet', label: '팬들 앞에 직접 선다', detail: '장악력 판정',
         run: (h) => roll(h, 'lead')
           ? { text: '변명하지 않고 계획을 설명했다. 박수가 나오지는 않았지만, 현수막은 다음 날 내려갔다.', tone: 'good', effects: fx(h, { confidence: 8, morale: 4 }) }
           : { text: '말을 꺼내기도 전에 야유가 쏟아졌다. 그 장면은 그대로 퍼졌다.', tone: 'bad', effects: fx(h, { confidence: -6, morale: -4 }) },
       },
       {
-        id: 'change', label: '전술을 뜯어고치겠다고 약속한다', detail: '숙련도가 깎이지만 시간을 번다',
+        id: 'change', label: '전술을 뜯어고치겠다고 약속한다', detail: '전술 완성도가 깎이지만 시간을 번다',
         run: (h) => ({ text: '훈련 일정을 전부 바꿨다. 선수들은 혼란스러워하지만 윗선은 "뭔가 하고 있다"고 본다.', tone: 'plain', effects: fx(h, { confidence: 6, cohesion: -15 }) }),
       },
       {
@@ -286,7 +286,7 @@ export const EVENTS: GameEvent[] = [
     id: 'captain', weight: 2,
     when: (g) => g.job!.seasons === 0,
     title: () => '주장 완장',
-    text: (g) => ko`새 팀의 주장을 정해야 한다. 최고참 ${eldest(g).name}(${eldest(g).age}세), 에이스 ${best(g).name}(실력 ${best(g).ovr}), 그리고 ${kid(g).age}세 막내 ${kid(g).name}이 후보로 거론된다.`,
+    text: (g) => ko`새 팀의 주장을 정해야 한다. 최고참 ${eldest(g).name}(${eldest(g).age}세), 에이스 ${best(g).name}(OVR ${best(g).ovr}), 그리고 ${kid(g).age}세 막내 ${kid(g).name}이 후보로 거론된다.`,
     choices: (g) => [
       {
         id: 'old', label: `${eldest(g).name}에게 맡긴다`, detail: '안정적인 선택',
@@ -313,7 +313,7 @@ export const EVENTS: GameEvent[] = [
     text: (g) => ko`토요일 아침 7시 경기인데, 주전 골키퍼 ${keeper(g).name}이 금요일 밤에 연락했다. "감독님, 내일 출근하래요." 후보 골키퍼는 지난주에 이사를 갔다.`,
     choices: (g) => [
       {
-        id: 'call', label: `${keeper(g).name}의 부장에게 전화한다`, detail: '수완 판정',
+        id: 'call', label: `${keeper(g).name}의 부장에게 전화한다`, detail: '협상력 판정',
         run: (h) => roll(h, 'deal')
           ? { text: '"부장님, 이 친구 없으면 우리 동네가 집니다." 10분 통화 끝에 반차를 얻어 냈다. 부장님은 경기도 보러 왔다.', tone: 'good', effects: fx(h, { morale: 8 }) }
           : { text: '부장님은 축구에 관심이 없었다. 통화는 30초 만에 끝났고, 필드 플레이어가 장갑을 꼈다.', tone: 'bad', effects: fx(h, { def: -1, morale: -2 }) },
@@ -337,13 +337,13 @@ export const EVENTS: GameEvent[] = [
         run: (h) => ({ text: '선수 영입은 물 건너갔다. 대신 선수단은 감독이 누구 편인지 알게 됐다.', tone: 'good', effects: fx(h, { budget: -Math.min(h.job!.budget, money(h) * 0.3), morale: 9 }) }),
       },
       {
-        id: 'sponsor', label: '후원사를 직접 찾아 나선다', detail: '수완 판정',
+        id: 'sponsor', label: '후원사를 직접 찾아 나선다', detail: '협상력 판정',
         run: (h) => roll(h, 'deal')
           ? { text: '동네 상가를 사흘 동안 돌았다. 유니폼 소매에 치킨집 로고가 붙었고, 밀린 돈이 해결됐다.', tone: 'good', effects: fx(h, { budget: money(h) * 0.2, morale: 6, confidence: 5 }) }
           : { text: '명함만 한 뭉치 받아 왔다. 훈련에 빠진 사흘이 아깝다.', tone: 'bad', effects: fx(h, { cohesion: -5, morale: -4 }) },
       },
       {
-        id: 'ask', label: '선수들에게 기다려 달라고 한다', detail: '리더십 판정',
+        id: 'ask', label: '선수들에게 기다려 달라고 한다', detail: '장악력 판정',
         run: (h) => roll(h, 'lead', -0.1)
           ? { text: '"이번 시즌 끝날 때까지만 나를 믿어 달라." 아무도 훈련에 빠지지 않았다.', tone: 'good', effects: fx(h, { morale: 4 }) }
           : { text: '두 명이 팀을 떠났다. 남은 선수들의 발도 무겁다.', tone: 'bad', effects: fx(h, { depth: -3, morale: -8 }) },
@@ -362,20 +362,20 @@ export const EVENTS: GameEvent[] = [
           const p = kid(h);
           if (chance(h, p.trait === 'glass' ? 0.5 : 0.25)) {
             p.temp -= 3;
-            return { text: ko`${p.name}은 한 달 만에 피로 골절로 쓰러졌다. 의무팀장은 아무 말도 하지 않았다.`, tone: 'bad', effects: [`${p.name} 실력 -3 (이번 시즌)`] };
+            return { text: ko`${p.name}은 한 달 만에 피로 골절로 쓰러졌다. 의무팀장은 아무 말도 하지 않았다.`, tone: 'bad', effects: [`${p.name} OVR -3 (이번 시즌)`] };
           }
           p.ovr = Math.min(p.pot, p.ovr + 3);
-          return { text: ko`${p.name}은 경기를 뛸수록 달라졌다. 석 달 만에 다른 선수가 됐다.`, tone: 'good', effects: [`${p.name} 실력 +3`] };
+          return { text: ko`${p.name}은 경기를 뛸수록 달라졌다. 석 달 만에 다른 선수가 됐다.`, tone: 'good', effects: [`${p.name} OVR +3`] };
         },
       },
       {
-        id: 'slow', label: '천천히 키운다', detail: '육성 판정. 잠재력이 더 열릴 수 있다',
+        id: 'slow', label: '천천히 키운다', detail: '유소년 지도 판정. 포텐셜이 더 열릴 수 있다',
         run: (h) => {
           const p = kid(h);
           if (roll(h, 'youth')) {
             p.pot = Math.min(99, p.pot + 3);
             p.ovr = Math.min(p.pot, p.ovr + 1);
-            return { text: `개인 훈련 프로그램을 따로 짰다. ${p.name}의 약점이던 왼발이 무기가 되어 간다.`, tone: 'good', effects: [`${p.name} 실력 +1, 잠재력 +3`] };
+            return { text: `개인 훈련 프로그램을 따로 짰다. ${p.name}의 약점이던 왼발이 무기가 되어 간다.`, tone: 'good', effects: [`${p.name} OVR +1, 포텐셜 +3`] };
           }
           return { text: ko`${p.name}은 벤치에서 조바심을 냈다. 성장은 예상한 만큼만 이뤄졌다.`, tone: 'plain', effects: [] };
         },
@@ -396,7 +396,7 @@ export const EVENTS: GameEvent[] = [
           ? { text: '수정은 정확히 들어맞았다. 상대는 준비해 온 압박이 헛도는 걸 보고 당황했다.', tone: 'good', effects: fx(h, { att: 1, def: 1 }) }
           : { text: '고치려다 원래 잘하던 것까지 흔들렸다.', tone: 'bad', effects: fx(h, { cohesion: -10 }) },
       },
-      { id: 'keep', label: '하던 대로 밀고 간다', run: (h) => ({ text: '선수들에게 익숙한 것을 지켰다. 숙련도는 계속 쌓인다.', tone: 'plain', effects: fx(h, { cohesion: 5 }) }) },
+      { id: 'keep', label: '하던 대로 밀고 간다', run: (h) => ({ text: '선수들에게 익숙한 것을 지켰다. 전술 완성도는 계속 쌓인다.', tone: 'plain', effects: fx(h, { cohesion: 5 }) }) },
     ],
   },
   {
@@ -406,7 +406,7 @@ export const EVENTS: GameEvent[] = [
     text: () => '일요일 아침 운동장에 도착하니 배드민턴 동호회가 먼저 와 있다. 구청 예약 시스템이 또 말썽이다. 상대 팀은 30분 뒤에 도착한다.',
     choices: () => [
       {
-        id: 'nego', label: '동호회 회장과 담판을 짓는다', detail: '수완 판정',
+        id: 'nego', label: '동호회 회장과 담판을 짓는다', detail: '협상력 판정',
         run: (h) => roll(h, 'deal')
           ? { text: '음료수 한 상자와 다음 달 예약 양보로 합의했다. 배드민턴 회원 몇은 남아서 응원까지 했다.', tone: 'good', effects: fx(h, { morale: 6 }) }
           : { text: '언성만 높아졌다. 결국 옆 동네 학교 운동장까지 뛰어가서 경기를 치렀다. 몸도 못 풀었다.', tone: 'bad', effects: fx(h, { morale: -5 }) },
@@ -440,10 +440,10 @@ export const EVENTS: GameEvent[] = [
         run: (h) => ({ text: ko`${best(h).name}은 14시간을 날아와 이틀 뒤 경기에 나섰다. 뛰어 주긴 했다.`, tone: 'plain', effects: fx(h, { morale: -4 }) }),
       },
       {
-        id: 'talk', label: '소속팀 감독과 직접 통화한다', detail: '수완 판정',
+        id: 'talk', label: '소속팀 감독과 직접 통화한다', detail: '협상력 판정',
         run: (h) => roll(h, 'deal')
           ? { text: '출전 시간을 조절하기로 약속하고 양해를 얻었다. 선수는 홀가분하게 합류했다.', tone: 'good', effects: fx(h, { morale: 6, confidence: 3 }) }
-          : (best(h).temp -= 3, { text: ko`통화는 평행선이었다. 결국 ${best(g).name}은 반쪽짜리 몸으로 합류했다.`, tone: 'bad', effects: [`${best(g).name} 실력 -3 (올해)`] }),
+          : (best(h).temp -= 3, { text: ko`통화는 평행선이었다. 결국 ${best(g).name}은 반쪽짜리 몸으로 합류했다.`, tone: 'bad', effects: [`${best(g).name} OVR -3 (올해)`] }),
       },
       {
         id: 'rest', label: '이번엔 쉬게 한다', detail: '에이스 없이 치른다',
@@ -458,7 +458,7 @@ export const EVENTS: GameEvent[] = [
     text: (g) => ko`대표팀 명단이 발표되자 여론이 들끓는다. 리그 득점 선두를 왜 안 뽑았느냐는 것이다. 감독이 보기에 그 선수는 지금 전술에 맞지 않는다. ${eldest(g).name}을 계속 뽑는 것도 도마에 올랐다.`,
     choices: () => [
       {
-        id: 'explain', label: '기자회견에서 이유를 설명한다', detail: '리더십 판정',
+        id: 'explain', label: '기자회견에서 이유를 설명한다', detail: '장악력 판정',
         run: (h) => roll(h, 'lead')
           ? { text: '전술판까지 들고 나와 20분 동안 설명했다. 다음 날 기사 제목이 달라졌다. "감독에게는 계획이 있다."', tone: 'good', effects: fx(h, { confidence: 6, morale: 4 }) }
           : { text: '설명은 변명으로 들렸다. 논란은 더 커졌다.', tone: 'bad', effects: fx(h, { confidence: -6 }) },

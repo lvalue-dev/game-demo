@@ -8,6 +8,7 @@ import { liveAdvice, liveCommand, liveTick } from '../manager/src/game/match.ts'
 import type { StyleId } from '../manager/src/game/types.ts';
 
 const hintOf = (g: Game, st: StyleId): string | undefined => liveAdvice(g).hints[st];
+import { weakest } from '../manager/src/game/squad.ts';
 import type { Game } from '../manager/src/game/types.ts';
 
 const runs = Number(process.argv[2] ?? 200);
@@ -64,8 +65,14 @@ function choose(g: Game, dice: { rng: number }): string {
     case 'focus': return 'attack';
     case 'market':
     case 'winter': {
-      const sign = open.find((c) => c.id === 'sign0');
-      return sign ? sign.id : open.find((c) => c.id === 'youth')?.id ?? 'skip';
+      // 주전보다 2 이상 좋은 후보 중 가장 큰 보강을 예산 안에서 두 명까지 데려온다.
+      const w = g.window!;
+      if (w.view) return open.some((c) => c.id === 'buy') ? 'buy' : 'back';
+      const best = w.list
+        .filter((d) => d.price <= g.job!.budget && d.player.ovr - weakest(g.squad, d.player.pos).ovr >= 2)
+        .sort((a, b) => (b.player.ovr - weakest(g.squad, b.player.pos).ovr) - (a.player.ovr - weakest(g.squad, a.player.pos).ovr))[0];
+      if (best && w.signed < 2 && (w.kind === 'summer' || w.signed < 1)) return `view:${best.id}`;
+      return 'done';
     }
     case 'plan': return 'steady';
     case 'growth': return open.sort((a, b) => a.label.localeCompare(b.label))[Math.floor(rand(dice) * open.length)]!.id;

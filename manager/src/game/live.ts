@@ -5,7 +5,8 @@
 import { tuning } from './live-tuning.ts';
 import { rand } from './rng.ts';
 import type { Rng } from './rng.ts';
-import type { Dials, LiveFlight, LiveHow, LivePlayer, LiveState, LiveTeam, Pos, RoleId, ShapeId, StyleId } from './types.ts';
+import { SPOTS } from './player.ts';
+import type { Dials, Foot, LiveFlight, LiveHow, LivePlayer, LiveState, LiveTeam, Pos, RoleId, ShapeId, Spot, StyleId } from './types.ts';
 
 /** 90분은 1800틱, 1분은 20틱이다. */
 export const TICKS = 1800;
@@ -71,49 +72,120 @@ export const SLOTS: Record<ShapeId, Slot[]> = {
 
 const RANK: Record<Pos, number> = { GK: 0, DF: 1, MF: 2, FW: 3 };
 
+/** 대형의 자리가 어떤 세부 포지션인지. 위쪽(v가 작은 쪽)이 공격 방향에서 왼쪽이다. */
+export function slotSpot(s: Slot): Spot {
+  if (s.line === 'GK') return 'GK';
+  const side = s.v < 20 ? 'L' : s.v > 48 ? 'R' : 'C';
+  if (s.line === 'DF') return side === 'L' ? 'LB' : side === 'R' ? 'RB' : 'CB';
+  if (s.line === 'MF') return side === 'L' ? 'LM' : side === 'R' ? 'RM' : s.u <= 42 ? 'CDM' : s.u >= 55 ? 'CAM' : 'CM';
+  return side === 'L' ? 'LW' : side === 'R' ? 'RW' : 'ST';
+}
+
+const DEPTH: Partial<Record<Spot, number>> = { CDM: 0, CM: 1, CAM: 2 };
+
+/** 선수를 그 자리에 세웠을 때의 어색함. 0이면 제자리다. */
+function misfit(spot: Spot, slot: Slot): number {
+  const want = slotSpot(slot);
+  if (spot === want) return 0;
+  if ((spot === 'GK') !== (want === 'GK')) return 100;
+  const a = SPOTS[spot];
+  const b = SPOTS[want];
+  return Math.abs(RANK[a.pos] - RANK[b.pos]) * 3 + Math.abs(a.side - b.side) * 1.5 + Math.abs((DEPTH[spot] ?? 1) - (DEPTH[want] ?? 1)) * 0.5 + 0.5;
+}
+
+/** 세부 포지션마다 관례적인 등번호. 앞 번호가 차 있으면 다음 번호를 쓴다. */
+const SHIRTS: Record<Spot, number[]> = {
+  GK: [1], RB: [2, 22], LB: [3, 23], CB: [4, 5, 15], CDM: [6, 16], CM: [8, 14, 18], CAM: [10, 20],
+  RM: [7, 17], LM: [11, 21], RW: [7, 17], LW: [11, 21], ST: [9, 19, 10],
+};
+
+function shirt(spot: Spot, used: Set<number>): number {
+  let n = SHIRTS[spot].find((x) => !used.has(x)) ?? 12;
+  while (used.has(n)) n++;
+  used.add(n);
+  return n;
+}
+
 export interface Entrant {
   name: string;
   pos: Pos;
   ovr: number;
   /** 주전 선수면 그 선수의 id, 아니면 -1. */
   key: number;
+  spot: Spot;
+  foot: Foot;
+  dev: number[];
 }
 
-/** 자리에 앉히는 순서. 골키퍼, 수비수, 미드필더(잘하는 순), 공격수(잘하는 선수가 마지막). */
-function seatOrder<T extends { pos: Pos; ovr: number; key: number }>(list: T[]): T[] {
-  const weight = (e: T): number => (e.key >= 0 ? 1000 : 0) + e.ovr;
-  return [...list].sort((a, b) => RANK[a.pos] - RANK[b.pos] || (a.pos === 'FW' ? weight(a) - weight(b) : weight(b) - weight(a)));
-}
-
-/** 주전 선수들에 후보를 보태 열한 명을 만든다. 후보는 대형에 모자란 자리부터 채운다. */
-export function lineup(shape: ShapeId, keys: Entrant[], filler: (pos: Pos) => Entrant): LivePlayer[] {
-  const slots = SLOTS[shape];
-  const list = [...keys];
-  let spare = 11 - list.length;
-  for (const pos of ['GK', 'DF', 'MF', 'FW'] as Pos[]) {
-    let need = slots.filter((s) => s.line === pos).length - keys.filter((k) => k.pos === pos).length;
-    while (need-- > 0 && spare > 0) {
-      list.push(filler(pos));
-      spare--;
+/** 선수들을 자리에 앉힌다. 주전부터, 잘하는 선수부터 자기 포지션에 가장 가까운 빈자리를 고른다. */
+function seat<T extends { spot: Spot; ovr: number; key: number }>(list: T[], slots: Slot[], free: number[]): Map<number, T> {
+  const out = new Map<number, T>();
+  const order = [...list].sort((a, b) => (b.key >= 0 ? 1 : 0) - (a.key >= 0 ? 1 : 0) || b.ovr - a.ovr);
+  const open = [...free];
+  for (const e of order) {
+    if (open.length === 0) break;
+    let best = 0;
+    for (let k = 1; k < open.length; k++) {
+      if (misfit(e.spot, slots[open[k] as number] as Slot) < misfit(e.spot, slots[open[best] as number] as Slot)) best = k;
     }
+    out.set(open[best] as number, e);
+    open.splice(best, 1);
   }
-  while (spare-- > 0) list.push(filler('MF'));
-  return seatOrder(list).map((e, i) => ({ n: i + 1, name: e.name, line: e.pos, slot: i, key: e.key, ovr: e.ovr, x: 0, y: 0, px: 0, py: 0, off: false }));
+  return out;
+}
+
+/** 주전 선수들을 세우고, 남은 자리는 그 자리에 맞는 후보로 채운다. 배열 순서가 곧 자리 순서다. */
+export function lineup(shape: ShapeId, keys: Entrant[], filler: (pos: Pos, spot: Spot) => Entrant): LivePlayer[] {
+  const slots = SLOTS[shape];
+  const seated = seat(keys.slice(0, 11), slots, slots.map((_, i) => i));
+  const used = new Set<number>();
+  return slots.map((slot, i) => {
+    const e = seated.get(i) ?? filler(slot.line, slotSpot(slot));
+    return {
+      n: shirt(e.key >= 0 ? e.spot : slotSpot(slot), used), name: e.name, line: e.pos, slot: i, key: e.key, ovr: e.ovr,
+      x: 0, y: 0, px: 0, py: 0, off: false, spot: e.spot, foot: e.foot, dev: e.dev,
+    };
+  });
 }
 
 /** 대형을 바꾼다. 선수는 그대로 두고 자리만 다시 나눈다. 열 명이면 공격 쪽 자리 하나를 비운다. */
 export function reshape(team: LiveTeam, shape: ShapeId): void {
   const slots = SLOTS[shape];
-  const on = seatOrder(team.players.filter((p) => !p.off).map((p) => ({ pos: p.line, ovr: p.ovr, key: p.key, p })));
+  const on = team.players.filter((p) => !p.off);
   const free = slots.map((_, i) => i);
-  if (on.length < free.length) {
+  while (on.length < free.length) {
     const forwards = free.filter((i) => (slots[i] as Slot).line === 'FW');
     const drop = forwards.length >= 2 ? (forwards[0] as number) : (free.filter((i) => (slots[i] as Slot).line === 'MF').pop() as number);
     free.splice(free.indexOf(drop), 1);
   }
-  on.forEach((e, i) => {
-    e.p.slot = free[Math.min(i, free.length - 1)] as number;
+  for (const [slot, p] of seat(on, slots, free)) p.slot = slot;
+}
+
+/** 킥오프를 하는 선수: 가장 앞에 선 선수. */
+function striker(team: LiveTeam, shape: ShapeId): number {
+  let best = 0;
+  let u = -1;
+  team.players.forEach((p, i) => {
+    const s = (SLOTS[shape] as Slot[])[p.slot] as Slot;
+    if (!p.off && s.u > u) {
+      u = s.u;
+      best = i;
+    }
   });
+  return best;
+}
+
+/** 선수의 능력치 개인차에 팀 안에서의 OVR 차이를 더한 값. 0이 팀 평균이다. k는 능력치 순서. */
+function skill(team: LiveTeam, i: number, k: number): number {
+  let sum = 0;
+  let n = 0;
+  for (const p of team.players) {
+    if (p.off) continue;
+    sum += p.ovr;
+    n++;
+  }
+  const p = team.players[i] as LivePlayer;
+  return (p.dev?.[k] ?? 0) + (p.ovr - sum / Math.max(1, n)) * 0.8;
 }
 
 // ---------- 경기 환경 ----------
@@ -140,6 +212,11 @@ export interface LiveEnv {
 
 export type LiveEvent =
   | { kind: 'goal'; team: 0 | 1; by: number; how: LiveHow }
+  | { kind: 'shot'; team: 0 | 1; by: number; result: 'save' | 'corner' | 'off'; xg: number }
+  | { kind: 'foul'; team: 0 | 1; by: number; victim: number; pen: boolean }
+  | { kind: 'offside'; team: 0 | 1; by: number }
+  | { kind: 'steal'; team: 0 | 1; by: number }
+  | { kind: 'corner'; team: 0 | 1 }
   | { kind: 'red'; team: 0 | 1; by: number }
   | { kind: 'half' }
   | { kind: 'full' };
@@ -235,7 +312,7 @@ const emptyTeam = (players: LivePlayer[]): LiveTeam => ({ players, shots: 0, onT
 function kickoffSpots(L: LiveState, shapes: [ShapeId, ShapeId], kicker: 0 | 1): void {
   for (const t of [0, 1] as const) {
     const team = L.teams[t];
-    const last = lastForward(team);
+    const last = striker(team, shapes[t]);
     team.players.forEach((p, i) => {
       const s = (SLOTS[shapes[t]] as Slot[])[p.slot] as Slot;
       let u = Math.min(s.u * 0.8, 49);
@@ -250,19 +327,15 @@ function kickoffSpots(L: LiveState, shapes: [ShapeId, ShapeId], kicker: 0 | 1): 
   }
 }
 
-const lastForward = (team: LiveTeam): number => {
-  for (let i = team.players.length - 1; i >= 0; i--) if (!(team.players[i] as LivePlayer).off) return i;
-  return 0;
-};
 
 export function createLive(mine: LivePlayer[], theirs: LivePlayer[], shapes: [ShapeId, ShapeId]): LiveState {
   const L: LiveState = {
     tick: 0, teams: [emptyTeam(mine), emptyTeam(theirs)], ball: { x: W / 2, y: CY, px: W / 2, py: CY },
     owner: null, flight: null, held: 0, sinceWin: 99, winU: 50, wait: 3, restart: 'kick', next: null, set: 0, lastKind: 'pass',
-    halfTimeDone: false, talked: false, confusedUntil: 0, over: false,
+    calls: [], halfTimeDone: false, talked: false, confusedUntil: 0, over: false,
   };
   kickoffSpots(L, shapes, 0);
-  L.next = { team: 0, i: lastForward(L.teams[0]), x: W / 2, y: CY };
+  L.next = { team: 0, i: striker(L.teams[0], shapes[0]), x: W / 2, y: CY };
   return L;
 }
 
@@ -413,7 +486,8 @@ function move(L: LiveState, env: LiveEnv): void {
       const dy = a.y - p.y;
       const dist = Math.hypot(dx, dy);
       if (dist < 0.01) return;
-      const step = Math.min(dist, a.speed);
+      const pace = p.line === 'GK' ? 1 : 1 + (p.dev?.[0] ?? 0) * 0.006;
+      const step = Math.min(dist, a.speed * pace);
       p.x += (dx / dist) * step;
       p.y += (dy / dist) * step;
     });
@@ -421,6 +495,9 @@ function move(L: LiveState, env: LiveEnv): void {
 }
 
 // ---------- 공 ----------
+
+/** 이번 틱의 사건을 모으는 곳. stepLive가 틱마다 새로 건다. */
+let emit: LiveEvent[] = [];
 
 /** 공의 주인이 바뀐다. 상대에게 넘어갔으면 "되찾은 자리"를 적어 둔다. */
 function gain(L: LiveState, team: 0 | 1, i: number): void {
@@ -481,7 +558,10 @@ function shoot(L: LiveState, env: LiveEnv, r: Rng, t: 0 | 1, i: number, fixed: n
     if (u > offsideLine(L, t) + 1) xg *= 1.6;
   }
   const way = how ?? describe(L);
-  xg = clamp(xg * (way === 'pen' ? 1 : finishing(L, env, t)), 0.004, 0.85);
+  // 슈팅 능력치가 좋은 선수는 더 잘 넣고, 반응속도가 좋은 골키퍼는 더 잘 막는다.
+  const other = (1 - t) as 0 | 1;
+  const touch = Math.exp(0.02 * skill(team, i, 1) - 0.015 * skill(L.teams[other], keeper(L.teams[other]), 3));
+  xg = clamp(xg * touch * (way === 'pen' ? 1 : finishing(L, env, t)), 0.004, 0.9);
   let result: LiveFlight['result'];
   if (rand(r) < xg) result = 'goal';
   else {
@@ -496,7 +576,7 @@ function shoot(L: LiveState, env: LiveEnv, r: Rng, t: 0 | 1, i: number, fixed: n
   const gu = result === 'save' ? W - 2.5 : W + (result === 'goal' ? 1.2 : 2.5);
   L.ball.x = p.x;
   L.ball.y = p.y;
-  launch(L, { toX: ux(t, gu), toY: vy(t, gy), kind: 'shot', side: t, by: i, team: (1 - t) as 0 | 1, to: keeper(L.teams[1 - t] as LiveTeam), result, speed: 16, how: way });
+  launch(L, { toX: ux(t, gu), toY: vy(t, gy), kind: 'shot', side: t, by: i, team: (1 - t) as 0 | 1, to: keeper(L.teams[1 - t] as LiveTeam), result, speed: 16, how: way, xg });
 }
 
 /** 측면에서 문전으로 올린다. 박스 안의 공격수와 수비수 숫자가 승부를 가른다. */
@@ -512,7 +592,7 @@ function cross(L: LiveState, env: LiveEnv, r: Rng, t: 0 | 1, i: number): void {
   const defenders = foes.players.filter((p) => !p.off && p.line !== 'GK' && inBox(p.x, p.y)).length;
   const tall = attackers.find((j) => side.roles[j] === 'target');
   let win = attackers.length === 0 ? 0 : clamp(0.24 + 0.05 * attackers.length - 0.025 * defenders, 0.1, 0.42) + (tall !== undefined ? 0.07 : 0) + (L.set ? 0.06 : 0);
-  win *= Math.exp(PROG * side.edge);
+  win *= Math.exp(PROG * side.edge + 0.015 * skill(team, i, 2));
   const tu = 94 + rand(r) * 5;
   const tv = CY + (rand(r) - 0.5) * 12;
   const toX = ux(t, tu);
@@ -587,6 +667,7 @@ function pass(L: LiveState, env: LiveEnv, r: Rng, t: 0 | 1, i: number, pressed: 
   if (cu > offU + 0.3 && cu > u) {
     // 오프사이드. 상대 수비가 그 자리에서 다시 시작한다.
     const taker = nearestFoe(L, t, c.x, c.y, true).i;
+    emit.push({ kind: 'offside', team: t, by: best });
     stop(L, 'free', other, taker, c.x, c.y, 3, 0);
     return true;
   }
@@ -606,7 +687,7 @@ function pass(L: LiveState, env: LiveEnv, r: Rng, t: 0 | 1, i: number, pressed: 
     toY = c.y + (H / 2 - c.y) * 0.15;
     q -= 0.1;
   }
-  let fail = (1 - q) * Math.exp(-PROG * side.edge);
+  let fail = (1 - q) * Math.exp(-PROG * side.edge - 0.02 * skill(team, i, 2));
   if (foe.style === 'press' && u < 60) fail *= 1.1;
   if (foe.style === 'park' && cu > 70) fail *= 1.2;
   team.passes++;
@@ -661,7 +742,7 @@ function act(L: LiveState, env: LiveEnv, r: Rng, events: LiveEvent[]): void {
 
   // 태클. 붙은 수비가 공을 뺏거나 반칙을 한다.
   if (near.d < 2.4) {
-    let lose = 0.3 * Math.exp(-PROG * side.edge) * (foe.style === 'press' ? 1.08 : 1) * (side.style === 'possess' ? 0.9 : 1) * (1 + side.dials.tempo * 0.06);
+    let lose = 0.3 * Math.exp(-PROG * side.edge - 0.02 * skill(team, i, 3) + 0.02 * skill(L.teams[other] as LiveTeam, near.i, 4)) * (foe.style === 'press' ? 1.08 : 1) * (side.style === 'possess' ? 0.9 : 1) * (1 + side.dials.tempo * 0.06);
     if (L.held <= 1) lose *= 0.5;
     if (rand(r) < lose) {
       const box = u > 88.5 && Math.abs(v - CY) < 20;
@@ -673,11 +754,13 @@ function act(L: LiveState, env: LiveEnv, r: Rng, events: LiveEvent[]): void {
             events.push({ kind: 'red', team: other, by: near.i });
           }
         }
+        emit.push({ kind: 'foul', team: other, by: near.i, victim: i, pen: box });
         if (box) stop(L, 'free', t, i, ux(t, 94), vy(t, CY), 8, 3);
         else stop(L, 'free', t, i, p.x, p.y, 3, u > 62 ? 2 : 0);
         return;
       }
       gain(L, other, near.i);
+      if (L.winU > 64) emit.push({ kind: 'steal', team: other, by: near.i });
       return;
     }
   }
@@ -712,15 +795,17 @@ function arrive(L: LiveState, env: LiveEnv, r: Rng, events: LiveEvent[]): void {
   L.ball.y = f.toY;
   if (f.result === 'goal') {
     events.push({ kind: 'goal', team: t, by: f.by, how: f.how });
-    stop(L, 'kick', other, lastForward(L.teams[other]), W / 2, CY, 14, 0);
+    stop(L, 'kick', other, striker(L.teams[other], env.sides[other].shape), W / 2, CY, 14, 0);
     return;
   }
+  if (f.kind === 'shot' && f.result !== null) emit.push({ kind: 'shot', team: t, by: f.by, result: f.result as 'save' | 'corner' | 'off', xg: f.xg ?? 0 });
   if (f.result === 'corner') {
+    emit.push({ kind: 'corner', team: t });
     // 코너킥은 측면 미드필더가, 없으면 아무 미드필더나 찬다.
     const team = L.teams[t];
     let taker = team.players.findIndex((p) => !p.off && p.line === 'MF' && slotOf(env, t, p).wide);
     if (taker < 0) taker = team.players.findIndex((p) => !p.off && p.line === 'MF');
-    if (taker < 0) taker = lastForward(team);
+    if (taker < 0) taker = striker(team, env.sides[t].shape);
     stop(L, 'corner', t, taker, ux(t, 104.5), vy(t, vy(t, f.toY) < CY ? 0.5 : 67.5), 6, 1);
     return;
   }
@@ -754,9 +839,10 @@ function arrive(L: LiveState, env: LiveEnv, r: Rng, events: LiveEvent[]): void {
   if (kept) L.lastKind = kind;
 }
 
-/** 한 틱을 진행한다. 골, 퇴장, 전반 종료, 경기 종료가 있으면 돌려준다. */
+/** 한 틱을 진행한다. 골, 슈팅, 파울, 퇴장, 전반 종료, 경기 종료 같은 사건을 돌려준다. */
 export function stepLive(L: LiveState, env: LiveEnv, r: Rng): LiveEvent[] {
   const events: LiveEvent[] = [];
+  emit = events;
   if (L.over) return events;
   L.tick++;
   L.ball.px = L.ball.x;
@@ -808,7 +894,7 @@ export function stepLive(L: LiveState, env: LiveEnv, r: Rng): LiveEvent[] {
     // 후반은 상대의 킥오프로 시작한다.
     kickoffSpots(L, [env.sides[0].shape, env.sides[1].shape], 1);
     L.flight = null;
-    stop(L, 'kick', 1, lastForward(L.teams[1]), W / 2, CY, 3, 0);
+    stop(L, 'kick', 1, striker(L.teams[1], env.sides[1].shape), W / 2, CY, 3, 0);
     L.ball.px = L.ball.x;
     L.ball.py = L.ball.y;
   } else if (L.tick >= TICKS && !shot) {

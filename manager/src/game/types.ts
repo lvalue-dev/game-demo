@@ -1,6 +1,10 @@
 // 감독 커리어 게임 "터치라인"의 자료 구조. 화면과 무관하며 전부 그대로 저장할 수 있는 값이다.
 
 export type Pos = 'GK' | 'DF' | 'MF' | 'FW';
+/** 세부 포지션. */
+export type Spot = 'GK' | 'CB' | 'LB' | 'RB' | 'CDM' | 'CM' | 'CAM' | 'LM' | 'RM' | 'LW' | 'RW' | 'ST';
+/** 주발: 오른발, 왼발, 양발. */
+export type Foot = 'R' | 'L' | 'B';
 /** 전술. 팀이 공을 가졌을 때와 잃었을 때 무엇을 하는지를 정한다. */
 export type StyleId = 'press' | 'possess' | 'counter' | 'direct' | 'wide' | 'park';
 export type ShapeId = '442' | '433' | '4231' | '352' | '541';
@@ -30,6 +34,13 @@ export interface Player {
   /** 이번 시즌 동안만 적용되는 실력 보정(불화, 부상 여파 등). */
   temp: number;
   homegrown: boolean;
+  spot: Spot;
+  foot: Foot;
+  /** 약발(1~5). */
+  weak: number;
+  height: number;
+  /** 같은 포지션 선수들과 견준 능력치 개인차(속도, 슈팅, 패스, 드리블, 수비, 피지컬). */
+  dev: number[];
 }
 
 export interface Club {
@@ -163,13 +174,40 @@ export interface Offer {
   pitch: string;
 }
 
-export interface MarketOption {
+/** 이적 시장에 나온 영입 후보. */
+export interface Deal {
   id: string;
-  kind: 'sign' | 'youth' | 'depth' | 'skip';
-  player?: Player;
+  kind: 'sign' | 'youth' | 'free';
+  player: Player;
+  /** 요구 이적료(백만 원). */
   price: number;
-  label: string;
-  detail: string;
+  /** 후보의 성격: 즉시 전력, 유망주, 베테랑, 자유계약, 유스. */
+  tag: string;
+  /** 협상을 시도한 횟수. */
+  tries: number;
+}
+
+/** 다른 구단이 우리 선수에게 낸 이적 제안. */
+export interface Bid {
+  id: string;
+  player: number;
+  club: string;
+  fee: number;
+}
+
+/** 열려 있는 이적 시장. */
+export interface TransferWindow {
+  kind: 'summer' | 'winter';
+  list: Deal[];
+  bids: Bid[];
+  /** 지금 보고 있는 화면: null은 목록, 'sell'은 판매 명단, 그 밖에는 후보 id. */
+  view: string | null;
+  /** 이번 시장에서 있었던 일. */
+  log: string[];
+  signed: number;
+  sold: number;
+  scouted: number;
+  depthDone: boolean;
 }
 
 /** 선수 개인에게 주는 역할. base는 포지션의 기본 역할이다. */
@@ -205,6 +243,9 @@ export interface LivePlayer {
   py: number;
   /** 퇴장당해 경기장에 없다. */
   off: boolean;
+  spot: Spot;
+  foot: Foot;
+  dev: number[];
 }
 
 export interface LiveTeam {
@@ -237,6 +278,8 @@ export interface LiveFlight {
   to: number;
   result: 'goal' | 'save' | 'corner' | 'off' | null;
   how: LiveHow;
+  /** 슈팅이면 그 슈팅의 기대 득점. */
+  xg?: number;
 }
 
 /** 실시간 경기의 상태. 1800틱이 90분이고, 한 틱에 선수는 3미터쯤 움직인다. */
@@ -260,6 +303,8 @@ export interface LiveState {
   /** 세트피스 중인지: 0 아님, 1 코너킥, 2 프리킥, 3 페널티킥. */
   set: 0 | 1 | 2 | 3;
   lastKind: 'pass' | 'long' | 'cross';
+  /** 최근 중계 문구. 화면 아래 자막으로 보여 준다. */
+  calls: { tick: number; text: string; tone: Tone }[];
   halfTimeDone: boolean;
   /** 하프타임 대화를 마쳤는지. 마치기 전에는 후반이 시작되지 않는다. */
   talked: boolean;
@@ -336,7 +381,8 @@ export type Block =
   | { kind: 'stats'; rows: { label: string; value: string; tone?: Tone }[] }
   | { kind: 'matches'; items: MatchLine[] }
   | { kind: 'table'; league: LeagueId }
-  | { kind: 'players'; items: { name: string; pos: Pos; age: number; ovr: number; delta?: number; note?: string }[] }
+  | { kind: 'players'; items: { player: Player; delta?: number; note?: string }[] }
+  | { kind: 'card'; player: Player; price?: string; compare?: Player; note?: string }
   | { kind: 'feed'; items: { who: string; where: string; text: string; tone: Tone }[] };
 
 export interface Choice {
@@ -347,6 +393,8 @@ export interface Choice {
   detail?: string;
   tone?: 'primary' | 'danger';
   disabled?: boolean;
+  /** 선택지 묶음의 제목. 앞 선택지와 다르면 화면에 제목을 넣는다. */
+  group?: string;
 }
 
 export type Phase =
@@ -388,7 +436,7 @@ export interface Game {
   scene: Scene;
   eventId: string | null;
   offers: Offer[];
-  market: MarketOption[];
+  window: TransferWindow | null;
   /** 다음 월드컵 본선 진출을 확정했는지. */
   wcTicket: boolean;
   sacked: boolean;

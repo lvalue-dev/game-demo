@@ -4,12 +4,13 @@
 import { ko } from './josa.ts';
 import { STYLES, STYLE_IDS, foreignName, koreanName } from './data.ts';
 import { HALF, PER_MIN, TICKS, createLive, lineup, reshape, stepLive } from './live.ts';
-import type { Entrant, LiveEnv } from './live.ts';
+import type { Entrant, LiveEnv, LiveEvent } from './live.ts';
+import { makeDetail } from './player.ts';
 import { baseSide, drilled, skill } from './power.ts';
 import { chance, int, pick, poisson, rand, spread } from './rng.ts';
 import { myClub, stage } from './squad.ts';
 import { BASE, ROLES, SHAPES, SHAPE_IDS, advantage, bestCounter, dialEdge, fits, matchup, roleEdge, shapeEdge, tempoCost, usualShape, why } from './tactics.ts';
-import type { Block, Choice, Dials, Game, LeagueId, LiveHow, LiveState, LogLine, MatchState, Player, RoleId, ShapeId, StyleId, Tone, WeatherId } from './types.ts';
+import type { Block, Choice, Club, Dials, Game, LeagueId, LiveHow, LiveState, LogLine, MatchState, Player, RoleId, ShapeId, StyleId, Tone, WeatherId } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 
@@ -358,7 +359,7 @@ function scene(g: Game): void {
   } else if (m.step === 'plan') {
     g.scene = {
       eyebrow, title: '어떤 축구로 나설까요?',
-      blocks: [{ kind: 'text', text: ko`대형은 ${SHAPES[m.me.shape].name}. 몸에 밴 전술은 ${STYLES[g.season.style].name}이고, 다른 전술은 숙련도의 절반만 나온다. 아래 유불리는 상대의 평소 전술 기준이다. 상대가 오늘 다르게 나올 수도 있다.` }],
+      blocks: [{ kind: 'text', text: ko`대형은 ${SHAPES[m.me.shape].name}. 몸에 밴 전술은 ${STYLES[g.season.style].name}이고, 다른 전술은 전술 완성도의 절반만 나온다. 아래 유불리는 상대의 평소 전술 기준이다. 상대가 오늘 다르게 나올 수도 있다.` }],
       choices: styleChoices(g, m, m.oppUsual, null),
     };
   } else if (m.step === 'mode') {
@@ -391,8 +392,8 @@ function scene(g: Game): void {
       eyebrow, title: '하프타임 라커룸',
       blocks: [scoreBlock(g, m), ...recent, { kind: 'text', text: lead > 0 ? '앞선 채로 들어왔다. 선수들이 감독을 본다.' : lead < 0 ? '뒤진 채로 들어왔다. 라커룸이 조용하다.' : '팽팽한 채로 들어왔다. 선수들이 감독을 본다.' }],
       choices: [
-        { id: 'praise', label: '잘하고 있다고 다독인다', detail: '리더십 판정. 비기거나 한 골 뒤질 때 잘 통한다' },
-        { id: 'blast', label: '물병을 걷어찬다', detail: '리더십 판정. 통하면 크게 살아나고, 안 통하면 얼어붙는다' },
+        { id: 'praise', label: '잘하고 있다고 다독인다', detail: '장악력 판정. 비기거나 한 골 뒤질 때 잘 통한다' },
+        { id: 'blast', label: '물병을 걷어찬다', detail: '장악력 판정. 통하면 크게 살아나고, 안 통하면 얼어붙는다' },
         { id: 'calm', label: '후반 계획만 짚는다', detail: '확실한 작은 효과. 전술 혼선이 줄어든다' },
       ],
     };
@@ -613,17 +614,56 @@ function startLive(g: Game, m: MatchState): void {
   const club = myClub(g);
   const { region } = stage(g);
   const depth = g.depth + g.season.depthMod;
-  const keys: Entrant[] = g.squad.map((p) => ({ name: p.name, pos: p.pos, ovr: p.ovr + p.temp, key: p.id }));
-  const mine = lineup(m.me.shape, keys, (pos) => {
-    const foreign = !club.nation && (region === 'eu' ? chance(g, 0.95) : chance(g, 0.12));
-    const name = foreign ? foreignName(rand(g), rand(g)) : koreanName(rand(g), rand(g), rand(g));
-    return { name, pos, ovr: Math.round(depth + spread(g, -2, 2)), key: -1 };
+  const name = (foreign: boolean): string => (foreign ? foreignName(rand(g), rand(g)) : koreanName(rand(g), rand(g), rand(g)));
+  const keys: Entrant[] = g.squad.map((p) => ({ name: p.name, pos: p.pos, ovr: p.ovr + p.temp, key: p.id, spot: p.spot, foot: p.foot, dev: p.dev }));
+  const mine = lineup(m.me.shape, keys, (pos, spot) => {
+    const d = makeDetail(g, pos, spot);
+    return { name: name(!club.nation && (region === 'eu' ? chance(g, 0.95) : chance(g, 0.12))), pos, ovr: Math.round(depth + spread(g, -2, 2)), key: -1, ...d };
   });
-  const theirs = lineup(m.opp.shape, [], (pos) => {
+  // 상대 선수 이름: 유럽 구단과 외국 대표팀은 외국 이름, 국내 구단은 대부분 한국 이름.
+  const opp = g.clubs[m.oppId] as Club | undefined;
+  const abroad = opp ? (opp.nation ? opp.name !== '대한민국' : opp.league === 'eu1' || opp.league === 'eu2') : false;
+  const theirs = lineup(m.opp.shape, [], (pos, spot) => {
     const base = pos === 'FW' ? m.oppAtt + 1 : pos === 'MF' ? (m.oppAtt + m.oppDef) / 2 : m.oppDef + 1;
-    return { name: '', pos, ovr: Math.round(base + spread(g, -4, 4)), key: -1 };
+    const d = makeDetail(g, pos, spot);
+    return { name: name(abroad || chance(g, 0.12)), pos, ovr: Math.round(base + spread(g, -4, 4)), key: -1, ...d };
   });
   m.live = createLive(mine, theirs, [m.me.shape, m.opp.shape]);
+}
+
+/** 중계 자막. 최근 여섯 줄만 남긴다. */
+function call(L: LiveState, text: string, tone: Tone): void {
+  L.calls.push({ tick: L.tick, text, tone });
+  if (L.calls.length > 6) L.calls.shift();
+}
+
+/** "9번 배규력" 또는 "상대 9번 실바". */
+function who(L: LiveState, t: 0 | 1, i: number): string {
+  const p = L.teams[t].players[i];
+  return p ? `${t === 1 ? '상대 ' : ''}${p.n}번 ${p.name}` : '';
+}
+
+/** 골과 퇴장 말고도 경기 흐름을 자막으로 전한다. */
+function narrate(L: LiveState, events: LiveEvent[]): void {
+  const shotCorner = events.some((e) => e.kind === 'shot' && e.result === 'corner');
+  for (const e of events) {
+    if (e.kind === 'goal') call(L, ko`골! ${who(L, e.team, e.by)}의 득점`, e.team === 0 ? 'good' : 'bad');
+    else if (e.kind === 'shot') {
+      const by = who(L, e.team, e.by);
+      if (e.result === 'save') call(L, e.xg >= 0.25 ? ko`결정적 기회! ${by}의 슈팅을 골키퍼가 막아 냈다` : ko`${by}의 슈팅, 골키퍼 정면`, 'plain');
+      else if (e.result === 'corner') call(L, ko`${by}의 슈팅이 수비 몸에 맞고 코너킥`, 'plain');
+      else call(L, e.xg >= 0.25 ? ko`${by}, 결정적 기회를 놓쳤다` : ko`${by}의 슈팅이 골문을 벗어났다`, 'plain');
+    } else if (e.kind === 'foul') {
+      const victim = who(L, (1 - e.team) as 0 | 1, e.victim);
+      if (e.pen) call(L, ko`페널티킥! ${victim}이 박스 안에서 넘어졌다`, e.team === 1 ? 'good' : 'bad');
+      else call(L, ko`${who(L, e.team, e.by)}의 파울. ${victim}이 프리킥을 얻었다`, 'plain');
+    } else if (e.kind === 'offside') call(L, ko`${who(L, e.team, e.by)} 오프사이드`, 'plain');
+    else if (e.kind === 'steal') call(L, ko`${who(L, e.team, e.by)}이 높은 곳에서 공을 빼앗았다`, e.team === 0 ? 'good' : 'plain');
+    else if (e.kind === 'corner' && !shotCorner) call(L, e.team === 0 ? '우리 코너킥' : '상대 코너킥', 'plain');
+    else if (e.kind === 'red') call(L, ko`레드카드! ${who(L, e.team, e.by)} 퇴장`, e.team === 0 ? 'bad' : 'good');
+    else if (e.kind === 'half') call(L, '전반 종료', 'plain');
+    else if (e.kind === 'full') call(L, '경기 종료', 'plain');
+  }
 }
 
 function liveEnv(g: Game, m: MatchState, L: LiveState): LiveEnv {
@@ -666,6 +706,7 @@ export function liveTick(g: Game): void {
   if (m.confusion < 0 && L.tick > HALF + 5 * PER_MIN) m.confusion = 0;
 
   const events = stepLive(L, liveEnv(g, m, L), g);
+  narrate(L, events);
   const minute = Math.min(90, Math.ceil(L.tick / PER_MIN));
   const hot = m.weather === 'heat' ? 1.3 : 1;
   const perTick = 1 / (15 * PER_MIN);
@@ -678,7 +719,7 @@ export function liveTick(g: Game): void {
       m.score = e.team === 0 ? [m.score[0] + 1, m.score[1]] : [m.score[0], m.score[1] + 1];
       const p = L.teams[e.team].players[e.by];
       if (e.team === 0) say(m, minute, pick(g, LIVE_GOAL[e.how])(p ? p.name : '공격수'), 'good');
-      else say(m, minute, `${pick(g, LIVE_CONCEDED[e.how])}${p ? ` (상대 ${p.n}번)` : ''}`, 'bad');
+      else say(m, minute, `${pick(g, LIVE_CONCEDED[e.how])}${p ? ` (상대 ${p.n}번 ${p.name})` : ''}`, 'bad');
     } else if (e.kind === 'red') {
       if (e.team === 0) {
         m.me.red = true;
@@ -691,7 +732,7 @@ export function liveTick(g: Game): void {
       m.seg = 3;
       say(m, 45, '전반이 끝났다.', 'plain');
       benchMoves(g, m, L);
-    } else {
+    } else if (e.kind === 'full') {
       m.seg = 6;
       finish(g, m);
       scene(g);
