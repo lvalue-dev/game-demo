@@ -357,6 +357,8 @@ export interface LiveState {
   lastKind: 'pass' | 'long' | 'cross';
   /** 최근 중계 문구. 화면 아래 자막으로 보여 준다. */
   calls: { tick: number; text: string; tone: Tone }[];
+  /** 이미 교체로 들어간 후보들의 이름. */
+  subbed?: string[];
   halfTimeDone: boolean;
   /** 하프타임 대화를 마쳤는지. 마치기 전에는 후반이 시작되지 않는다. */
   talked: boolean;

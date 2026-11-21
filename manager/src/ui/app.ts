@@ -269,9 +269,17 @@ function renderGame(g: Game): string {
     <main class="page">${tab === 'play' ? (isLive(g) ? renderLive(g) : renderScene(g)) : tab === 'table' ? renderTables(g) : tab === 'squad' ? renderSquad(g) : renderRecord(g)}</main>
     <nav class="tabs" aria-label="화면 전환">
       ${([['play', '진행'], ['table', '순위'], ['squad', '스쿼드'], ['record', '기록']] as [Tab, string][]).map(([id, label]) =>
-        `<button type="button" class="tabs__item${tab === id ? ' is-on' : ''}" data-tab="${id}"${tab === id ? ' aria-current="page"' : ''}>${label}</button>`).join('')}
+        `<button type="button" class="tabs__item${tab === id ? ' is-on' : ''}" data-tab="${id}"${tab === id ? ' aria-current="page"' : ''}>${TAB_ICONS[id]}<span>${label}</span></button>`).join('')}
     </nav>`;
 }
+
+/** 하단 탭 아이콘: 공, 순위표, 유니폼, 트로피. */
+const TAB_ICONS: Record<Tab, string> = {
+  play: '<svg class="tabs__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5 L15.8 10.3 L14.4 14.8 H9.6 L8.2 10.3 Z" fill="currentColor"/><path d="M12 3 V7.5 M15.8 10.3 L20.5 9 M14.4 14.8 L17 19.5 M9.6 14.8 L7 19.5 M8.2 10.3 L3.5 9" stroke="currentColor" stroke-width="1.4"/></svg>',
+  table: '<svg class="tabs__icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 9 H20.5 M3.5 14 H20.5 M9 4 V20" stroke="currentColor" stroke-width="1.5"/></svg>',
+  squad: '<svg class="tabs__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3 L4.5 5 L1.5 9.5 L4.5 12 L6.5 10.5 V21 H17.5 V10.5 L19.5 12 L22.5 9.5 L19.5 5 L16 3 C15.2 5 13.8 6 12 6 C10.2 6 8.8 5 8 3 Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  record: '<svg class="tabs__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5 H17 V9 C17 12 14.8 14.2 12 14.2 C9.2 14.2 7 12 7 9 Z M7 5.5 H3.5 C3.5 8.5 5 10 7.3 10.3 M17 5.5 H20.5 C20.5 8.5 19 10 16.7 10.3 M12 14.2 V18 M8 20.5 H16 L15 18 H9 Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+};
 
 function renderScene(g: Game): string {
   const s = g.scene;
@@ -282,7 +290,7 @@ function renderScene(g: Game): string {
       ${s.blocks.map((b) => renderBlock(g, b)).join('')}
       <div class="choices">
         ${s.choices.map((c, i) => `${c.group && c.group !== s.choices[i - 1]?.group ? `<p class="choices__group">${esc(c.group.trim())}</p>` : ''}
-          <button type="button" class="choice${c.tone === 'primary' ? ' choice--primary' : c.tone === 'danger' ? ' choice--danger' : ''}${s.choices.length === 1 ? ' choice--solo' : ''}${c.club !== undefined ? ' choice--club' : ''}" data-act="${esc(c.id)}"${c.disabled ? ' disabled' : ''}>
+          <button type="button" class="choice${g.phase === 'match' && g.match?.step === 'shape' && SHAPE_IDS.includes(c.id as ShapeId) ? ' choice--icon' : ''}${c.tone === 'primary' ? ' choice--primary' : c.tone === 'danger' ? ' choice--danger' : ''}${s.choices.length === 1 ? ' choice--solo' : ''}${c.club !== undefined ? ' choice--club' : ''}" data-act="${esc(c.id)}"${c.disabled ? ' disabled' : ''}>
             ${c.club !== undefined ? crest(g.clubs[c.club] as Club, 30) : ''}
             ${g.phase === 'match' && g.match?.step === 'shape' && SHAPE_IDS.includes(c.id as ShapeId) ? miniFor(c.id as ShapeId) : ''}
             <span class="choice__label">${esc(c.label)}</span>

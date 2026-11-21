@@ -10,7 +10,7 @@ import { baseSide, drilled, skill } from './power.ts';
 import { chance, int, pick, poisson, rand, spread } from './rng.ts';
 import { myClub, stage } from './squad.ts';
 import { BASE, ROLES, SHAPES, SHAPE_IDS, advantage, bestCounter, dialEdge, fits, matchup, roleEdge, shapeEdge, tempoCost, usualShape, why } from './tactics.ts';
-import type { Block, Choice, Club, Dials, Game, LeagueId, LiveHow, LiveState, LogLine, MatchState, Player, RoleId, ShapeId, StyleId, Tone, WeatherId } from './types.ts';
+import type { Block, Choice, Club, Dials, Game, Pos, LeagueId, LiveHow, LiveState, LogLine, MatchState, Player, RoleId, ShapeId, StyleId, Tone, WeatherId } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 
@@ -638,6 +638,16 @@ function startLive(g: Game, m: MatchState): void {
   m.live = createLive(mine, theirs, [m.me.shape, m.opp.shape]);
 }
 
+/** 교체로 들어갈 후보. 경기장에 없는 같은 포지션 후보 중 가장 좋은 선수, 없으면 2군 선수. */
+function bench(g: Game, L: LiveState, pos: Pos, fallback: string): string {
+  const used = new Set([...L.teams[0].players.map((p) => p.name), ...(L.subbed ?? [])]);
+  const r = g.reserves.filter((p) => p.pos === pos && !used.has(p.name)).sort((a, b) => b.ovr - a.ovr)[0];
+  if (!r) return `2군 ${fallback}`;
+  (L.subbed ??= []).push(r.name);
+  call(L, `교체: ${r.no}번 ${r.name} 투입`, 'plain');
+  return `${r.no}번 ${r.name}`;
+}
+
 /** 중계 자막. 최근 여섯 줄만 남긴다. */
 function call(L: LiveState, text: string, tone: Tone): void {
   L.calls.push({ tick: L.tick, text, tone });
@@ -822,16 +832,16 @@ export function liveCommand(g: Game, cmd: string): void {
       if (a === 'fw') {
         m.subAtt += (trailing ? 2.2 : 1.5) * fresh;
         m.subDef -= fresh;
-        say(m, minute, '공격수를 넣었다.', 'plain');
+        say(m, minute, ko`${bench(g, L, 'FW', '공격수')}을 넣었다.`, 'plain');
       } else if (a === 'mf') {
         m.subAtt += 0.6 * fresh;
         m.subDef += 0.6 * fresh;
         m.me.stamina = clamp(m.me.stamina + 8, 0, 100);
-        say(m, minute, '미드필더를 넣어 중원에 힘을 보탰다.', 'plain');
+        say(m, minute, ko`${bench(g, L, 'MF', '미드필더')}을 넣어 중원에 힘을 보탰다.`, 'plain');
       } else if (a === 'df') {
         m.subDef += 1.5 * fresh;
         m.subAtt -= fresh;
-        say(m, minute, '수비수를 넣었다.', 'plain');
+        say(m, minute, ko`${bench(g, L, 'DF', '수비수')}을 넣었다.`, 'plain');
       } else {
         m.me.stamina = clamp(m.me.stamina + 22, 0, 100);
         say(m, minute, '지친 선수 둘을 바꿨다. 다리가 다시 움직인다.', 'plain');

@@ -1481,3 +1481,190 @@ button {
   font-weight: 700;
   color: var(--amber);
 }
+
+/* ---------- 축구 그래픽 ---------- */
+
+.tabs__item {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding-top: 9px;
+}
+
+.tabs__icon {
+  width: 22px;
+  height: 22px;
+}
+
+.jersey {
+  flex: none;
+  display: block;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+}
+
+.flag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--tint-bad);
+  color: var(--red);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  vertical-align: 2px;
+}
+
+.plist--tight {
+  border-top-width: 1px;
+}
+
+.board11 {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.board11 svg {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  margin-inline: auto;
+  border-radius: 6px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+
+.board11 figcaption {
+  text-align: center;
+}
+
+.choice--icon {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  align-items: center;
+}
+
+.choice--icon .mini11 {
+  grid-row: span 2;
+  width: 40px;
+  height: 52px;
+}
+
+.score__team {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.score__team--away {
+  justify-content: flex-end;
+}
+
+.table__form {
+  white-space: nowrap;
+}
+
+.form {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.form__dot {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 3px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: #fff;
+  background: #8a948e;
+}
+
+.form__dot--W {
+  background: #1b9a57;
+}
+
+.form__dot--L {
+  background: #d9534f;
+}
+
+.contract {
+  display: grid;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 27px, rgba(0, 0, 0, 0.035) 27px 28px),
+    #fbf8ef;
+  color: #1d1d1d;
+  border: 1px solid #d8cfb5;
+  border-radius: 4px;
+  box-shadow: 0 1px 0 #d8cfb5, 0 6px 16px -10px rgba(0, 0, 0, 0.5);
+}
+
+.contract__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 2px double #b9ae8f;
+}
+
+.contract__seal {
+  flex: none;
+  padding: 3px 8px;
+  border: 2px solid #b23a2a;
+  border-radius: 3px;
+  color: #b23a2a;
+  font-family: var(--font-display);
+  font-size: 0.8125rem;
+  transform: rotate(-4deg);
+}
+
+.contract__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 1.125rem;
+}
+
+.contract__row {
+  display: grid;
+  gap: 6px;
+}
+
+.contract__label {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.contract__note {
+  margin-left: 8px;
+  font-weight: 400;
+  color: #6b6455;
+}
+
+.contract .chip {
+  min-height: 34px;
+  background: #fff;
+  border-color: #d8cfb5;
+  color: #1d1d1d;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.contract .chip.is-on {
+  background: #1d3a2b;
+  border-color: #1d3a2b;
+  color: #fff;
+}
+
+.contract__sign {
+  margin: 4px 0 0;
+  text-align: right;
+  font-size: 0.75rem;
+  color: #8a826d;
+  letter-spacing: 0.04em;
+}
