@@ -182,3 +182,95 @@ test('전술 상성: 맞춤 전술은 실제로 유리하고, 유불리는 서�
   assert.ok(matchup('possess', 'press', 0).att < 0);
   assert.ok(matchup('possess', 'press', 3).att > 0);
 });
+
+/** 첫 직접 지휘 경기를 실시간 모드로 시작한다. */
+async function liveGame(seed: number) {
+  const { liveTick, liveCommand } = await import('../src/game/match.ts');
+  const g = createGame(seed, '실시간', 'analyst');
+  while (g.phase !== 'match') act(g, g.scene.choices.find((c) => !c.disabled)!.id);
+  act(g, '433');
+  act(g, g.season.style);
+  assert.equal(g.match!.step, 'mode');
+  act(g, 'live');
+  assert.equal(g.match!.step, 'live');
+  return { g, liveTick, liveCommand };
+}
+
+test('실시간 경기: 하프타임 대화를 거쳐 90분을 마치고, 결과가 순위표에 들어간다', async () => {
+  const { g, liveTick, liveCommand } = await liveGame(31337);
+  let ticks = 0;
+  while (g.match!.step === 'live' && ticks < 5000) {
+    const L = g.match!.live!;
+    if (L.halfTimeDone && !L.talked) {
+      const before = L.tick;
+      liveTick(g);
+      assert.equal(g.match!.live!.tick, before, '라커룸 대화 전에는 후반이 시작되지 않는다');
+      liveCommand(g, 'talk:calm');
+    }
+    liveTick(g);
+    ticks++;
+  }
+  const m = g.match!;
+  assert.equal(m.step, 'done');
+  assert.ok(m.live!.over && m.live!.tick >= 1800);
+  const goals = m.log.filter((l) => l.tone !== 'plain' && !l.text.includes('레드카드') && !l.text.includes('퇴장')).length;
+  assert.equal(goals, m.score[0] + m.score[1], '골마다 기록이 한 줄씩 남는다');
+  const [gf, ga] = m.score;
+  const club = g.job!.club;
+  const league = m.league!;
+  const row = () => g.tables[league].find((r) => r.club === club)!;
+  const played = row().p;
+  act(g, 'next');
+  assert.equal(g.match, null);
+  assert.equal(row().p, played + 1);
+  assert.ok(g.season.lines.some((l) => l.gf === gf && l.ga === ga && l.note === '직접 지휘'));
+});
+
+test('실시간 경기: 같은 시드와 같은 지시면 같은 경기가 나온다', async () => {
+  const play = async (): Promise<string> => {
+    const { g, liveTick, liveCommand } = await liveGame(2718);
+    liveCommand(g, 'line:1');
+    liveCommand(g, 'role:' + g.squad.find((p) => p.pos === 'FW')!.id + ':target');
+    for (let k = 0; k < 2000 && g.match!.step === 'live'; k++) {
+      if (g.match!.live!.halfTimeDone && !g.match!.live!.talked) liveCommand(g, 'talk:praise');
+      liveTick(g);
+    }
+    return JSON.stringify([g.match!.score, g.match!.log]);
+  };
+  assert.equal(await play(), await play());
+});
+
+test('실시간 경기: 지시가 상태에 반영되고, 교체 카드가 모자라면 거절된다', async () => {
+  const { g, liveCommand } = await liveGame(99);
+  const m = g.match!;
+  const other = (['press', 'possess', 'counter', 'direct', 'wide', 'park'] as const).find((s) => s !== m.me.style)!;
+  liveCommand(g, `style:${other}`);
+  assert.equal(m.me.style, other);
+  assert.equal(m.confusion, 1, '전술을 바꾸면 혼선이 생긴다');
+  liveCommand(g, 'tempo:1');
+  liveCommand(g, 'overlap:1');
+  assert.deepEqual(m.dials, { line: 0, width: 0, tempo: 1, overlap: true });
+  const mf = g.squad.find((p) => p.pos === 'MF')!;
+  liveCommand(g, `role:${mf.id}:hold`);
+  assert.equal(m.roles[mf.id], 'hold');
+  liveCommand(g, `role:${mf.id}:target`);
+  assert.equal(m.roles[mf.id], 'hold', '포지션에 없는 역할은 받지 않는다');
+  liveCommand(g, 'shape:541');
+  assert.equal(m.me.shape, '541');
+  assert.equal(m.subs, 2);
+  const slots = new Set(m.live!.teams[0].players.map((p) => p.slot));
+  assert.equal(slots.size, 11, '대형을 바꿔도 자리가 겹치지 않는다');
+  liveCommand(g, 'sub:legs');
+  assert.equal(m.subs, 0);
+  liveCommand(g, 'sub:fw');
+  assert.equal(m.subs, 0);
+  liveCommand(g, 'shape:442');
+  assert.equal(m.me.shape, '541', '카드가 없으면 대형을 못 바꾼다');
+});
+
+test('실시간 경기: 건너뛰면 지금 지시대로 끝까지 진행된다', async () => {
+  const { g } = await liveGame(5150);
+  act(g, 'skip');
+  assert.equal(g.match!.step, 'done');
+  assert.deepEqual(g.scene.choices.map((c) => c.id), ['next']);
+});

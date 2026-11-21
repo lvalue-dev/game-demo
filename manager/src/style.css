@@ -873,3 +873,296 @@ button {
     transition: none;
   }
 }
+
+/* ---------- 실시간 경기 ---------- */
+
+.live {
+  display: grid;
+  gap: 12px;
+}
+
+.live .eyebrow {
+  margin: 0;
+}
+
+.live__field {
+  position: relative;
+  margin-inline: calc(var(--gutter-l) * -1) calc(var(--gutter-r) * -1);
+  background: #2a7d4a;
+}
+
+.live__pitch {
+  display: block;
+  width: 100%;
+  touch-action: manipulation;
+}
+
+.live__flash {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  pointer-events: none;
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 12vw, 4.5rem);
+  color: #fff;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.live__flash.is-good,
+.live__flash.is-bad {
+  opacity: 1;
+}
+
+.live__flash.is-bad {
+  color: #ffd3c9;
+}
+
+.live__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.live__play {
+  min-height: 44px;
+  padding: 8px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--bg);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.live__play:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.live__speeds {
+  display: flex;
+  gap: 6px;
+}
+
+.live__speeds .chip {
+  min-width: 44px;
+  min-height: 36px;
+  font-family: var(--font-num);
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.live__stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 10px 0;
+  border-block: 1px solid var(--line);
+}
+
+.live__stats div {
+  min-width: 0;
+}
+
+.live__stats dt {
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+.live__stats dd {
+  margin: 0;
+  font-family: var(--font-num);
+  font-weight: 600;
+  font-size: 1.125rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.live__stats dd .meter {
+  display: block;
+  width: 100%;
+  margin: 4px 0 2px;
+}
+
+.live__stats dd.is-bad {
+  color: var(--red);
+}
+
+.live__ticker {
+  margin: 0;
+}
+
+.live__ticker .log__row:not(:first-child) {
+  opacity: 0.7;
+}
+
+.live__tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-bottom: 2px solid var(--ink);
+}
+
+.live__tab {
+  min-height: 44px;
+  padding: 8px 4px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9375rem;
+  cursor: pointer;
+}
+
+.live__tab.is-on {
+  color: var(--ink);
+  font-weight: 700;
+  box-shadow: inset 0 -3px 0 var(--amber);
+}
+
+.live__panel {
+  display: grid;
+  gap: 14px;
+}
+
+.live__panel .note,
+.live__panel .prose,
+.live__panel .fine {
+  margin: 0;
+}
+
+.live__row {
+  display: grid;
+  gap: 6px;
+}
+
+.live__label {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.live__label .muted {
+  font-weight: 400;
+}
+
+.live__panel .chip {
+  min-height: 36px;
+  cursor: pointer;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.live__panel .chip.is-on {
+  color: var(--bg);
+}
+
+.live__panel .chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chip__hint {
+  margin-left: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.chip__hint--good {
+  color: var(--pitch);
+}
+
+.chip__hint--bad {
+  color: var(--red);
+}
+
+.chip.is-on .chip__hint {
+  color: inherit;
+}
+
+.live__people {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 2px solid var(--ink);
+}
+
+.live__person {
+  display: grid;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.live__person.is-picked {
+  background: var(--tint-mine);
+  margin-inline: -8px;
+  padding-inline: 8px;
+}
+
+.live__who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.live__num {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--kit);
+  color: var(--kit-ink);
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.45);
+  font-family: var(--font-num);
+  font-weight: 700;
+}
+
+.live__name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+}
+
+.live__name .muted {
+  font-weight: 400;
+}
+
+.is-live .board {
+  position: static;
+}
+
+.live__stick {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 4;
+  display: grid;
+  background: var(--bg);
+  box-shadow: 0 6px 10px -8px rgba(0, 0, 0, 0.4);
+}
+
+.live__stick .score {
+  padding: 8px 12px 6px;
+}
+
+.live__stick .score__num {
+  font-size: 2.25rem;
+}

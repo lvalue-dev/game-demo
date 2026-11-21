@@ -1,6 +1,6 @@
 // 전술과 대형의 상성. 근거는 TACTICS.md에 정리했다.
 // 모든 보정은 "감독 팀" 쪽 공격력과 수비력에 더하는 값이다. 상대의 손해는 우리 이득으로 표현된다.
-import type { ShapeId, StyleId } from './types.ts';
+import type { Dials, Pos, RoleId, ShapeId, StyleId } from './types.ts';
 
 export interface Delta {
   att: number;
@@ -146,4 +146,103 @@ export function why(mine: StyleId, theirs: StyleId, midEdge: number): { text: st
     'wide>press': '상대 압박에 측면 전개가 끊긴다',
   };
   return { text: texts[key] ?? (adv > 0 ? '전술 싸움에서 앞서고 있다' : '전술 싸움에서 밀리고 있다'), good: adv > 0 };
+}
+
+// ---------- 팀 지시와 개인 역할 ----------
+
+/**
+ * 수비 라인, 폭, 템포, 풀백 오버래핑이 만드는 보정. 어느 것이나 얻는 게 있으면 내주는 게 있고,
+ * 상대 전술에 따라 손익이 달라진다.
+ */
+export function dialEdge(d: Dials, myStyle: StyleId, theirStyle: StyleId): Delta {
+  let att = 0;
+  let def = 0;
+  const behind = theirStyle === 'direct' || theirStyle === 'counter';
+  if (d.line === 1) {
+    // 라인을 올리면 높은 곳에서 공을 되찾지만 뒷공간이 열린다.
+    att += 0.8;
+    def += behind ? -1.8 : theirStyle === 'possess' ? 0.6 : -0.6;
+  } else if (d.line === -1) {
+    att -= 0.8;
+    def += behind ? 1.6 : theirStyle === 'wide' ? -0.6 : 0.8;
+  }
+  if (d.width === 1) {
+    att += myStyle === 'wide' || myStyle === 'possess' ? 0.6 : 0.2;
+    def -= theirStyle === 'counter' ? 1 : 0.5;
+  } else if (d.width === -1) {
+    att -= 0.3;
+    def += theirStyle === 'wide' ? -0.8 : 0.6;
+  }
+  if (d.tempo === 1) att += 0.6;
+  if (d.tempo === -1) {
+    att -= 0.4;
+    def += 0.3;
+  }
+  if (d.overlap) {
+    att += myStyle === 'wide' ? 1 : 0.6;
+    def -= theirStyle === 'counter' ? 1.1 : 0.5;
+  }
+  return { att, def };
+}
+
+/** 템포가 체력 소모에 주는 배수. */
+export const tempoCost = (d: Dials): number => (d.tempo === 1 ? 1.15 : d.tempo === -1 ? 0.9 : 1);
+
+export const ROLES: Record<Pos, { id: RoleId; name: string; desc: string }[]> = {
+  GK: [
+    { id: 'base', name: '골문을 지킨다', desc: '기본' },
+    { id: 'sweeper', name: '스위퍼 키퍼', desc: '라인을 올렸을 때 뒷공간을 지운다. 가끔 실수한다' },
+  ],
+  DF: [
+    { id: 'base', name: '커버', desc: '기본. 자리를 지킨다' },
+    { id: 'stopper', name: '전진 수비', desc: '앞으로 나가 끊는다. 짧은 패스에 강하고 뒷공간에 약하다' },
+    { id: 'mark', name: '대인 마크', desc: '상대 에이스를 따라다닌다. 수비 대형은 조금 흐트러진다' },
+  ],
+  MF: [
+    { id: 'base', name: '박스 투 박스', desc: '기본. 공수를 오간다' },
+    { id: 'hold', name: '홀딩', desc: '수비 앞을 지킨다. 역습을 막고 공격 가담이 준다' },
+    { id: 'maker', name: '플레이메이커', desc: '공이 이 선수를 거친다. 잘할수록 효과가 크고, 압박의 표적이 된다' },
+    { id: 'runner', name: '침투', desc: '박스 안으로 뛰어든다. 뒤가 빈다' },
+  ],
+  FW: [
+    { id: 'base', name: '침투', desc: '기본. 수비 뒷공간을 노린다' },
+    { id: 'link', name: '내려와 연계', desc: '중원에 숫자를 보탠다. 박스 안이 빈다' },
+    { id: 'target', name: '타깃', desc: '공중볼을 따낸다. 롱볼, 측면 공격과 잘 맞는다' },
+    { id: 'drift', name: '측면으로 빠진다', desc: '수비를 벌린다. 밀집 수비에 통한다' },
+  ],
+};
+
+export interface RoleInput {
+  pos: Pos;
+  role: RoleId;
+  /** 선수가 이 무대 수준보다 얼마나 잘하는지에 따른 배수(0.5~1.5). */
+  scale: number;
+}
+
+/** 개인 역할들이 만드는 보정. oAtt는 상대 공격력에 더하는 값(대인 마크면 음수)이다. */
+export function roleEdge(list: RoleInput[], myStyle: StyleId, theirStyle: StyleId, d: Dials): Delta & { oAtt: number } {
+  let att = 0;
+  let def = 0;
+  let oAtt = 0;
+  const behind = theirStyle === 'direct' || theirStyle === 'counter';
+  for (const { role, scale } of list) {
+    if (role === 'sweeper') def += d.line === 1 ? 0.7 : -0.2;
+    else if (role === 'stopper') def += behind ? -0.7 : 0.6 * scale;
+    else if (role === 'mark') {
+      oAtt -= scale;
+      def -= 0.3;
+    } else if (role === 'hold') {
+      def += 0.7 + (theirStyle === 'counter' ? 0.5 : 0);
+      att -= 0.4;
+    } else if (role === 'maker') att += 0.7 * scale - (theirStyle === 'press' ? 0.5 : 0);
+    else if (role === 'runner') {
+      att += 0.6;
+      def -= 0.5;
+    } else if (role === 'link') {
+      att += myStyle === 'possess' ? 0.6 : 0.1;
+      def += 0.3;
+    } else if (role === 'target') att += myStyle === 'direct' || myStyle === 'wide' ? 0.8 * scale : -0.2;
+    else if (role === 'drift') att += theirStyle === 'park' ? 0.7 : -0.1;
+  }
+  return { att, def, oAtt };
 }

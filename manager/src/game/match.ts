@@ -2,11 +2,14 @@
 // 경기 전(대형, 전술) → 30분(전술) → 하프타임(대화, 전술) → 60분(교체) → 75분(태세) → 종료
 // 규칙의 근거는 TACTICS.md에 있다.
 import { ko } from './josa.ts';
-import { STYLES, STYLE_IDS } from './data.ts';
+import { STYLES, STYLE_IDS, foreignName, koreanName } from './data.ts';
+import { HALF, PER_MIN, TICKS, createLive, lineup, reshape, stepLive } from './live.ts';
+import type { Entrant, LiveEnv } from './live.ts';
 import { baseSide, drilled, skill } from './power.ts';
-import { chance, int, pick, poisson, rand } from './rng.ts';
-import { SHAPES, SHAPE_IDS, advantage, bestCounter, fits, matchup, shapeEdge, usualShape, why, BASE } from './tactics.ts';
-import type { Block, Choice, Game, LeagueId, LogLine, MatchState, Player, ShapeId, StyleId, Tone, WeatherId } from './types.ts';
+import { chance, int, pick, poisson, rand, spread } from './rng.ts';
+import { myClub, stage } from './squad.ts';
+import { BASE, ROLES, SHAPES, SHAPE_IDS, advantage, bestCounter, dialEdge, fits, matchup, roleEdge, shapeEdge, tempoCost, usualShape, why } from './tactics.ts';
+import type { Block, Choice, Dials, Game, LeagueId, LiveHow, LiveState, LogLine, MatchState, Player, RoleId, ShapeId, StyleId, Tone, WeatherId } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 
@@ -100,10 +103,18 @@ function say(m: MatchState, min: number, text: string, tone: Tone): void {
   m.log.push({ min, text, tone });
 }
 
-/** 15분 한 토막을 치른다. */
-function playSegment(g: Game, m: MatchState): void {
-  const i = m.seg;
-  const from = i * 15;
+export interface Ratings {
+  att: number;
+  def: number;
+  oAtt: number;
+  oDef: number;
+}
+
+/**
+ * 지금 이 순간 두 팀의 전력. 전술과 대형의 상성, 팀 지시, 개인 역할, 체력, 교체, 태세, 퇴장, 날씨,
+ * 점수 상황이 모두 여기서 더해진다. minute은 경기 시간(분)이다.
+ */
+export function ratingsNow(g: Game, m: MatchState, minute: number): Ratings {
   const base = baseSide(g, g.season.half);
   const familiar = m.me.style === g.season.style ? 1 : 0.5;
   const edge = myMidEdge(g, m);
@@ -115,8 +126,16 @@ function playSegment(g: Game, m: MatchState): void {
 
   const mu = matchup(m.me.style, m.opp.style, edge);
   const se = shapeEdge(m.me.shape, m.opp.shape, m.me.style, m.opp.style);
-  att += mu.att + se.att + m.subAtt;
-  def += mu.def + se.def + m.subDef;
+  const de = dialEdge(m.dials, m.me.style, m.opp.style);
+  const level = (m.oppAtt + m.oppDef) / 2;
+  const re = roleEdge(
+    g.squad.filter((p) => m.roles[p.id] && m.roles[p.id] !== 'base')
+      .map((p) => ({ pos: p.pos, role: m.roles[p.id] as RoleId, scale: clamp(1 + (p.ovr + p.temp - level) / 20, 0.5, 1.5) })),
+    m.me.style, m.opp.style, m.dials,
+  );
+  att += mu.att + se.att + de.att + re.att + m.subAtt;
+  def += mu.def + se.def + de.def + re.def + m.subDef;
+  oAtt += re.oAtt;
 
   // 체력: 지친 팀은 공수가 함께 무너진다. 수비 쪽이 더 크게 무너진다.
   att -= tired(m.me.stamina);
@@ -124,7 +143,7 @@ function playSegment(g: Game, m: MatchState): void {
   oAtt -= tired(m.opp.stamina);
   oDef -= tired(m.opp.stamina) * 1.2;
 
-  if (i >= 3) {
+  if (minute >= 45) {
     att += m.talk;
     def += m.talk;
   }
@@ -133,7 +152,6 @@ function playSegment(g: Game, m: MatchState): void {
     const mess = 1.5 * (1 - g.manager.attrs.tactics / 25);
     att -= mess;
     def -= mess;
-    m.confusion--;
   }
   if (m.me.push === 1) {
     att += 3;
@@ -151,8 +169,8 @@ function playSegment(g: Game, m: MatchState): void {
   }
   // 60분 이후에는 뒤진 쪽이 득점에서 유리해진다.
   const lead = m.score[0] - m.score[1];
-  if (i >= 4 && lead < 0) att += 0.8;
-  if (i >= 4 && lead > 0) oAtt += 0.8;
+  if (minute >= 60 && lead < 0) att += 0.8;
+  if (minute >= 60 && lead > 0) oAtt += 0.8;
   if (m.me.red) {
     att -= 2.5;
     def -= 3;
@@ -168,6 +186,16 @@ function playSegment(g: Game, m: MatchState): void {
     if (m.me.style === 'direct' || m.me.style === 'wide') att -= 1;
     if (m.opp.style === 'direct' || m.opp.style === 'wide') oAtt -= 1;
   }
+  return { att, def, oAtt, oDef };
+}
+
+/** 15분 한 토막을 치른다. */
+function playSegment(g: Game, m: MatchState): void {
+  const i = m.seg;
+  const from = i * 15;
+  const edge = myMidEdge(g, m);
+  const { att, def, oAtt, oDef } = ratingsNow(g, m, from);
+  if (m.confusion > 0) m.confusion--;
 
   // 마지막 15분에는 골이 더 많이 난다. 첫 15분은 탐색전이다.
   const tempo = (i === 5 ? 1.15 : i === 0 ? 0.9 : 1) / 6;
@@ -203,7 +231,7 @@ function playSegment(g: Game, m: MatchState): void {
   m.log.push(...moments);
 
   const hot = m.weather === 'heat' ? 1.3 : 1;
-  m.me.stamina = clamp(m.me.stamina - COST[m.me.style] * hot * (g.season.focus === 'fitness' ? 0.8 : 1), 0, 100);
+  m.me.stamina = clamp(m.me.stamina - COST[m.me.style] * hot * tempoCost(m.dials) * (g.season.focus === 'fitness' ? 0.8 : 1), 0, 100);
   m.opp.stamina = clamp(m.opp.stamina - COST[m.opp.style] * hot, 0, 100);
   m.seg++;
 }
@@ -247,6 +275,7 @@ export function beginMatch(g: Game, setup: MatchSetup): void {
     me: { style: g.season.style, shape: usualShape(g.season.style, 0), stamina: 100, push: 0, red: false },
     opp: { style, shape: surprise ? usualShape(style, int(g, 0, 5)) : setup.opp.shape, stamina: 100, push: 0, red: false },
     read: false, subs: 3, talk: 0, confusion: 0, subAtt: 0, subDef: 0, log: [], logStart: 0, pens: null, auto: false,
+    dials: { line: 0, width: 0, tempo: 0, overlap: false }, roles: {}, live: null,
   };
   g.phase = 'match';
   scene(g);
@@ -332,6 +361,24 @@ function scene(g: Game): void {
       blocks: [{ kind: 'text', text: ko`대형은 ${SHAPES[m.me.shape].name}. 몸에 밴 전술은 ${STYLES[g.season.style].name}이고, 다른 전술은 숙련도의 절반만 나온다. 아래 유불리는 상대의 평소 전술 기준이다. 상대가 오늘 다르게 나올 수도 있다.` }],
       choices: styleChoices(g, m, m.oppUsual, null),
     };
+  } else if (m.step === 'mode') {
+    g.scene = {
+      eyebrow, title: '어떻게 지휘할까요?',
+      blocks: [
+        ...recent,
+        { kind: 'text', text: '경기를 보면서 지휘하면 언제든 멈추고 전술, 수비 라인과 템포 같은 팀 지시, 선수 개인의 역할, 교체를 바꿀 수 있다. 빠른 진행은 30분, 하프타임, 60분, 75분에만 결정한다.' },
+      ],
+      choices: [
+        { id: 'live', label: '경기를 보면서 지휘한다', detail: '위에서 본 경기장 · 3~5분', tone: 'primary' },
+        { id: 'text', label: '빠르게 진행한다', detail: '글로 진행 · 1분' },
+      ],
+    };
+  } else if (m.step === 'live') {
+    g.scene = {
+      eyebrow, title: '경기 중',
+      blocks: [scoreBlock(g, m)],
+      choices: [{ id: 'skip', label: '남은 경기를 건너뛴다', detail: '지금 지시 그대로 끝까지 진행한다' }],
+    };
   } else if (m.step === 'm30' || m.step === 'ht') {
     g.scene = {
       eyebrow, title: m.step === 'm30' ? '30분, 벤치의 판단' : '후반은 어떻게 갈까요?',
@@ -395,6 +442,21 @@ function finish(g: Game, m: MatchState): void {
   m.step = 'done';
 }
 
+/** 하프타임 라커룸 대화. 리더십 판정에 따라 후반 전력이 오르내린다. */
+function teamTalk(g: Game, m: MatchState, id: string): void {
+  const lead = m.score[0] - m.score[1];
+  if (id === 'praise') {
+    m.talk = sway(g, lead === 0 || lead === -1 ? 0.2 : 0) ? 1 : 0;
+    say(m, 45, m.talk > 0 ? '다독이는 말에 선수들의 어깨가 펴졌다.' : '좋은 말이었지만 라커룸 분위기는 그대로였다.', m.talk > 0 ? 'good' : 'plain');
+  } else if (id === 'blast') {
+    m.talk = sway(g, lead < 0 ? 0.1 : -0.2) ? 1.8 : -1;
+    say(m, 45, m.talk > 0 ? '물병이 벽에 부딪혔다. 선수들의 눈빛이 달라졌다.' : '고함이 지나쳤다. 선수들이 고개를 숙인 채 나갔다.', m.talk > 0 ? 'good' : 'bad');
+  } else {
+    m.talk = 0.4;
+    say(m, 45, '전술판 앞에서 후반 계획을 다시 짚었다.', 'plain');
+  }
+}
+
 /** 수석 코치가 처음부터 끝까지 지휘한다. */
 function autoplay(g: Game, m: MatchState): void {
   m.auto = true;
@@ -430,11 +492,27 @@ export function actMatch(g: Game, id: string): boolean {
       m.me.style = id as StyleId;
       m.read = chance(g, readChance(g));
       if (m.opp.style !== m.oppUsual && m.read) say(m, 0, ko`킥오프 직후 알아챘다. 상대가 평소와 달리 ${STYLES[m.opp.style].name}으로 나왔다. 우리를 분석하고 온 것이다.`, 'plain');
-      playSegment(g, m);
-      playSegment(g, m);
-      opponentMoves(g, m);
-      m.step = 'm30';
+      m.step = 'mode';
       break;
+    case 'mode':
+      if (id === 'live') {
+        startLive(g, m);
+        m.step = 'live';
+      } else if (id === 'text') {
+        playSegment(g, m);
+        playSegment(g, m);
+        opponentMoves(g, m);
+        m.step = 'm30';
+      } else return false;
+      break;
+    case 'live':
+      if (id !== 'skip') return false;
+      // 지금 지시 그대로 끝까지 돌린다. 하프타임 대화는 계획만 짚는 것으로 한다.
+      for (let guard = 0; m.step === 'live' && guard < TICKS + 50; guard++) {
+        if (m.live && m.live.halfTimeDone && !m.live.talked) liveCommand(g, 'talk:calm');
+        liveTick(g);
+      }
+      return false;
     case 'm30':
     case 'ht':
       if (id !== 'keep') {
@@ -455,23 +533,12 @@ export function actMatch(g: Game, id: string): boolean {
         m.step = 'm60';
       }
       break;
-    case 'talk': {
-      const lead = m.score[0] - m.score[1];
-      if (id === 'praise') {
-        m.talk = sway(g, lead === 0 || lead === -1 ? 0.2 : 0) ? 1 : 0;
-        say(m, 45, m.talk > 0 ? '다독이는 말에 선수들의 어깨가 펴졌다.' : '좋은 말이었지만 라커룸 분위기는 그대로였다.', m.talk > 0 ? 'good' : 'plain');
-      } else if (id === 'blast') {
-        m.talk = sway(g, lead < 0 ? 0.1 : -0.2) ? 1.8 : -1;
-        say(m, 45, m.talk > 0 ? '물병이 벽에 부딪혔다. 선수들의 눈빛이 달라졌다.' : '고함이 지나쳤다. 선수들이 고개를 숙인 채 나갔다.', m.talk > 0 ? 'good' : 'bad');
-      } else {
-        m.talk = 0.4;
-        say(m, 45, '전술판 앞에서 후반 계획을 다시 짚었다.', 'plain');
-      }
+    case 'talk':
+      teamTalk(g, m, id);
       m.read = m.read || chance(g, readChance(g));
       m.step = 'ht';
       if (id === 'calm') m.confusion = -1;
       break;
-    }
     case 'm60': {
       const trailing = m.score[0] < m.score[1];
       if (id === 'fw') {
@@ -515,3 +582,224 @@ export function actMatch(g: Game, id: string): boolean {
   scene(g);
   return false;
 }
+
+// ---------- 실시간 경기 ----------
+// 선수들의 움직임과 판정은 live.ts가, 전력 계산과 감독의 지시와 기록은 여기서 맡는다.
+
+const NEUTRAL: Dials = { line: 0, width: 0, tempo: 0, overlap: false };
+
+const LIVE_GOAL: Record<LiveHow, ((name: string) => string)[]> = {
+  pass: [(n) => ko`패스 연결 끝에 수비가 벌어졌다. ${n}이 침착하게 마무리했다.`, (n) => ko`수비 사이로 들어온 패스를 ${n}이 낮게 깔아 찼다.`],
+  long: [(n) => ko`길게 넘어온 공을 ${n}이 잡아 그대로 때려 넣었다.`, (n) => ko`한 번에 넘어온 긴 패스. ${n}이 수비와 몸싸움을 이기고 넣었다.`],
+  cross: [(n) => ko`측면에서 올라온 크로스를 ${n}이 머리로 받아 넣었다.`, (n) => ko`크로스가 올라왔고, ${n}이 수비 사이에서 솟구쳤다.`],
+  press: [(n) => ko`상대 진영에서 공을 빼앗았다. ${n}이 그대로 차 넣었다.`, (n) => ko`압박에 상대가 공을 흘렸고, ${n}이 놓치지 않았다.`],
+  counter: [(n) => ko`역습. ${n}이 수비 뒷공간을 파고들어 골키퍼를 넘겼다.`, (n) => ko`끊자마자 앞으로 나갔다. ${n}이 빈 곳에 밀어 넣었다.`],
+  set: [(n) => ko`세트피스. ${n}이 골망을 흔들었다.`, (n) => ko`멈춘 공 한 번에 승부가 났다. ${n}의 골.`],
+  pen: [(n) => ko`페널티킥. ${n}이 침착하게 성공시켰다.`],
+};
+
+const LIVE_CONCEDED: Record<LiveHow, string[]> = {
+  pass: ['상대가 패스로 수비를 끌어낸 뒤 빈 곳을 찔렀다. 실점.', '마지막 패스가 수비 사이를 갈랐다. 실점.'],
+  long: ['긴 공 한 번에 수비 라인이 뚫렸다. 실점.', '높이 뜬 공을 수비가 놓쳤다. 실점.'],
+  cross: ['크로스를 막지 못했다. 문전에서 헤더를 내줬다.', '먼 쪽 골대에 아무도 없었다. 크로스 한 번에 실점.'],
+  press: ['우리 진영에서 공을 빼앗겼고, 그대로 실점했다.', '상대 압박에 공을 흘렸다. 실점.'],
+  counter: ['공격하다 끊긴 공이 한 번에 넘어왔다. 역습에 실점.', '수비 뒷공간으로 달린 상대 공격수를 아무도 잡지 못했다.'],
+  set: ['세트피스 한 번에 당했다. 실점.', '멈춘 공을 막지 못했다. 실점.'],
+  pen: ['페널티킥을 내줬고, 골키퍼는 반대로 뛰었다.'],
+};
+
+/** 실시간 경기를 시작한다. 주전 일곱 명에 후보 넷을 보태 열한 명을 세우고, 상대 열한 명을 만든다. */
+function startLive(g: Game, m: MatchState): void {
+  const club = myClub(g);
+  const { region } = stage(g);
+  const depth = g.depth + g.season.depthMod;
+  const keys: Entrant[] = g.squad.map((p) => ({ name: p.name, pos: p.pos, ovr: p.ovr + p.temp, key: p.id }));
+  const mine = lineup(m.me.shape, keys, (pos) => {
+    const foreign = !club.nation && (region === 'eu' ? chance(g, 0.95) : chance(g, 0.12));
+    const name = foreign ? foreignName(rand(g), rand(g)) : koreanName(rand(g), rand(g), rand(g));
+    return { name, pos, ovr: Math.round(depth + spread(g, -2, 2)), key: -1 };
+  });
+  const theirs = lineup(m.opp.shape, [], (pos) => {
+    const base = pos === 'FW' ? m.oppAtt + 1 : pos === 'MF' ? (m.oppAtt + m.oppDef) / 2 : m.oppDef + 1;
+    return { name: '', pos, ovr: Math.round(base + spread(g, -4, 4)), key: -1 };
+  });
+  m.live = createLive(mine, theirs, [m.me.shape, m.opp.shape]);
+}
+
+function liveEnv(g: Game, m: MatchState, L: LiveState): LiveEnv {
+  // 퇴장의 효과는 열 명으로 뛰는 것 자체에서 나오므로, 전력에서는 다시 빼지 않는다.
+  const red = [m.me.red, m.opp.red];
+  m.me.red = false;
+  m.opp.red = false;
+  const r = ratingsNow(g, m, L.tick / PER_MIN);
+  m.me.red = red[0] as boolean;
+  m.opp.red = red[1] as boolean;
+  const mine = m.venue === 'home' ? 1.5 : m.venue === 'away' ? 1.15 : 1.3;
+  const theirs = m.venue === 'home' ? 1.15 : m.venue === 'away' ? 1.5 : 1.3;
+  const roles: Record<number, RoleId> = {};
+  L.teams[0].players.forEach((p, i) => {
+    const role = p.key >= 0 ? m.roles[p.key] : undefined;
+    if (role && role !== 'base') roles[i] = role;
+  });
+  return {
+    sides: [
+      { style: m.me.style, shape: m.me.shape, push: m.me.push, red: m.me.red, tired: m.me.stamina < 45, dials: m.dials, roles, edge: r.att - r.oDef, venue: mine / 1.3 },
+      { style: m.opp.style, shape: m.opp.shape, push: m.opp.push, red: m.opp.red, tired: m.opp.stamina < 45, dials: NEUTRAL, roles: {}, edge: r.oAtt - r.def, venue: theirs / 1.3 },
+    ],
+  };
+}
+
+/** 상대 감독이 움직인다. 대형을 바꿨으면 경기장의 선수들도 자리를 옮긴다. */
+function benchMoves(g: Game, m: MatchState, L: LiveState): void {
+  const shape = m.opp.shape;
+  opponentMoves(g, m);
+  m.read = m.read || chance(g, readChance(g));
+  if (m.opp.shape !== shape) reshape(L.teams[1], m.opp.shape);
+}
+
+/** 실시간 경기를 한 틱 진행한다. 화면이 배속에 맞춰 되풀이해 부른다. */
+export function liveTick(g: Game): void {
+  const m = g.match;
+  const L = m?.live;
+  if (!m || !L || m.step !== 'live' || (L.halfTimeDone && !L.talked)) return;
+  if (m.confusion > 0 && L.tick >= L.confusedUntil) m.confusion = 0;
+  if (m.confusion < 0 && L.tick > HALF + 5 * PER_MIN) m.confusion = 0;
+
+  const events = stepLive(L, liveEnv(g, m, L), g);
+  const minute = Math.min(90, Math.ceil(L.tick / PER_MIN));
+  const hot = m.weather === 'heat' ? 1.3 : 1;
+  const perTick = 1 / (15 * PER_MIN);
+  m.me.stamina = clamp(m.me.stamina - COST[m.me.style] * perTick * hot * tempoCost(m.dials) * (g.season.focus === 'fitness' ? 0.8 : 1), 0, 100);
+  m.opp.stamina = clamp(m.opp.stamina - COST[m.opp.style] * perTick * hot, 0, 100);
+  if (!L.over) m.seg = Math.min(5, Math.floor(L.tick / (15 * PER_MIN)));
+
+  for (const e of events) {
+    if (e.kind === 'goal') {
+      m.score = e.team === 0 ? [m.score[0] + 1, m.score[1]] : [m.score[0], m.score[1] + 1];
+      const p = L.teams[e.team].players[e.by];
+      if (e.team === 0) say(m, minute, pick(g, LIVE_GOAL[e.how])(p ? p.name : '공격수'), 'good');
+      else say(m, minute, `${pick(g, LIVE_CONCEDED[e.how])}${p ? ` (상대 ${p.n}번)` : ''}`, 'bad');
+    } else if (e.kind === 'red') {
+      if (e.team === 0) {
+        m.me.red = true;
+        say(m, minute, '거친 태클에 주심이 레드카드를 꺼냈다. 남은 시간을 열 명으로 버텨야 한다.', 'bad');
+      } else {
+        m.opp.red = true;
+        say(m, minute, '상대 선수가 퇴장당했다. 수적 우위다.', 'good');
+      }
+    } else if (e.kind === 'half') {
+      m.seg = 3;
+      say(m, 45, '전반이 끝났다.', 'plain');
+      benchMoves(g, m, L);
+    } else {
+      m.seg = 6;
+      finish(g, m);
+      scene(g);
+    }
+  }
+  // 상대 감독은 30분, 60분, 75분에 판단한다. 하프타임의 판단은 위에서 했다.
+  if (!L.over && (L.tick === 30 * PER_MIN || L.tick === 60 * PER_MIN || L.tick === 75 * PER_MIN)) benchMoves(g, m, L);
+}
+
+/**
+ * 실시간 경기 중 감독의 지시. "종류:값" 꼴이다.
+ * style:press, shape:433, line:1, width:-1, tempo:0, overlap:1, role:선수id:역할, push:1, sub:fw, talk:calm
+ */
+export function liveCommand(g: Game, cmd: string): void {
+  const m = g.match;
+  const L = m?.live;
+  if (!m || !L || m.step !== 'live') return;
+  const [verb, a = '', b = ''] = cmd.split(':');
+  const minute = Math.min(90, Math.ceil(L.tick / PER_MIN));
+  // 지시를 바꾸면 선수들이 익히는 동안 잠깐 흐트러진다.
+  const confuse = (minutes: number): void => {
+    m.confusion = 1;
+    L.confusedUntil = Math.max(L.confusedUntil, L.tick + minutes * PER_MIN);
+  };
+  const level = a === '1' ? 1 : a === '-1' ? -1 : 0;
+  switch (verb) {
+    case 'talk':
+      if (!L.halfTimeDone || L.talked) return;
+      teamTalk(g, m, a);
+      L.talked = true;
+      // 계획을 차분히 짚었으면 후반 초반의 전술 변경은 혼선 없이 먹힌다.
+      m.confusion = a === 'calm' ? -1 : 0;
+      L.confusedUntil = 0;
+      return;
+    case 'style':
+      if (!STYLE_IDS.includes(a as StyleId) || a === m.me.style) return;
+      m.me.style = a as StyleId;
+      if (m.confusion < 0) m.confusion = 0;
+      else confuse(15);
+      say(m, minute, ko`${STYLES[m.me.style].name}으로 바꿨다.`, 'plain');
+      return;
+    case 'shape':
+      if (!SHAPE_IDS.includes(a as ShapeId) || a === m.me.shape || m.subs < 1) return;
+      m.me.shape = a as ShapeId;
+      m.subs--;
+      reshape(L.teams[0], m.me.shape);
+      confuse(8);
+      say(m, minute, ko`교체 카드를 써서 대형을 ${SHAPES[m.me.shape].name}으로 바꿨다.`, 'plain');
+      return;
+    case 'line':
+    case 'width':
+    case 'tempo':
+      if (m.dials[verb] === level) return;
+      m.dials = { ...m.dials, [verb]: level };
+      confuse(4);
+      return;
+    case 'overlap':
+      if (m.dials.overlap === (a === '1')) return;
+      m.dials = { ...m.dials, overlap: a === '1' };
+      confuse(4);
+      return;
+    case 'role': {
+      const p = g.squad.find((x) => x.id === Number(a));
+      if (!p || !ROLES[p.pos].some((r) => r.id === b) || (m.roles[p.id] ?? 'base') === b) return;
+      if (b === 'base') delete m.roles[p.id];
+      else m.roles[p.id] = b as RoleId;
+      confuse(3);
+      return;
+    }
+    case 'push':
+      m.me.push = level;
+      return;
+    case 'sub': {
+      const cost = a === 'legs' ? 2 : 1;
+      if (m.subs < cost || !['fw', 'mf', 'df', 'legs'].includes(a)) return;
+      // 새로 들어온 선수의 값어치는 뛰던 선수가 얼마나 지쳤느냐에 달렸다. 막판 교체는 효과를 낼 시간이 짧다.
+      const fresh = clamp((100 - m.me.stamina) / 30, 0.25, 1) * (minute >= 70 ? 0.7 : 1);
+      const trailing = m.score[0] < m.score[1];
+      m.subs -= cost;
+      if (a === 'fw') {
+        m.subAtt += (trailing ? 2.2 : 1.5) * fresh;
+        m.subDef -= fresh;
+        say(m, minute, '공격수를 넣었다.', 'plain');
+      } else if (a === 'mf') {
+        m.subAtt += 0.6 * fresh;
+        m.subDef += 0.6 * fresh;
+        m.me.stamina = clamp(m.me.stamina + 8, 0, 100);
+        say(m, minute, '미드필더를 넣어 중원에 힘을 보탰다.', 'plain');
+      } else if (a === 'df') {
+        m.subDef += 1.5 * fresh;
+        m.subAtt -= fresh;
+        say(m, minute, '수비수를 넣었다.', 'plain');
+      } else {
+        m.me.stamina = clamp(m.me.stamina + 22, 0, 100);
+        say(m, minute, '지친 선수 둘을 바꿨다. 다리가 다시 움직인다.', 'plain');
+      }
+      return;
+    }
+  }
+}
+
+/** 실시간 경기 화면에 보여 줄 벤치의 판단: 상대 전술이 읽혔는지, 지금 전술과 다른 전술들의 유불리. */
+export function liveAdvice(g: Game): { text: string; tone: Tone; hints: Partial<Record<StyleId, string>> } {
+  const m = g.match as MatchState;
+  const block = readBlock(g, m) as { text: string; tone: Tone };
+  const hints: Partial<Record<StyleId, string>> = {};
+  if (m.read) for (const id of STYLE_IDS) hints[id] = hint(g, m, id, m.opp.style);
+  return { text: block.text, tone: block.tone, hints };
+}
+
+export { staminaText, readChance };

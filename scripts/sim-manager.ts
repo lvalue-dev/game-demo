@@ -1,12 +1,34 @@
 // 감독 커리어를 봇으로 여러 번 돌려 균형을 본다.
-//   node scripts/sim-manager.ts [횟수] [smart|random]
+//   node scripts/sim-manager.ts [횟수] [smart|random] [text|live]
+// 셋째 값이 live면 직접 지휘하는 경기를 실시간 모드로 치른다(느리다).
 import { act, createGame, legacyScore } from '../manager/src/game/career.ts';
 import { BACKGROUND_IDS } from '../manager/src/game/data.ts';
 import { rand } from '../manager/src/game/rng.ts';
+import { liveAdvice, liveCommand, liveTick } from '../manager/src/game/match.ts';
+import type { StyleId } from '../manager/src/game/types.ts';
+
+const hintOf = (g: Game, st: StyleId): string | undefined => liveAdvice(g).hints[st];
 import type { Game } from '../manager/src/game/types.ts';
 
 const runs = Number(process.argv[2] ?? 200);
 const mode = process.argv[3] ?? 'smart';
+const view = process.argv[4] ?? 'text';
+
+/** 실시간 경기를 봇이 지휘한다. 상대 전술이 읽히면 유리한 전술로, 60분에 뒤지면 공격수, 75분에 점수에 따라 태세. */
+function playLive(g: Game): void {
+  const m = g.match!;
+  const L = m.live!;
+  while (m.step === 'live') {
+    if (L.halfTimeDone && !L.talked) liveCommand(g, 'talk:calm');
+    if (mode === 'smart' && (L.tick === 30 * 20 || L.tick === 46 * 20)) {
+      const good = (['press', 'possess', 'counter', 'direct', 'wide', 'park'] as const).find((st) => m.read && st !== m.me.style && hintOf(g, st) === '유리');
+      if (good && hintOf(g, m.me.style) !== '유리') liveCommand(g, `style:${good}`);
+    }
+    if (mode === 'smart' && L.tick === 60 * 20) liveCommand(g, m.score[0] < m.score[1] ? 'sub:fw' : m.me.stamina < 55 ? 'sub:legs' : 'sub:mf');
+    if (mode === 'smart' && L.tick === 75 * 20) liveCommand(g, `push:${m.score[0] < m.score[1] ? 1 : m.score[0] > m.score[1] ? -1 : 0}`);
+    liveTick(g);
+  }
+}
 
 /** 봇의 선택. smart는 그럴듯한 사람처럼 고르고, random은 아무거나 고른다. */
 function choose(g: Game, dice: { rng: number }): string {
@@ -32,6 +54,7 @@ function choose(g: Game, dice: { rng: number }): string {
       const m = g.match!;
       if (m.step === 'shape') return '433';
       if (m.step === 'plan') return open.find((c) => c.detail?.includes('유리'))?.id ?? g.season.style;
+      if (m.step === 'mode') return view;
       if (m.step === 'm30' || m.step === 'ht') return open.find((c) => c.id !== 'keep' && c.detail?.includes('유리') && !open[0]!.detail?.includes('유리'))?.id ?? 'keep';
       if (m.step === 'talk') return 'calm';
       if (m.step === 'm60') return m.score[0] < m.score[1] ? 'fw' : m.me.stamina < 55 ? 'legs' : 'mf';
@@ -63,7 +86,8 @@ for (let i = 0; i < runs; i++) {
       const [a, b] = g.match!.score;
       if (a > b) big.w++; else if (a < b) big.l++; else big.d++;
     }
-    act(g, choose(g, dice));
+    if (g.phase === 'match' && g.match!.step === 'live') playLive(g);
+    else act(g, choose(g, dice));
     if (++guard > 5000) throw new Error(`끝나지 않는 커리어: seed ${i}, phase ${g.phase}`);
   }
   g.history.forEach((h, k) => { if (!h.club.endsWith('대표팀')) gaps[Math.min(2, Math.floor(k / 10))]!.push(h.pos); });
@@ -82,7 +106,7 @@ for (let i = 0; i < runs; i++) {
   if (idx >= 0) stats.firstTop.push(idx + 1);
 }
 const med = (a: number[]): number => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)] ?? 0;
-console.log(`${mode} 봇 ${runs}회`);
+console.log(`${mode} 봇 ${runs}회 (${view === 'live' ? '실시간' : '빠른 진행'})`);
 console.log(`커리어당 시즌 ${(stats.seasons / runs).toFixed(1)}, 경질 ${(stats.sacked / runs).toFixed(2)}회, 리그 우승 ${(stats.titles / runs).toFixed(2)}회, 승격 ${(stats.promotions / runs).toFixed(2)}회`);
 console.log(`커리어 점수 중앙값 ${med(stats.score)}, 최고 ${Math.max(...stats.score)}, 최저 ${Math.min(...stats.score)} / 최고 평판 중앙값 ${med(stats.peak).toFixed(0)}`);
 console.log('리그 평균 순위(초반/중반/후반 10시즌):', gaps.map((a) => (a.reduce((x, y) => x + y, 0) / Math.max(1, a.length)).toFixed(1)).join(' / '));

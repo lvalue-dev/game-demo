@@ -172,6 +172,102 @@ export interface MarketOption {
   detail: string;
 }
 
+/** 선수 개인에게 주는 역할. base는 포지션의 기본 역할이다. */
+export type RoleId = 'base' | 'link' | 'target' | 'drift' | 'hold' | 'maker' | 'runner' | 'stopper' | 'mark' | 'sweeper';
+
+/** 전술과 별개로 조절하는 팀 지시. -1, 0, 1의 세 단계다. */
+export interface Dials {
+  /** 수비 라인: -1 내림, 1 올림. */
+  line: -1 | 0 | 1;
+  /** 좌우 폭: -1 좁게, 1 넓게. */
+  width: -1 | 0 | 1;
+  /** 템포: -1 느리게, 1 빠르게. */
+  tempo: -1 | 0 | 1;
+  /** 풀백 오버래핑. */
+  overlap: boolean;
+}
+
+/** 실시간 경기 화면의 선수 한 명. 좌표는 미터(가로 105, 세로 68)다. */
+export interface LivePlayer {
+  /** 등번호. */
+  n: number;
+  name: string;
+  /** 본래 포지션. 지금 서는 자리는 대형의 slot이 정한다. */
+  line: Pos;
+  slot: number;
+  /** 주전 선수면 그 선수의 id, 후보나 상대 선수면 -1. */
+  key: number;
+  ovr: number;
+  x: number;
+  y: number;
+  /** 한 틱 전의 위치. 화면에서 부드럽게 이어 그리는 데 쓴다. */
+  px: number;
+  py: number;
+  /** 퇴장당해 경기장에 없다. */
+  off: boolean;
+}
+
+export interface LiveTeam {
+  players: LivePlayer[];
+  shots: number;
+  onTarget: number;
+  /** 슈팅마다의 득점 확률을 더한 기대 득점. */
+  xg: number;
+  passes: number;
+  passesOk: number;
+  possession: number;
+}
+
+/** 골이 어떻게 만들어졌는지. 골 장면을 글로 옮길 때 쓴다. */
+export type LiveHow = 'pass' | 'long' | 'cross' | 'press' | 'counter' | 'set' | 'pen';
+
+export interface LiveFlight {
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  start: number;
+  end: number;
+  kind: 'pass' | 'long' | 'cross' | 'shot';
+  /** 공을 찬 팀과 선수. */
+  side: 0 | 1;
+  by: number;
+  /** 도착했을 때 공을 잡는 팀과 선수. 슛이나 빗나간 크로스는 결과가 result에 있다. */
+  team: 0 | 1;
+  to: number;
+  result: 'goal' | 'save' | 'corner' | 'off' | null;
+  how: LiveHow;
+}
+
+/** 실시간 경기의 상태. 1800틱이 90분이고, 한 틱에 선수는 3미터쯤 움직인다. */
+export interface LiveState {
+  tick: number;
+  /** 0은 감독 팀(오른쪽으로 공격), 1은 상대. */
+  teams: [LiveTeam, LiveTeam];
+  ball: { x: number; y: number; px: number; py: number };
+  /** 공을 가진 팀과 선수. 공이 날아가는 중이거나 멈춰 있으면 null. */
+  owner: { team: 0 | 1; i: number } | null;
+  flight: LiveFlight | null;
+  /** 지금 선수가 공을 잡고 있었던 틱 수. */
+  held: number;
+  /** 공을 되찾은 뒤 지난 틱 수와, 되찾은 자리(공격 방향으로 0~105). */
+  sinceWin: number;
+  winU: number;
+  /** 멈춘 경기가 다시 시작되기까지 남은 틱과, 그때 공을 잡을 선수. */
+  wait: number;
+  restart: 'kick' | 'corner' | 'goalkick' | 'free' | null;
+  next: { team: 0 | 1; i: number; x: number; y: number } | null;
+  /** 세트피스 중인지: 0 아님, 1 코너킥, 2 프리킥, 3 페널티킥. */
+  set: 0 | 1 | 2 | 3;
+  lastKind: 'pass' | 'long' | 'cross';
+  halfTimeDone: boolean;
+  /** 하프타임 대화를 마쳤는지. 마치기 전에는 후반이 시작되지 않는다. */
+  talked: boolean;
+  /** 지시를 바꾼 뒤의 혼선이 끝나는 틱. */
+  confusedUntil: number;
+  over: boolean;
+}
+
 export interface LogLine {
   min: number;
   text: string;
@@ -205,7 +301,7 @@ export interface MatchState {
   oppIq: number;
   venue: 'home' | 'away' | 'neutral';
   weather: WeatherId;
-  step: 'shape' | 'plan' | 'm30' | 'talk' | 'ht' | 'm60' | 'm75' | 'done';
+  step: 'shape' | 'plan' | 'mode' | 'live' | 'm30' | 'talk' | 'ht' | 'm60' | 'm75' | 'done';
   /** 지금까지 치른 토막 수(0~6). */
   seg: number;
   score: [number, number];
@@ -226,6 +322,10 @@ export interface MatchState {
   logStart: number;
   pens: 'won' | 'lost' | null;
   auto: boolean;
+  dials: Dials;
+  /** 주전 선수 id별 개인 역할. 적혀 있지 않으면 기본 역할이다. */
+  roles: Record<number, RoleId>;
+  live: LiveState | null;
 }
 
 export type Block =

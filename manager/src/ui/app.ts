@@ -6,6 +6,7 @@ import {
 import { potentialText, ratings } from '../game/squad.ts';
 import { legacyTitle } from '../game/talk.ts';
 import { dropCount, sortTable, zone } from '../game/world.ts';
+import { isLive, mountLive, onLiveClick, pauseLive, renderLive, unmountLive } from './live.ts';
 import type { BackgroundId, Block, Club, ClubLeagueId, Game, LeagueId, MatchLine, Phase, Pos } from '../game/types.ts';
 
 type Tab = 'play' | 'table' | 'squad' | 'record';
@@ -63,6 +64,9 @@ export function start(data: { game?: unknown }): void {
   const saved = (data.game as Game | undefined) ?? load<Game>(SAVE_KEY);
   game = saved && saved.version === 3 ? saved : null;
   root.addEventListener('click', onClick);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) pauseLive();
+  });
   root.addEventListener('input', (e) => {
     const input = e.target as HTMLInputElement;
     if (input.id === 'manager-name') draft.name = input.value;
@@ -85,8 +89,9 @@ function begin(): void {
 }
 
 function onClick(e: Event): void {
-  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-do]');
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-do],[data-live],[data-live-do]');
   if (!el) return;
+  if ((el.dataset.live || el.dataset.liveDo) && onLiveClick(el)) return;
   if (el.dataset.bg) {
     draft.background = el.dataset.bg as BackgroundId;
     render();
@@ -170,7 +175,21 @@ function crest(club: Club, size: number): string {
 
 function render(): void {
   crestCount = 0;
+  unmountLive();
   root.innerHTML = game ? renderGame(game) : renderStart();
+  const live = !!game && tab === 'play' && isLive(game);
+  // 실시간 경기 중에는 전광판 대신 점수와 경기장을 화면 위에 붙여 둔다. 아래 지시 패널을 만지면서도 경기가 보인다.
+  document.body.classList.toggle('is-live', live);
+  if (game && live) {
+    mountLive(game, {
+      save: () => store(SAVE_KEY, game),
+      done: () => {
+        store(SAVE_KEY, game);
+        render();
+        window.scrollTo(0, 0);
+      },
+    });
+  }
 }
 
 function renderStart(): string {
@@ -235,7 +254,7 @@ function renderGame(g: Game): string {
       </div>
       ${step >= 0 ? `<ol class="steps" aria-label="시즌 진행">${STEPS.map((s, i) => `<li class="steps__item${i < step ? ' is-done' : i === step ? ' is-now' : ''}"${i === step ? ' aria-current="step"' : ''}>${s.label}</li>`).join('')}</ol>` : ''}
     </header>
-    <main class="page">${tab === 'play' ? renderScene(g) : tab === 'table' ? renderTables(g) : tab === 'squad' ? renderSquad(g) : renderRecord(g)}</main>
+    <main class="page">${tab === 'play' ? (isLive(g) ? renderLive(g) : renderScene(g)) : tab === 'table' ? renderTables(g) : tab === 'squad' ? renderSquad(g) : renderRecord(g)}</main>
     <nav class="tabs" aria-label="화면 전환">
       ${([['play', '진행'], ['table', '순위'], ['squad', '선수단'], ['record', '기록']] as [Tab, string][]).map(([id, label]) =>
         `<button type="button" class="tabs__item${tab === id ? ' is-on' : ''}" data-tab="${id}"${tab === id ? ' aria-current="page"' : ''}>${label}</button>`).join('')}
