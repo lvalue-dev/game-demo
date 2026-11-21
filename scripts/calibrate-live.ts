@@ -85,9 +85,18 @@ const line = (name: string, s: Stat): string =>
   `${name.padEnd(26)} 골 ${f(s.gf)}:${f(s.ga)}  xG ${f(s.xg)}:${f(s.xga)}  슈팅 ${f(s.shots, 1)}:${f(s.shotsAgainst, 1)}  유효 ${f(s.onTarget, 1)}  점유 ${f(s.poss * 100, 0)}%  패스 ${f(s.passes, 0)}(${f((s.passOk / s.passes) * 100, 0)}%)  승 ${f(s.win * 100, 0)}% 무 ${f(s.draw * 100, 0)}%`;
 
 const mode = process.argv[2] ?? 'check';
+const isMain = import.meta.url === `file://${process.argv[1]}`;
 const N = Number(process.argv[3] ?? 300);
 
-if (mode === 'check') {
+if (!isMain) {
+  // 다른 스크립트가 run만 가져다 쓴다.
+} else if (mode === 'pairs') {
+  // 전술 조합별 슈팅과 골. 보정 전 움직임 자체의 차이를 본다.
+  for (const a of STYLES) for (const b of STYLES) {
+    const s = run({ style: a }, { style: b }, N);
+    console.log(line(`${a} vs ${b}`, s));
+  }
+} else if (mode === 'check') {
   const t0 = Date.now();
   const base = run({}, {}, N);
   console.log(line('같은 전력', base), ` (${((Date.now() - t0) / N).toFixed(1)}ms/경기, 퇴장 ${f(base.reds)})`);
@@ -116,7 +125,7 @@ if (mode === 'check') {
   tuning.style = STYLES.map(() => STYLES.map(() => 1));
   tuning.shape = SHAPES.map(() => SHAPES.map(() => 1));
   tuning.extra = {};
-  for (let round = 0; round < 2; round++) {
+  for (let round = 0; round < 3; round++) {
     for (let i = 0; i < STYLES.length; i++) {
       for (let j = 0; j < STYLES.length; j++) {
         const s = run({ style: STYLES[i] }, { style: STYLES[j] }, N, round + 1);
@@ -126,7 +135,7 @@ if (mode === 'check') {
     console.log(`전술 ${round + 1}회차 끝`);
   }
   // 대형 표는 전술 표 위에 곱해지므로, 점유 대 점유의 값(이미 맞춰진 값)을 기준으로 삼는다.
-  for (let round = 0; round < 2; round++) {
+  for (let round = 0; round < 3; round++) {
     for (let i = 0; i < SHAPES.length; i++) {
       for (let j = 0; j < SHAPES.length; j++) {
         const s = run({ shape: SHAPES[i] }, { shape: SHAPES[j] }, N, round + 3);
@@ -144,9 +153,13 @@ if (mode === 'check') {
     ['hold', { roles: { 5: 'hold' } }], ['maker', { roles: { 5: 'maker' } }], ['runner', { roles: { 5: 'runner' } }],
     ['link', { roles: { 10: 'link' } }], ['target', { roles: { 10: 'target' } }], ['drift', { roles: { 10: 'drift' } }],
   ];
-  for (const [key, setup] of extras) {
-    const s = run(setup, {}, N * 2, 9);
-    tuning.extra[key] = [base.xg / Math.max(0.15, s.xg), base.xga / Math.max(0.15, s.xga)];
+  for (let round = 0; round < 2; round++) {
+    for (const [key, setup] of extras) {
+      const s = run(setup, {}, N * 2, 9 + round);
+      const old = tuning.extra[key] ?? [1, 1];
+      tuning.extra[key] = [old[0] * (base.xg / Math.max(0.15, s.xg)), old[1] * (base.xga / Math.max(0.15, s.xga))];
+    }
+    console.log(`지시 ${round + 1}회차 끝`);
   }
   const rows = (m: number[][]): string => m.map((row) => `    [${row.map((v) => v.toFixed(2)).join(', ')}],`).join('\n');
   const extra = Object.entries(tuning.extra).map(([k, v]) => `    '${k}': [${v[0].toFixed(2)}, ${v[1].toFixed(2)}],`).join('\n');

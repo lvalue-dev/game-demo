@@ -168,18 +168,27 @@ export function settings(side: LiveSide): string[] {
   return keys;
 }
 
-function finishing(L: LiveState, env: LiveEnv, t: 0 | 1): number {
+/**
+ * 보정표의 배수. 절반(제곱근)은 슈팅을 시도하려는 마음에, 나머지 절반은 결정력에 건다.
+ * 결정력에만 걸면 슈팅 수는 4개인데 골은 남들만큼 넣는 어색한 경기가 나온다.
+ */
+function compensation(env: LiveEnv, t: 0 | 1): number {
   const a = env.sides[t];
   const b = env.sides[1 - t] as LiveSide;
-  const minute = L.tick / PER_MIN;
-  // 마지막 15분에는 골이 더 많이 난다. 첫 15분은 탐색전이다.
-  const time = minute >= 75 ? 1.12 : minute < 15 ? 0.92 : 1;
   const style = (tuning.style[STYLE_ORDER.indexOf(a.style)] as number[])[STYLE_ORDER.indexOf(b.style)] as number;
   const shape = (tuning.shape[SHAPE_ORDER.indexOf(a.shape)] as number[])[SHAPE_ORDER.indexOf(b.shape)] as number;
   let extra = 1;
   for (const key of settings(a)) extra *= tuning.extra[key]?.[0] ?? 1;
   for (const key of settings(b)) extra *= tuning.extra[key]?.[1] ?? 1;
-  return SCALE * Math.exp(FIN * a.edge) * a.venue * time * style * shape * extra;
+  return Math.sqrt(style * shape * extra);
+}
+
+function finishing(L: LiveState, env: LiveEnv, t: 0 | 1): number {
+  const a = env.sides[t];
+  const minute = L.tick / PER_MIN;
+  // 마지막 15분에는 골이 더 많이 난다. 첫 15분은 탐색전이다.
+  const time = minute >= 75 ? 1.12 : minute < 15 ? 0.92 : 1;
+  return SCALE * Math.exp(FIN * a.edge) * a.venue * time * compensation(env, t);
 }
 
 // ---------- 좌표 ----------
@@ -362,7 +371,7 @@ function desire(L: LiveState, env: LiveEnv, t: 0 | 1): (Aim | null)[] {
       v = clamp(v, 2, 66);
     } else {
       u = s.u + (bu - 50) * ([0.7, 0.66, 0.5][k] as number) - ([3, 4, 3][k] as number);
-      const block = st === 'press' ? 9 : st === 'possess' ? 3 : st === 'counter' ? -7 : st === 'park' ? -13 : 0;
+      const block = st === 'press' ? 7 : st === 'possess' ? 3 : st === 'counter' ? -7 : st === 'park' ? -13 : 0;
       u += k === 2 && block < 0 ? block * 0.4 : block;
       u += d.line * ([7, 4, 1][k] as number) + side.push * 6;
       const w = 0.8 + (st === 'park' ? -0.1 : st === 'press' ? 0.05 : 0) + d.width * 0.08;
@@ -598,7 +607,7 @@ function pass(L: LiveState, env: LiveEnv, r: Rng, t: 0 | 1, i: number, pressed: 
     q -= 0.1;
   }
   let fail = (1 - q) * Math.exp(-PROG * side.edge);
-  if (foe.style === 'press' && u < 60) fail *= 1.15;
+  if (foe.style === 'press' && u < 60) fail *= 1.1;
   if (foe.style === 'park' && cu > 70) fail *= 1.2;
   team.passes++;
   L.lastKind = long ? 'long' : 'pass';
@@ -652,7 +661,7 @@ function act(L: LiveState, env: LiveEnv, r: Rng, events: LiveEvent[]): void {
 
   // 태클. 붙은 수비가 공을 뺏거나 반칙을 한다.
   if (near.d < 2.4) {
-    let lose = 0.3 * Math.exp(-PROG * side.edge) * (foe.style === 'press' ? 1.15 : 1) * (side.style === 'possess' ? 0.9 : 1) * (1 + side.dials.tempo * 0.06);
+    let lose = 0.3 * Math.exp(-PROG * side.edge) * (foe.style === 'press' ? 1.08 : 1) * (side.style === 'possess' ? 0.9 : 1) * (1 + side.dials.tempo * 0.06);
     if (L.held <= 1) lose *= 0.5;
     if (rand(r) < lose) {
       const box = u > 88.5 && Math.abs(v - CY) < 20;
@@ -677,7 +686,7 @@ function act(L: LiveState, env: LiveEnv, r: Rng, events: LiveEvent[]): void {
   if (dist < 30) {
     let want = dist < 9 ? 0.75 : dist < 14 ? 0.45 : dist < 20 ? 0.2 : dist < 26 ? 0.07 : 0.02;
     if (u > 88 && Math.abs(v - CY) > 16) want *= 0.3;
-    if (rand(r) < want) return shoot(L, env, r, t, i, null);
+    if (rand(r) < Math.min(0.95, want * compensation(env, t))) return shoot(L, env, r, t, i, null);
   }
   if (u > 80 && Math.abs(v - CY) > 14) {
     // 박스 안에 받을 선수가 있어야 올린다.
