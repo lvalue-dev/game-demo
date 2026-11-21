@@ -1,12 +1,11 @@
 // 리그와 경기. 모든 구단의 경기를 실제로 돌려 순위표를 만든다.
 import { CLUB_LEAGUES, CLUB_SEEDS, LEAGUES, NATIONS, STYLE_IDS } from './data.ts';
 import { chance, int, pick, poisson, shuffle, spread } from './rng.ts';
-import type { Club, ClubLeagueId, Game, LeagueId, MatchLine, Row } from './types.ts';
+import { usualShape } from './tactics.ts';
+import type { Club, ClubLeagueId, Game, LeagueId, MatchLine, Row, StyleId } from './types.ts';
 
-export interface Side {
-  att: number;
-  def: number;
-}
+export type { Side } from './power.ts';
+import type { Side } from './power.ts';
 
 export const emptyRow = (club: number): Row => ({ club, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0, form: [] });
 
@@ -47,7 +46,8 @@ export function goals(g: Game, att: number, def: number, venue: 'home' | 'away' 
   return poisson(g, lambda);
 }
 
-function apply(row: Row, gf: number, ga: number): void {
+/** 한 경기의 결과를 순위표의 한 줄에 반영한다. */
+export function applyResult(row: Row, gf: number, ga: number): void {
   row.p++;
   row.gf += gf;
   row.ga += ga;
@@ -87,10 +87,12 @@ export function createClubs(g: Game): void {
       const club: Club = {
         id: g.clubs.length, name: seed.name, league,
         att: meta.level + seed.edge + spread(g, -1.5, 1.5), def: meta.level + seed.edge + spread(g, -1.5, 1.5),
-        style: pick(g, STYLE_IDS), wealth: Math.max(-5, Math.min(5, Math.round(seed.edge * 0.7 + spread(g, -1, 1)))),
+        style: 'possess', shape: '442', wealth: Math.max(-5, Math.min(5, Math.round(seed.edge * 0.7 + spread(g, -1, 1)))),
         lastPos: ranked.indexOf(seed) + 1, colors: seed.colors ?? (PALETTE[h % PALETTE.length] as [string, string]),
         pattern: seed.pattern ?? (seed.colors ? 0 : (h >>> 8) % 6), conti: false, nation: false, asia: false,
       };
+      club.style = pick(g, STYLE_IDS);
+      club.shape = usualShape(club.style, h >>> 4);
       // 지난 시즌 상위 팀은 첫 시즌부터 대륙 대회에 나간다.
       club.conti = club.lastPos <= meta.conti;
       g.clubs.push(club);
@@ -102,7 +104,8 @@ export function createClubs(g: Game): void {
     const h = hash(nation.name);
     g.clubs.push({
       id: g.clubs.length, name: nation.name, league: 'intl', att: nation.level, def: nation.level,
-      style: pick(g, STYLE_IDS), wealth: 0, lastPos: 0, colors: PALETTE[h % PALETTE.length] as [string, string], pattern: 0,
+      style: STYLE_IDS[h % STYLE_IDS.length] as StyleId, shape: usualShape(STYLE_IDS[h % STYLE_IDS.length] as StyleId, h >>> 4), wealth: 0, lastPos: 0,
+      colors: PALETTE[h % PALETTE.length] as [string, string], pattern: 0,
       conti: false, nation: true, asia: nation.asia,
     });
   }
@@ -129,20 +132,22 @@ export function startGroup(g: Game, clubs: number[], double: boolean): void {
  * 감독 팀의 경기는 줄글로 돌려준다.
  */
 export function playRound(
-  g: Game, league: LeagueId, round: number, mine: number, side: (opp: Club, home: boolean) => Side, neutral = false,
+  g: Game, league: LeagueId, round: number, mine: number, side: (opp: Club, home: boolean) => Side, neutral = false, skip = -1,
 ): MatchLine | null {
   const fixtures = g.fixtures[league][round];
   if (!fixtures) return null;
   let line: MatchLine | null = null;
   for (const [h, a] of fixtures) {
+    // 감독이 직접 지휘할 경기는 건너뛴다.
+    if ((h === mine && a === skip) || (a === mine && h === skip)) continue;
     const home = g.clubs[h] as Club;
     const away = g.clubs[a] as Club;
     const hs = h === mine ? side(away, true) : { att: home.att, def: home.def };
     const as = a === mine ? side(home, false) : { att: away.att, def: away.def };
     const hg = goals(g, hs.att, as.def, neutral ? 'neutral' : 'home');
     const ag = goals(g, as.att, hs.def, neutral ? 'neutral' : 'away');
-    apply(g.tables[league].find((r) => r.club === h) as Row, hg, ag);
-    apply(g.tables[league].find((r) => r.club === a) as Row, ag, hg);
+    applyResult(g.tables[league].find((r) => r.club === h) as Row, hg, ag);
+    applyResult(g.tables[league].find((r) => r.club === a) as Row, ag, hg);
     if (h === mine || a === mine) {
       const isHome = h === mine;
       const gf = isHome ? hg : ag;
@@ -175,7 +180,10 @@ export function evolveClubs(g: Game, skip: number): void {
       const target = meta.level + club.wealth * 1.2;
       club.att += (target - club.att) * 0.2 + spread(g, -2, 2);
       club.def += (target - club.def) * 0.2 + spread(g, -2, 2);
-      if (chance(g, 0.1)) club.style = pick(g, STYLE_IDS);
+      if (chance(g, 0.15)) {
+        club.style = pick(g, STYLE_IDS);
+        club.shape = usualShape(club.style, int(g, 0, 5));
+      }
     }
   }
 }

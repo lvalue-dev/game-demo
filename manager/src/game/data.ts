@@ -26,9 +26,9 @@ export const CLUB_LEAGUES: ClubLeagueId[] = ['kr5', 'kr4', 'kr3', 'kr2', 'kr1', 
 
 // 리그의 이름과 참가 구단은 2026년(잉글랜드는 2026-27 시즌) 실제 구성을 따른다.
 // 일정 방식은 단순화했다: 모든 팀이 홈과 원정으로 한 번씩 만나고, 승격과 강등은 정해진 수만큼 바로 이뤄진다.
-// K5리그는 전국에 수백 팀이 있는 동호인 리그라서 가상의 권역 하나를 지어냈다.
+// K5리그는 권역별 동호인 리그다. 서울 권역을 골랐지만 전체 명단은 확인하지 못해 일부만 실제 팀이다.
 export const LEAGUES: Record<ClubLeagueId, LeagueMeta> = {
-  kr5: { name: 'K5리그', short: 'K5', region: 'kr', level: 32, rep: 0, money: 3, up: 'kr4', down: null, promote: 2, conti: 0, weight: 1, blurb: '주말 아침 운동장을 빌려 뛰는 동호인 리그' },
+  kr5: { name: 'K5리그 서울', short: 'K5', region: 'kr', level: 32, rep: 0, money: 3, up: 'kr4', down: null, promote: 2, conti: 0, weight: 1, blurb: '주말 아침 운동장을 빌려 뛰는 동호인 리그' },
   kr4: { name: 'K4리그', short: 'K4', region: 'kr', level: 42, rep: 10, money: 30, up: 'kr3', down: 'kr5', promote: 2, conti: 0, weight: 2, blurb: '직장과 축구를 병행하는 선수가 많은 세미프로 리그' },
   kr3: { name: 'K3리그', short: 'K3', region: 'kr', level: 51, rep: 22, money: 150, up: 'kr2', down: 'kr4', promote: 2, conti: 0, weight: 4, blurb: '세미프로 최상위. 버스로 전국을 돈다' },
   kr2: { name: 'K리그2', short: 'K리그2', region: 'kr', level: 60, rep: 36, money: 800, up: 'kr1', down: 'kr3', promote: 2, conti: 0, weight: 7, blurb: '프로 2부. 승격 경쟁이 가장 치열한 무대' },
@@ -51,10 +51,10 @@ const c = (name: string, edge: number, a?: string, b?: string, pattern?: number)
   ({ name, edge, colors: a && b ? [a, b] : null, pattern });
 
 export const CLUB_SEEDS: Record<ClubLeagueId, ClubSeed[]> = {
-  // 가상의 동호인 팀들.
+  // 서울 권역. 양천 TNT FC, 벽산 플레이어스, 닛시FC는 실제 팀이고, 나머지는 명단을 확인하지 못해 지어낸 팀이다.
   kr5: [
-    c('새벽 조기회', 5), c('동네 형들 FC', 4), c('명진 철물 FC', 2), c('삼거리 정육점 FC', 1), c('퇴근 후 FC', 0),
-    c('행복 부동산 유나이티드', -1), c('주말만 FC', -2), c('무릎 조심 FC', -3), c('월요병 시티', -4), c('숙취 유나이티드', -5),
+    c('양천 TNT FC', 6), c('벽산 플레이어스 FC', 4), c('닛시FC', 1), c('새벽 조기회', 1), c('동네 형들 FC', 0),
+    c('명진 철물 FC', -1), c('퇴근 후 FC', -2), c('주말만 FC', -3), c('무릎 조심 FC', -4), c('월요병 시티', -5),
   ],
   kr4: [
     c('연천FC', 3), c('서울중랑축구단', 3), c('남양주시민축구단', 2), c('평창유나이티드', 2), c('진주시민축구단', 1),
@@ -121,13 +121,14 @@ export const NATIONS: { name: string; level: number; asia: boolean }[] = [
 export const NATION_REP = 68;
 
 export const STYLES: Record<StyleId, { name: string; desc: string }> = {
-  attack: { name: '공격 축구', desc: '골이 늘고 실점도 는다' },
-  defend: { name: '선수비', desc: '실점이 줄고 골도 준다' },
-  possess: { name: '점유 축구', desc: '미드필더가 리그 평균보다 좋아야 통한다' },
-  counter: { name: '역습', desc: '강팀에 강하고 약팀을 상대로는 답답하다' },
-  press: { name: '전방 압박', desc: '전반기에 강하고 후반기에 지친다' },
+  press: { name: '전방 압박', desc: '잃은 자리에서 바로 되찾는다. 체력 소모가 크고 후반기에 지친다' },
+  possess: { name: '점유', desc: '짧은 패스로 경기를 쥔다. 중원이 밀리면 위험하다' },
+  counter: { name: '선수비 후역습', desc: '내려서 받고 뒷공간으로 빠르게 나간다' },
+  direct: { name: '롱볼', desc: '긴 패스로 압박을 건너뛰고 떨어진 공을 노린다' },
+  wide: { name: '측면 공격', desc: '넓게 벌려 크로스를 올린다. 역습에 노출된다' },
+  park: { name: '밀집 수비', desc: '내려앉아 공간을 지운다. 골을 넣기 어렵다' },
 };
-export const STYLE_IDS: StyleId[] = ['attack', 'defend', 'possess', 'counter', 'press'];
+export const STYLE_IDS: StyleId[] = ['press', 'possess', 'counter', 'direct', 'wide', 'park'];
 
 export const FOCUSES: Record<FocusId, { name: string; desc: string }> = {
   attack: { name: '공격 전개', desc: '공격력이 조금 오른다' },

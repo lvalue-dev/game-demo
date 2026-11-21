@@ -125,9 +125,9 @@ test('전력이 강한 팀이 대체로 위에 선다', () => {
       const open = g.scene.choices.filter((c) => !c.disabled);
       act(g, open[Math.floor(rand(dice) * open.length)]!.id);
     }
-    const table = sortTable(g.tables.kr1);
-    const strongest = [...g.leagues.kr1].sort((x, y) => g.clubs[y]!.att + g.clubs[y]!.def - (g.clubs[x]!.att + g.clubs[x]!.def))[0];
-    if (table.findIndex((r) => r.club === strongest) < 5) topHalf++;
+    const table = sortTable(g.tables.eu1);
+    const strongest = [...g.leagues.eu1].sort((x, y) => g.clubs[y]!.att + g.clubs[y]!.def - (g.clubs[x]!.att + g.clubs[x]!.def))[0];
+    if (table.findIndex((r) => r.club === strongest) < 10) topHalf++;
   }
   assert.ok(topHalf >= runs * 0.8, `가장 강한 팀이 상위 절반에 든 횟수: ${topHalf}/${runs}`);
 });
@@ -140,4 +140,45 @@ test('조사는 이름의 받침에 맞춰 붙는다', async () => {
   assert.equal(ko`${'마테오 실바'}과 ${'루카 로시'}이 다퉜다`, '마테오 실바와 루카 로시가 다퉜다');
   assert.equal(ko`${'챌린저스 리그'}으로 내려간다, ${'서울'}으로`, '챌린저스 리그로 내려간다, 서울로');
   assert.equal(ko`${'김민준'}이라는 선수`, '김민준이라는 선수', '조사가 아닌 말은 건드리지 않는다');
+});
+
+test('직접 지휘한 라이벌전도 순위표에 반영되어 모든 팀의 경기 수가 맞는다', () => {
+  for (let seed = 0; seed < 6; seed++) {
+    const g = createGame(seed * 13 + 77, '지휘', 'analyst');
+    const dice = { rng: seed + 1 };
+    let matches = 0;
+    while (g.phase !== 'end') {
+      if (g.phase === 'match' && g.match!.step === 'shape') matches++;
+      const open = g.scene.choices.filter((c) => !c.disabled && c.id !== 'auto');
+      act(g, open[Math.floor(rand(dice) * open.length)]!.id);
+    }
+    assert.ok(matches >= 2, '라이벌전은 전반기와 후반기에 한 번씩 있다');
+    const size = g.leagues.kr5.length;
+    for (const row of g.tables.kr5) assert.equal(row.p, 2 * (size - 1), '시즌이 끝나면 모든 팀이 같은 수의 경기를 치렀다');
+    assert.equal(g.match, null);
+    assert.ok(g.season.lines.some((l) => l.note === '직접 지휘'));
+  }
+});
+
+test('수석 코치에게 맡기면 선택 없이 경기가 끝난다', () => {
+  const g = createGame(4242, '위임', 'pro');
+  while (g.phase !== 'match') act(g, g.scene.choices.find((c) => !c.disabled)!.id);
+  act(g, 'auto');
+  assert.equal(g.match!.step, 'done');
+  assert.equal(g.match!.seg, 6);
+  assert.deepEqual(g.scene.choices.map((c) => c.id), ['next']);
+});
+
+test('전술 상성: 맞춤 전술은 실제로 유리하고, 유불리는 서로 뒤집힌다', async () => {
+  const { advantage, bestCounter, matchup } = await import('../src/game/tactics.ts');
+  const { STYLE_IDS } = await import('../src/game/data.ts');
+  for (const a of STYLE_IDS) {
+    assert.ok(advantage(bestCounter(a), a) > 0, `${a}를 받아치는 전술이 있다`);
+    for (const b of STYLE_IDS) assert.ok(Math.abs(advantage(a, b) + advantage(b, a)) < 1e-9);
+  }
+  assert.ok(['direct', 'counter'].includes(bestCounter('press')), '높이 올라온 팀에는 롱볼과 역습이 통한다');
+  assert.equal(bestCounter('park'), 'wide', '밀집 수비는 측면에서 흔든다');
+  // 압박과 점유의 싸움은 중원의 기술이 가른다.
+  assert.ok(matchup('possess', 'press', 0).att < 0);
+  assert.ok(matchup('possess', 'press', 3).att > 0);
 });

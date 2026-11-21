@@ -61,7 +61,7 @@ export function snapshot(): { game: Game | null } {
 export function start(data: { game?: unknown }): void {
   root = document.getElementById('app') as HTMLElement;
   const saved = (data.game as Game | undefined) ?? load<Game>(SAVE_KEY);
-  game = saved && saved.version === 2 ? saved : null;
+  game = saved && saved.version === 3 ? saved : null;
   root.addEventListener('click', onClick);
   root.addEventListener('input', (e) => {
     const input = e.target as HTMLInputElement;
@@ -219,7 +219,7 @@ function renderGame(g: Game): string {
   const club = g.job ? (g.clubs[g.job.club] as Club) : null;
   const meta = club && !club.nation ? LEAGUES[club.league as ClubLeagueId] : null;
   const where = club ? (meta ? (meta.short === meta.name || meta.name.startsWith(meta.short) ? meta.name : `${meta.name} · ${meta.short}`) : '국가대표팀') : '무소속';
-  const step = STEPS.findIndex((s) => s.phases.includes(g.phase));
+  const step = g.phase === 'match' ? (g.season.half === 1 ? 3 : 6) : STEPS.findIndex((s) => s.phases.includes(g.phase));
   return `
     <header class="board">
       <div class="board__row">
@@ -295,6 +295,15 @@ function renderTable(g: Game, league: LeagueId): string {
 
 function renderBlock(g: Game, b: Block): string {
   switch (b.kind) {
+    case 'score': return `
+      <div class="score" role="group" aria-label="점수">
+        <span class="score__team${b.mine === 0 ? ' is-mine' : ''}">${esc(b.home)}</span>
+        <span class="score__num">${b.score[0]}<span class="score__sep">:</span>${b.score[1]}</span>
+        <span class="score__team score__team--away${b.mine === 1 ? ' is-mine' : ''}">${esc(b.away)}</span>
+        <span class="score__minute">${esc(b.minute)}</span>
+      </div>`;
+    case 'log': return `<ol class="log">${b.items.map((l) => `
+      <li class="log__row log__row--${l.tone}"><span class="log__min">${l.min === 0 ? '시작' : `${Math.min(90, l.min)}'`}</span><span class="log__text">${esc(l.text)}</span></li>`).join('')}</ol>`;
     case 'text': return `<p class="prose">${esc(b.text)}</p>`;
     case 'note': return `<p class="note note--${b.tone}">${esc(b.text)}</p>`;
     case 'stats': return `<dl class="stats">${b.rows.map((r) => `<div class="stats__row"><dt>${esc(r.label)}</dt><dd class="${r.tone ? `is-${r.tone}` : ''}">${esc(r.value)}</dd></div>`).join('')}</dl>`;

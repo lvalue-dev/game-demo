@@ -1,7 +1,10 @@
 // 감독 커리어 게임 "터치라인"의 자료 구조. 화면과 무관하며 전부 그대로 저장할 수 있는 값이다.
 
 export type Pos = 'GK' | 'DF' | 'MF' | 'FW';
-export type StyleId = 'attack' | 'defend' | 'possess' | 'counter' | 'press';
+/** 전술. 팀이 공을 가졌을 때와 잃었을 때 무엇을 하는지를 정한다. */
+export type StyleId = 'press' | 'possess' | 'counter' | 'direct' | 'wide' | 'park';
+export type ShapeId = '442' | '433' | '4231' | '352' | '541';
+export type WeatherId = 'clear' | 'rain' | 'wind' | 'heat';
 export type FocusId = 'attack' | 'defense' | 'fitness' | 'youth';
 export type PlanId = 'allout' | 'steady' | 'rotate';
 export type AttrId = 'tactics' | 'lead' | 'youth' | 'deal' | 'eye';
@@ -36,6 +39,7 @@ export interface Club {
   att: number;
   def: number;
   style: StyleId;
+  shape: ShapeId;
   /** 재정 형편. -5(가난)에서 +5(부자). */
   wealth: number;
   lastPos: number;
@@ -105,6 +109,14 @@ export interface Job {
 export type NationYear = 'asia' | 'q2' | 'q3' | 'wc' | 'friendly';
 
 export interface SeasonState {
+  /** 지금 치르는 절반(1 전반기, 2 후반기). */
+  half: 1 | 2;
+  /** 올 시즌 직접 지휘하는 라이벌전의 상대. 없으면 -1. */
+  rival: number;
+  /** 자동 진행에서 빼 두고 직접 치를 리그 경기. */
+  pending: { league: LeagueId; round: number; home: boolean; opp: number } | null;
+  /** 이번 절반의 경기 기록이 lines의 몇 번째부터인지. */
+  halfStart: number;
   style: StyleId;
   focus: FocusId;
   plan: PlanId;
@@ -160,7 +172,65 @@ export interface MarketOption {
   detail: string;
 }
 
+export interface LogLine {
+  min: number;
+  text: string;
+  tone: Tone;
+}
+
+export interface MatchTeam {
+  style: StyleId;
+  shape: ShapeId;
+  /** 체력 0~100. 15분마다 줄고, 낮으면 공수가 함께 떨어진다. */
+  stamina: number;
+  /** 75분 이후의 태세. 1 총공세, -1 잠그기. */
+  push: -1 | 0 | 1;
+  red: boolean;
+}
+
+/** 직접 지휘하는 한 경기. 15분 여섯 토막으로 진행된다. */
+export interface MatchState {
+  kind: 'league' | 'knockout';
+  ko: 'cup' | 'conti' | 'finals' | null;
+  league: LeagueId | null;
+  round: number;
+  label: string;
+  oppId: number;
+  oppName: string;
+  /** 상대의 평소 전력과, 평소 쓰는 전술. */
+  oppAtt: number;
+  oppDef: number;
+  oppUsual: StyleId;
+  /** 상대 감독이 우리 전술에 대응하는 정도(0~1). 상위 리그일수록 높다. */
+  oppIq: number;
+  venue: 'home' | 'away' | 'neutral';
+  weather: WeatherId;
+  step: 'shape' | 'plan' | 'm30' | 'talk' | 'ht' | 'm60' | 'm75' | 'done';
+  /** 지금까지 치른 토막 수(0~6). */
+  seg: number;
+  score: [number, number];
+  me: MatchTeam;
+  opp: MatchTeam;
+  /** 지금 상대의 전술이 읽히는지. */
+  read: boolean;
+  subs: number;
+  /** 하프타임 대화가 후반에 주는 보정. */
+  talk: number;
+  /** 전술을 바꾼 직후의 혼선이 남은 토막 수. */
+  confusion: number;
+  /** 교체로 바뀐 공수 보정. */
+  subAtt: number;
+  subDef: number;
+  log: LogLine[];
+  /** 지난 결정 이후의 기록이 log의 몇 번째부터인지. */
+  logStart: number;
+  pens: 'won' | 'lost' | null;
+  auto: boolean;
+}
+
 export type Block =
+  | { kind: 'score'; home: string; away: string; score: [number, number]; minute: string; mine: 0 | 1 }
+  | { kind: 'log'; items: LogLine[] }
   | { kind: 'text'; text: string }
   | { kind: 'note'; text: string; tone: Tone }
   | { kind: 'stats'; rows: { label: string; value: string; tone?: Tone }[] }
@@ -180,7 +250,7 @@ export interface Choice {
 }
 
 export type Phase =
-  | 'offers' | 'style' | 'focus' | 'market' | 'half1' | 'event' | 'outcome'
+  | 'offers' | 'style' | 'focus' | 'market' | 'match' | 'half1' | 'event' | 'outcome'
   | 'winter' | 'plan' | 'end' | 'growth' | 'retired';
 
 export interface Scene {
@@ -211,6 +281,8 @@ export interface Game {
   /** 전술 숙련도 0~100. 같은 전술을 오래 쓸수록 오른다. */
   cohesion: number;
   season: SeasonState;
+  /** 직접 지휘하고 있는 경기. 없으면 null. */
+  match: MatchState | null;
   lastStyle: StyleId | null;
   phase: Phase;
   scene: Scene;

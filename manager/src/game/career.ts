@@ -13,20 +13,20 @@ import {
 } from './squad.ts';
 import { legacyTitle, reactions } from './talk.ts';
 import type { Mood } from './talk.ts';
+import { actMatch, beginMatch } from './match.ts';
+import { autoSide } from './power.ts';
+import type { Side } from './power.ts';
+import { usualShape } from './tactics.ts';
 import {
-  applyMoves, createClubs, dropCount, evolveClubs, playRound, playTie, positionOf, sortTable, startGroup, startLeagues, zone,
+  applyMoves, applyResult, createClubs, dropCount, evolveClubs, playRound, playTie, positionOf, sortTable, startGroup, startLeagues, zone,
 } from './world.ts';
-import type { Side } from './world.ts';
 import type {
-  AttrId, BackgroundId, Block, Choice, Club, ClubLeagueId, FocusId, Game, Knockout, MatchLine, NationYear, Offer,
-  PlanId, Player, Row, SeasonState, StyleId, Tone,
+  AttrId, BackgroundId, Block, Choice, Club, ClubLeagueId, FocusId, Game, Knockout, LeagueId, MatchLine, MatchState, NationYear,
+  Offer, PlanId, Player, Row, SeasonState, ShapeId, StyleId, Tone,
 } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 const round1 = (v: number): number => Math.round(v * 10) / 10;
-
-/** 평범한 감독이 팀에 더하는 전력. */
-const AVERAGE_MANAGER = 3.5;
 
 // 대륙 대회에서 만나는 상대. 이름만 빌려 쓰고 전력은 라운드에 따라 정한다.
 const ASIA_CLUBS = ['비셀 고베', '가와사키 프론탈레', '산프레체 히로시마', '요코하마 F. 마리노스', '알힐랄', '알나스르', '알아흘리', '알사드', '조호르 다룰 탁짐', '부리람 유나이티드', '상하이 하이강', '멜버른 시티'];
@@ -34,7 +34,7 @@ const EURO_CLUBS = ['레알 마드리드', 'FC 바르셀로나', '아틀레티�
 
 function blankSeason(): SeasonState {
   return {
-    style: 'possess', focus: 'attack', plan: 'steady', lines: [], cup: null, conti: null, nationYear: null, finals: null,
+    half: 1, rival: -1, pending: null, halfStart: 0, style: 'possess', focus: 'attack', plan: 'steady', lines: [], cup: null, conti: null, nationYear: null, finals: null,
     groupPassed: false, half1Pos: 0, notes: [], attMod: 0, defMod: 0, depthMod: 0,
   };
 }
@@ -43,13 +43,13 @@ export function createGame(seed: number, name: string, background: BackgroundId)
   const attrs: Record<AttrId, number> = { tactics: 6, lead: 6, youth: 6, deal: 6, eye: 6 };
   for (const [key, value] of Object.entries(BACKGROUNDS[background].bonus)) attrs[key as AttrId] += value as number;
   const g: Game = {
-    rng: seed | 0, version: 2, year: START_YEAR, nextId: 1,
+    rng: seed | 0, version: 3, year: START_YEAR, nextId: 1,
     manager: { name: name.trim() || '김감독', age: START_AGE, background, attrs, rep: 2, peakRep: 2 },
     clubs: [],
     leagues: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
     tables: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
     fixtures: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
-    round: 0, job: null, squad: [], depth: 0, morale: 60, cohesion: 25, season: blankSeason(), lastStyle: null,
+    round: 0, job: null, squad: [], depth: 0, morale: 60, cohesion: 25, season: blankSeason(), match: null, lastStyle: null,
     phase: 'offers', scene: { eyebrow: '', title: '', blocks: [], choices: [] }, eventId: null, offers: [], market: [],
     wcTicket: false, sacked: false, points: 0, history: [], trophies: [], promotions: 0,
   };
@@ -59,85 +59,42 @@ export function createGame(seed: number, name: string, background: BackgroundId)
   return g;
 }
 
-// ---------- 전력 ----------
-
-/** 감독 팀이 이번 경기에 내는 전력. 전술, 숙련도, 사기, 훈련, 후반기 운영이 모두 여기서 더해진다. */
-function side(g: Game, opp: Side, half: 1 | 2, cup: boolean): Side {
-  const s = g.season;
-  const r = ratings(g.squad, g.depth + s.depthMod);
-  const tactics = g.manager.attrs.tactics;
-  const k = 0.6 + tactics / 15;
-  // 다른 구단의 전력에는 평범한 감독의 몫이 이미 들어 있다. 그만큼을 빼고 시작해,
-  // 전술과 숙련도와 사기로 그 이상을 끌어내야 이름값을 한다.
-  let att = r.att + s.attMod - AVERAGE_MANAGER;
-  let def = r.def + s.defMod - AVERAGE_MANAGER;
-  if (s.style === 'attack') {
-    att += 3 * k;
-    def -= 2;
-  } else if (s.style === 'defend') {
-    def += 3 * k;
-    att -= 2;
-  } else if (s.style === 'possess') {
-    const good = r.mid >= stage(g).level;
-    att += good ? 1.5 * k : -1;
-    def += good ? 1.5 * k : -1;
-  } else if (s.style === 'counter') {
-    const stronger = (opp.att + opp.def) / 2 > (att + def) / 2 + 1;
-    att += stronger ? 3 * k : -1.5;
-    def += stronger ? k : 0;
-  } else if (half === 1) {
-    att += 2 * k;
-    def += 2 * k;
-  } else {
-    att += s.focus === 'fitness' ? k : -1.5;
-    def += s.focus === 'fitness' ? k : -1.5;
-  }
-  const drilled = (g.cohesion / 100) * (1 + tactics / 6);
-  const mood = (g.morale - 55) / 15;
-  att += drilled + mood + (s.focus === 'attack' ? 1.5 : 0) + (s.focus === 'fitness' && half === 2 ? 1 : 0);
-  def += drilled + mood + (s.focus === 'defense' ? 1.5 : 0) + (s.focus === 'fitness' && half === 2 ? 1 : 0);
-  if (half === 2) {
-    if (s.plan === 'allout') {
-      att += 2.5;
-      def -= 1.5;
-    } else if (s.plan === 'steady') {
-      def += 2.5;
-      att -= 1.5;
-    } else {
-      att += cup ? 2 : -1;
-      def += cup ? 2 : -1;
-    }
-  }
-  return { att, def };
-}
-
 // ---------- 토너먼트 ----------
 
 function newKnockout(name: string, rounds: string[]): Knockout {
   return { name, rounds, next: 0, alive: true, won: false, lines: [] };
 }
 
-/** 토너먼트를 count 라운드만큼 치른다. 지면 거기서 끝난다. */
-function runKnockout(g: Game, ko: Knockout | null, count: number, half: 1 | 2, opponent: (round: number) => { name: string; side: Side }): void {
-  if (!ko) return;
-  const nerve = g.squad.filter((p) => p.trait === 'clutch').length;
-  for (let i = 0; i < count && ko.alive; i++) {
-    const opp = opponent(ko.next);
-    const tie = playTie(g, side(g, opp.side, half, true), opp.side, clamp(0.5 + (g.manager.attrs.lead - 8) * 0.012 + nerve * 0.03, 0.3, 0.75));
-    ko.lines.push({
-      label: ko.rounds[ko.next] as string, opp: opp.name, home: true, gf: tie.gf, ga: tie.ga, result: tie.win ? 'W' : 'L',
-      note: tie.pens ? (tie.win ? '승부차기 승' : '승부차기 패') : undefined,
-    });
-    if (!tie.win) {
-      ko.alive = false;
-    } else if (++ko.next >= ko.rounds.length) {
-      ko.alive = false;
-      ko.won = true;
-    }
+interface Rival {
+  id: number;
+  name: string;
+  side: Side;
+  style: StyleId | null;
+  shape: ShapeId;
+}
+
+/** 토너먼트의 결과 한 줄을 적고 다음 라운드로 넘긴다. */
+function settleKnockout(ko: Knockout, opp: string, gf: number, ga: number, win: boolean, pens: boolean, note?: string): void {
+  ko.lines.push({
+    label: ko.rounds[ko.next] as string, opp, home: true, gf, ga, result: win ? 'W' : 'L',
+    note: [pens ? (win ? '승부차기 승' : '승부차기 패') : '', note ?? ''].filter(Boolean).join(' · ') || undefined,
+  });
+  if (!win) {
+    ko.alive = false;
+  } else if (++ko.next >= ko.rounds.length) {
+    ko.alive = false;
+    ko.won = true;
   }
 }
 
-function cupOpponent(g: Game, round: number): { name: string; side: Side } {
+/** 토너먼트 한 라운드를 자동으로 치른다. */
+function autoKnockout(g: Game, ko: Knockout, opp: Rival): void {
+  const nerve = g.squad.filter((p) => p.trait === 'clutch').length;
+  const tie = playTie(g, autoSide(g, opp.side, opp.style, g.season.half, true), opp.side, clamp(0.5 + (g.manager.attrs.lead - 8) * 0.012 + nerve * 0.03, 0.3, 0.75));
+  settleKnockout(ko, opp.name, tie.gf, tie.ga, tie.win, tie.pens);
+}
+
+function cupOpponent(g: Game, round: number): Rival {
   const me = myClub(g);
   const region = stage(g).region;
   const pool = CLUB_LEAGUES.filter((l) => LEAGUES[l].region === region).flatMap((l) => g.leagues[l]).filter((id) => id !== me.id)
@@ -145,23 +102,24 @@ function cupOpponent(g: Game, round: number): { name: string; side: Side } {
   // 라운드가 올라갈수록 강한 팀만 남는다.
   const keep = [1, 0.7, 0.5, 0.3, 0.15][round] ?? 0.15;
   const club = pool[int(g, 0, Math.max(0, Math.floor(pool.length * keep) - 1))] as Club;
-  return { name: `${club.name} (${LEAGUES[club.league as ClubLeagueId].short})`, side: { att: club.att, def: club.def } };
+  return { id: club.id, name: `${club.name} (${LEAGUES[club.league as ClubLeagueId].short})`, side: { att: club.att, def: club.def }, style: club.style, shape: club.shape };
 }
 
-function contiOpponent(g: Game, round: number): { name: string; side: Side } {
+function contiOpponent(g: Game, round: number): Rival {
   const euro = stage(g).region === 'eu';
   const level = (euro ? 82 : 68) + round * (euro ? 2.5 : 3) + spread(g, -3, 3);
   const names = (euro ? EURO_CLUBS : ASIA_CLUBS).filter((n) => n !== myClub(g).name);
-  return { name: pick(g, names), side: { att: level, def: level } };
+  const style = pick(g, STYLE_IDS);
+  return { id: -1, name: pick(g, names), side: { att: level, def: level }, style, shape: usualShape(style, int(g, 0, 5)) };
 }
 
-function nationOpponent(g: Game, round: number): { name: string; side: Side } {
+function nationOpponent(g: Game, round: number): Rival {
   const asia = g.season.nationYear === 'asia';
   const pool = g.clubs.filter((c) => c.nation && c.id !== g.job!.club && (asia ? c.asia : true))
     .sort((a, b) => b.att - a.att);
   const keep = asia ? [0.6, 0.35, 0.2][round] ?? 0.2 : [0.75, 0.45, 0.25, 0.12][round] ?? 0.12;
   const club = pool[int(g, 0, Math.max(0, Math.floor(pool.length * keep) - 1))] as Club;
-  return { name: club.name, side: { att: club.att, def: club.def } };
+  return { id: club.id, name: club.name, side: { att: club.att, def: club.def }, style: club.style, shape: club.shape };
 }
 
 // ---------- 시즌 시작 ----------
@@ -191,6 +149,8 @@ function setupNation(g: Game): void {
   else if (kind === 'wc') group = [...from(others.filter((c) => !c.asia && c.att >= 84), 1), ...from(others.filter((c) => !c.asia && c.att < 84), 2)];
   else group = from(others, 3);
   startGroup(g, shuffle(g, [me, ...group]), kind === 'q2' || kind === 'q3');
+  // 조에서 가장 강한 상대와의 경기는 직접 지휘한다.
+  g.season.rival = [...group].sort((a, b) => (g.clubs[b] as Club).att - (g.clubs[a] as Club).att)[0] as number;
   g.season.nationYear = kind;
   if (kind === 'asia') g.season.finals = newKnockout('아시안컵', ['8강', '4강', '결승']);
   if (kind === 'wc') g.season.finals = newKnockout('월드컵', ['16강', '8강', '4강', '결승']);
@@ -212,6 +172,8 @@ function beginSeason(g: Game): void {
     const power = (id: number): number => (g.clubs[id] as Club).att + (g.clubs[id] as Club).def;
     const rank = 1 + ids.filter((id) => id !== club.id && power(id) > power(club.id)).length;
     job.objective = clamp(rank - (club.wealth >= 3 ? 1 : 0), 1, ids.length - Math.max(1, dropCount(club.league as ClubLeagueId)));
+    // 전력이 가장 비슷한 팀이 올 시즌의 라이벌이다. 그 팀과의 두 경기는 직접 지휘한다.
+    g.season.rival = ids.filter((id) => id !== club.id).sort((a, b) => Math.abs(power(a) - power(club.id)) - Math.abs(power(b) - power(club.id)))[0] as number;
     job.budget = round1(job.budget + meta.money * (1 + club.wealth * 0.12));
     g.season.cup = newKnockout(meta.region === 'kr' ? '코리아컵' : 'FA컵', ['32강', '16강', '8강', '4강', '결승']);
     if (club.conti) g.season.conti = newKnockout(meta.region === 'kr' ? '아시아 챔피언스리그' : '유럽 챔피언스리그', ['16강', '8강', '4강', '결승']);
@@ -326,48 +288,134 @@ function recordOf(lines: MatchLine[]): { w: number; d: number; l: number; text: 
   return { w, d, l, text: `${w}승 ${d}무 ${l}패` };
 }
 
-/** 전반기 또는 후반기를 치른다. */
-function playHalf(g: Game, half: 1 | 2): MatchLine[] {
+/**
+ * 전반기 또는 후반기를 시작한다. 리그 경기를 자동으로 돌리되, 라이벌전 한 경기는 빼 두었다가
+ * 감독이 직접 지휘한다. 이어서 토너먼트를 치르고, 다 끝나면 결산으로 넘어간다.
+ */
+function startHalf(g: Game, half: 1 | 2): void {
   const club = myClub(g);
-  const mine: MatchLine[] = [];
+  const s = g.season;
+  s.half = half;
+  s.halfStart = s.lines.length;
+  s.pending = null;
+  const range = (total: number): [number, number] => {
+    const split = total <= 3 ? total : Math.ceil(total / 2);
+    return half === 1 ? [0, split] : [split, total];
+  };
+  const mine = (league: LeagueId, r: number): [number, number] | undefined =>
+    g.fixtures[league][r]!.find(([h, a]) => (h === club.id && a === s.rival) || (a === club.id && h === s.rival));
   // 리그마다 팀 수가 달라 라운드 수도 다르다. 각 리그의 일정을 절반씩 치른다.
   for (const league of CLUB_LEAGUES) {
-    const total = g.fixtures[league].length;
-    const split = Math.ceil(total / 2);
-    for (let r = half === 1 ? 0 : split; r < (half === 1 ? split : total); r++) {
-      const line = playRound(g, league, r, club.nation ? -1 : club.id, (opp) => side(g, opp, half, false));
-      if (line) mine.push(line);
+    const [from, to] = range(g.fixtures[league].length);
+    for (let r = from; r < to; r++) {
+      const fixture = club.nation ? undefined : mine(league, r);
+      if (fixture) s.pending = { league, round: r, home: fixture[0] === club.id, opp: s.rival };
+      const line = playRound(g, league, r, club.nation ? -1 : club.id, (opp) => autoSide(g, opp, opp.style, half, false), false, s.rival);
+      if (line) s.lines.push(line);
+    }
+  }
+  if (club.nation) {
+    const kind = s.nationYear as NationYear;
+    const neutral = kind !== 'q2' && kind !== 'q3';
+    const [from, to] = range(g.fixtures.intl.length);
+    for (let r = from; r < to; r++) {
+      const fixture = mine('intl', r);
+      if (fixture) s.pending = { league: 'intl', round: r, home: fixture[0] === club.id, opp: s.rival };
+      const line = playRound(g, 'intl', r, club.id, (opp) => autoSide(g, opp, opp.style, half, false), neutral, s.rival);
+      if (line) s.lines.push({ ...line, label: neutral ? `조별 ${r + 1}차전` : `${r + 1}차전` });
     }
   }
   g.round = half;
-  if (club.nation) {
-    const total = g.fixtures.intl.length;
-    const kind = g.season.nationYear as NationYear;
-    const split = total <= 3 ? total : total / 2;
-    const start = half === 1 ? 0 : split;
-    const end = half === 1 ? split : total;
-    const neutral = kind !== 'q2' && kind !== 'q3';
-    for (let r = start; r < end; r++) {
-      const line = playRound(g, 'intl', r, club.id, (opp) => side(g, opp, half, false), neutral);
-      if (line) mine.push({ ...line, label: neutral ? `조별 ${r + 1}차전` : `${r + 1}차전` });
-    }
-    if (half === 1 && total <= 3) g.season.groupPassed = positionOf(g, 'intl', club.id) <= 2;
-    if (half === 2 && g.season.finals) {
-      if (g.season.groupPassed) runKnockout(g, g.season.finals, g.season.finals.rounds.length, 2, (round) => nationOpponent(g, round));
-      else g.season.finals.alive = false;
-    }
-  } else {
-    runKnockout(g, g.season.cup, half === 1 ? 3 : 2, half, (round) => cupOpponent(g, round));
-    runKnockout(g, g.season.conti, 2, half, (round) => contiOpponent(g, round));
+  advance(g);
+}
+
+interface Bracket {
+  ko: Knockout;
+  kind: 'cup' | 'conti' | 'finals';
+  until: number;
+  opponent: (round: number) => Rival;
+}
+
+/** 이번 절반에 치를 토너먼트와, 각각 몇 라운드까지 가는지. */
+function knockoutsNow(g: Game): Bracket[] {
+  const s = g.season;
+  const list: Bracket[] = [];
+  if (s.cup) list.push({ ko: s.cup, kind: 'cup', until: s.half === 1 ? 3 : 5, opponent: (r) => cupOpponent(g, r) });
+  if (s.conti) list.push({ ko: s.conti, kind: 'conti', until: s.half === 1 ? 2 : 4, opponent: (r) => contiOpponent(g, r) });
+  if (s.finals && s.half === 2) list.push({ ko: s.finals, kind: 'finals', until: s.finals.rounds.length, opponent: (r) => nationOpponent(g, r) });
+  return list;
+}
+
+/** 감독이 직접 지휘하는 토너먼트 경기: 컵 결승, 대륙 대회 4강부터, 대표팀 토너먼트 전부. */
+function handsOn(kind: 'cup' | 'conti' | 'finals', ko: Knockout): boolean {
+  if (kind === 'finals') return true;
+  return ko.next >= ko.rounds.length - (kind === 'conti' ? 2 : 1);
+}
+
+/** 남은 일을 순서대로 처리한다. 직접 지휘할 경기를 만나면 거기서 멈춘다. */
+function advance(g: Game): void {
+  const s = g.season;
+  const club = myClub(g);
+  if (s.pending) {
+    const p = s.pending;
+    s.pending = null;
+    const opp = g.clubs[p.opp] as Club;
+    const neutral = club.nation && s.nationYear !== 'q2' && s.nationYear !== 'q3';
+    beginMatch(g, {
+      kind: 'league', ko: null, league: p.league, round: p.round,
+      label: club.nation ? `${seasonLabel(g)} · ${p.round + 1}차전` : `${seasonLabel(g)} · ${p.round + 1}R 라이벌전`,
+      opp: { id: opp.id, name: opp.name, att: opp.att, def: opp.def, style: opp.style, shape: opp.shape },
+      venue: neutral ? 'neutral' : p.home ? 'home' : 'away',
+    });
+    return;
   }
-  g.season.lines.push(...mine);
+  if (club.nation && s.half === 1 && g.fixtures.intl.length <= 3) s.groupPassed = positionOf(g, 'intl', club.id) <= 2;
+  if (s.finals && s.half === 2 && !s.groupPassed) s.finals.alive = false;
+  for (const { ko, kind, until, opponent } of knockoutsNow(g)) {
+    while (ko.alive && ko.next < until) {
+      const opp = opponent(ko.next);
+      if (handsOn(kind, ko)) {
+        beginMatch(g, {
+          kind: 'knockout', ko: kind, league: null, round: ko.next, label: `${ko.name} ${ko.rounds[ko.next]}`,
+          opp: { id: opp.id, name: opp.name, att: opp.side.att, def: opp.side.def, style: opp.style ?? 'possess', shape: opp.shape },
+          venue: 'neutral',
+        });
+        return;
+      }
+      autoKnockout(g, ko, opp);
+    }
+  }
   // 결과에 따라 사기가 움직이고, 같은 전술로 뛴 만큼 숙련도가 쌓인다.
-  const rec = recordOf(mine);
+  const rec = recordOf(s.lines.slice(s.halfStart));
   const leaders = g.squad.filter((p) => p.trait === 'leader').length;
   const swing = (rec.w - rec.l) * 2.2;
   g.morale = clamp(g.morale + (swing < 0 ? swing * (1 - leaders * 0.2) : swing) + (g.manager.attrs.lead - 8) * 0.4, 5, 100);
   g.cohesion = clamp(g.cohesion + 8 + g.manager.attrs.tactics / 2, 0, 100);
-  return mine;
+  if (s.half === 1) enterHalf1(g);
+  else if (club.nation) finishNationYear(g);
+  else finishClubSeason(g, false);
+}
+
+/** 직접 지휘한 경기의 결과를 순위표나 토너먼트에 반영한다. */
+function settleMatch(g: Game): void {
+  const m = g.match as MatchState;
+  const club = myClub(g);
+  const [gf, ga] = m.score;
+  if (m.kind === 'league' && m.league) {
+    applyResult(g.tables[m.league].find((r) => r.club === club.id) as Row, gf, ga);
+    applyResult(g.tables[m.league].find((r) => r.club === m.oppId) as Row, ga, gf);
+    g.season.lines.push({
+      label: club.nation ? `${m.round + 1}차전` : `${m.round + 1}R`, opp: m.oppName, home: m.venue !== 'away', gf, ga,
+      result: gf > ga ? 'W' : gf === ga ? 'D' : 'L', note: m.auto ? '라이벌전' : '직접 지휘',
+    });
+  } else {
+    const ko = (m.ko === 'cup' ? g.season.cup : m.ko === 'conti' ? g.season.conti : g.season.finals) as Knockout;
+    settleKnockout(ko, m.oppName, gf, ga, m.pens ? m.pens === 'won' : gf > ga, !!m.pens, m.auto ? undefined : '직접 지휘');
+  }
+  // 큰 경기의 결과는 라커룸에 오래 남는다.
+  const won = m.pens ? m.pens === 'won' : gf > ga;
+  g.morale = clamp(g.morale + (won ? 4 : gf === ga && !m.pens ? 0 : -4), 5, 100);
+  g.match = null;
 }
 
 function knockoutNote(ko: Knockout | null): string {
@@ -381,7 +429,7 @@ function knockoutNote(ko: Knockout | null): string {
 function enterHalf1(g: Game): void {
   const job = g.job!;
   const club = myClub(g);
-  const lines = playHalf(g, 1);
+  const lines = g.season.lines.slice(g.season.halfStart);
   const league = club.nation ? 'intl' : club.league;
   const pos = positionOf(g, league, club.id);
   g.season.half1Pos = pos;
@@ -771,7 +819,13 @@ export function act(g: Game, id: string): void {
       return;
     case 'market':
       applyMarket(g, id);
-      enterHalf1(g);
+      startHalf(g, 1);
+      return;
+    case 'match':
+      if (actMatch(g, id)) {
+        settleMatch(g);
+        advance(g);
+      }
       return;
     case 'half1':
       // 전반기 성적이 처참하면 시즌 도중에 잘린다.
@@ -800,9 +854,7 @@ export function act(g: Game, id: string): void {
       return;
     case 'plan':
       g.season.plan = id as PlanId;
-      playHalf(g, 2);
-      if (nation) finishNationYear(g);
-      else finishClubSeason(g, false);
+      startHalf(g, 2);
       return;
     case 'end':
       enterGrowth(g);
