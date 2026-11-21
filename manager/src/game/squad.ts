@@ -27,7 +27,7 @@ export function makePlayer(g: Game, pos: Pos, ovr: number, age: number, region: 
   return {
     id: g.nextId++, name, pos, age, ovr: value, pot: Math.min(99, value + room),
     trait: chance(g, 0.35) ? pick(g, TRAIT_IDS) : null, years: 0, goals: 0, temp: 0, homegrown: false,
-    ...makeDetail(g, pos, spot),
+    ...makeDetail(g, pos, spot), no: 0, contract: null, unhappy: false,
   };
 }
 
@@ -97,7 +97,7 @@ export interface Change {
 export function develop(g: Game): Change[] {
   const { attrs } = g.manager;
   const changes: Change[] = [];
-  for (const p of g.squad) {
+  for (const p of [...g.squad, ...g.reserves]) {
     let delta = 0;
     if (p.age <= 23) {
       const rate = spread(g, 0.12, 0.3) * (1 + attrs.youth / 25) * (g.season.focus === 'youth' ? 1.4 : 1);
@@ -139,11 +139,38 @@ export function departures(g: Game, nextLevel: number): { income: number; lines:
       gone = ko`${p.age}세 ${p.name}이 대표팀 은퇴를 선언했다.`;
     }
     if (!gone) continue;
-    const fill = makePlayer(g, p.pos, nextLevel + spread(g, -4, 1), int(g, 20, 27), region, club.nation, p.spot);
-    g.squad = g.squad.map((q) => (q.id === p.id ? fill : q));
-    lines.push(ko`${gone} 빈자리는 OVR ${fill.ovr}의 ${fill.name}(${fill.spot})이 맡는다.`);
+    lines.push(`${gone} ${fillSlot(g, p, nextLevel, region)}`);
+  }
+  // 후보 중 노장은 은퇴한다.
+  for (const p of [...g.reserves]) {
+    if (p.age >= 36 || (p.age >= 34 && chance(g, 0.4))) {
+      g.reserves = g.reserves.filter((q) => q.id !== p.id);
+      lines.push(ko`후보 ${p.age}세 ${p.name}이 유니폼을 벗었다.`);
+    }
   }
   return { income, lines };
+}
+
+/**
+ * 선발 한 자리가 비었다. 같은 포지션 후보 중 가장 좋은 선수가 올라가고, 없으면 새 선수가 온다.
+ * 대표팀은 늘 새 선수를 부른다. 설명 한 줄을 돌려준다.
+ */
+export function fillSlot(g: Game, out: Player, level: number, region: 'kr' | 'eu'): string {
+  const club = myClub(g);
+  const target = level + spread(g, -4, 1);
+  const bench = club.nation ? undefined : g.reserves.filter((q) => q.pos === out.pos).sort((a, b) => b.ovr - a.ovr)[0];
+  // 후보가 새로 데려올 선수만큼 좋으면 후보를 올리고, 아니면 새 선수를 데려온다.
+  if (bench && bench.ovr >= target - 1) {
+    g.reserves = g.reserves.filter((q) => q.id !== bench.id);
+    g.squad = g.squad.map((q) => (q.id === out.id ? bench : q));
+    return ko`후보 ${bench.name}(${bench.spot}, OVR ${bench.ovr})이 선발로 올라섰다.`;
+  }
+  const fill = makePlayer(g, out.pos, target, int(g, 20, 27), region, club.nation, out.spot);
+  if (!club.nation) {
+    fill.contract = { wage: 0, years: int(g, 2, 3), promise: 'starter', clause: null, sellOn: 0, since: g.year };
+  }
+  g.squad = g.squad.map((q) => (q.id === out.id ? fill : q));
+  return ko`빈자리는 OVR ${fill.ovr}의 ${fill.name}(${fill.spot})이 맡는다.`;
 }
 
 /** 팀 득점을 주전들에게 나눠 준다. 시즌 기록에 이야깃거리를 만든다. */

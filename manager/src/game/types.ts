@@ -41,6 +41,29 @@ export interface Player {
   height: number;
   /** 같은 포지션 선수들과 견준 능력치 개인차(속도, 슈팅, 패스, 드리블, 수비, 피지컬). */
   dev: number[];
+  /** 등번호. */
+  no: number;
+  /** 구단과 맺은 계약. 대표팀 선수나 상대 팀 선수는 없다. */
+  contract: Contract | null;
+  /** 약속이 깨졌거나 이적을 원해 불만이 있다. */
+  unhappy: boolean;
+}
+
+/** 출전 보장: 핵심 선수, 주전, 로테이션, 백업. */
+export type PromiseId = 'star' | 'starter' | 'rotation' | 'backup';
+
+export interface Contract {
+  /** 연봉(백만 원, 한 시즌). 아마추어 리그는 0이다. */
+  wage: number;
+  /** 남은 계약 기간(시즌). 1이면 이번 시즌이 마지막이다. */
+  years: number;
+  promise: PromiseId;
+  /** 바이아웃(백만 원). 이 금액을 내는 구단에는 이적을 막을 수 없다. */
+  clause: number | null;
+  /** 셀온 조항: 다시 팔 때 이적료의 이만큼을 전 소속 구단에 준다. */
+  sellOn: number;
+  /** 서명한 해. */
+  since: number;
 }
 
 export interface Club {
@@ -113,7 +136,10 @@ export interface Job {
   confidence: number;
   /** 구단이 요구하는 최종 순위. 국가대표는 대회별 목표를 따로 쓴다. */
   objective: number;
+  /** 이적 예산(백만 원). */
   budget: number;
+  /** 한 시즌 연봉 총액의 상한(백만 원). */
+  wageBudget: number;
   seasons: number;
 }
 
@@ -174,25 +200,51 @@ export interface Offer {
   pitch: string;
 }
 
-/** 이적 시장에 나온 영입 후보. */
-export interface Deal {
-  id: string;
-  kind: 'sign' | 'youth' | 'free';
-  player: Player;
-  /** 요구 이적료(백만 원). */
-  price: number;
-  /** 후보의 성격: 즉시 전력, 유망주, 베테랑, 자유계약, 유스. */
-  tag: string;
-  /** 협상을 시도한 횟수. */
-  tries: number;
+/** 개인 조건 제안서. */
+export interface Terms {
+  wage: number;
+  years: number;
+  promise: PromiseId;
+  /** 바이아웃: 없음, 높게(시장가 2.5배), 낮게(시장가 1.5배). */
+  clause: 'none' | 'high' | 'low';
+  /** 계약금(서명 보너스)을 줄지. 연봉의 절반이다. */
+  bonus: boolean;
 }
 
-/** 다른 구단이 우리 선수에게 낸 이적 제안. */
+/** 이적 시장에 나온 영입 후보와 협상 진행 상태. */
+export interface Deal {
+  id: string;
+  kind: 'sign' | 'youth' | 'free' | 'renew';
+  player: Player;
+  /** 판매 구단의 요구 이적료(백만 원). 자유계약과 유스, 재계약은 0. */
+  price: number;
+  /** 판매 구단 이름. 자유계약이면 '무소속'. */
+  from: string;
+  /** 후보의 성격: 즉시 전력, 유망주, 베테랑, 자유계약, 유스, 재계약. */
+  tag: string;
+  /** 협상 단계: 이적료 협상, 개인 조건 협상. */
+  stage: 'fee' | 'terms';
+  /** 합의한 이적료와 셀온 조항. */
+  fee: number;
+  sellOn: number;
+  /** 선수의 요구: 연봉, 기대하는 출전 시간, 원하는 계약 기간. */
+  ask: { wage: number; promise: PromiseId; years: number };
+  /** 지금 우리가 쓰고 있는 제안서. */
+  offer: Terms;
+  /** 이적료 협상과 개인 조건 협상에서 거절당한 횟수. */
+  tries: number;
+  talks: number;
+}
+
+/** 다른 구단이 우리 선수에게 낸 이적 제안. clause면 바이아웃 발동이다. */
 export interface Bid {
   id: string;
   player: number;
   club: string;
   fee: number;
+  clause: boolean;
+  /** 우리가 역제안을 한 번 했는지. */
+  countered: boolean;
 }
 
 /** 열려 있는 이적 시장. */
@@ -200,7 +252,7 @@ export interface TransferWindow {
   kind: 'summer' | 'winter';
   list: Deal[];
   bids: Bid[];
-  /** 지금 보고 있는 화면: null은 목록, 'sell'은 판매 명단, 그 밖에는 후보 id. */
+  /** 지금 보고 있는 화면: null은 목록, 'sell'은 판매·방출 명단, 그 밖에는 후보 id. */
   view: string | null;
   /** 이번 시장에서 있었던 일. */
   log: string[];
@@ -374,7 +426,7 @@ export interface MatchState {
 }
 
 export type Block =
-  | { kind: 'score'; home: string; away: string; score: [number, number]; minute: string; mine: 0 | 1 }
+  | { kind: 'score'; home: string; away: string; score: [number, number]; minute: string; mine: 0 | 1; clubs?: [number, number] }
   | { kind: 'log'; items: LogLine[] }
   | { kind: 'text'; text: string }
   | { kind: 'note'; text: string; tone: Tone }
@@ -383,6 +435,8 @@ export type Block =
   | { kind: 'table'; league: LeagueId }
   | { kind: 'players'; items: { player: Player; delta?: number; note?: string }[] }
   | { kind: 'card'; player: Player; price?: string; compare?: Player; note?: string }
+  /** 칩을 눌러 고르는 양식. 계약 제안서에 쓴다. 칩의 id는 선택지 id처럼 act()로 간다. */
+  | { kind: 'form'; title: string; rows: { label: string; note?: string; options: { id: string; label: string; on: boolean; disabled?: boolean }[] }[] }
   | { kind: 'feed'; items: { who: string; where: string; text: string; tone: Tone }[] };
 
 export interface Choice {
@@ -423,6 +477,8 @@ export interface Game {
   round: number;
   job: Job | null;
   squad: Player[];
+  /** 후보 명단. 선발 일곱 명 밖의 등록 선수들. */
+  reserves: Player[];
   /** 주전 일곱 명을 뺀 나머지 선수층의 수준. */
   depth: number;
   morale: number;

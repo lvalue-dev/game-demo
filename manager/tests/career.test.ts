@@ -281,58 +281,150 @@ test('실시간 경기: 건너뛰면 지금 지시대로 끝까지 진행된다'
   assert.deepEqual(g.scene.choices.map((c) => c.id), ['next']);
 });
 
-/** 첫 여름 이적시장 목록 화면까지 간다. */
-function toMarket(seed: number): Game {
+/** 첫 여름 이적시장 목록 화면까지 간다. 예산은 넉넉하게 준다. */
+function toMarket(seed: number, rich = true): Game {
   const g = createGame(seed, '시장', 'scout');
+  // 연봉이 있는 리그에서 시험한다: K3 구단을 고른다.
   while (g.phase !== 'market') act(g, g.scene.choices.find((c) => !c.disabled)!.id);
+  if (rich) {
+    g.job!.budget = 1e6;
+    g.job!.wageBudget = 1e6;
+  }
   return g;
 }
 
-test('이적시장: 한 시장에서 여러 명을 영입하고, 판매하고, 마감할 수 있다', () => {
+test('이적: 이적료 합의 → 개인 조건 협상 → 서명. 여러 명을 영입하고 판매, 해지도 한다', () => {
   const g = toMarket(808);
-  g.job!.budget = 1e6;
-  const w = g.window!;
-  assert.ok(w.list.length >= 6, '여름에는 후보가 여섯 명 넘게 나온다');
   const before = g.squad.length;
-  for (let k = 0; k < 3; k++) {
-    const d = g.window!.list.find((x) => x.kind !== 'youth')!;
+  let signed = 0;
+  for (const d of g.window!.list.filter((x) => x.kind === 'sign').slice(0, 3)) {
+    const budget = g.job!.budget;
     act(g, `view:${d.id}`);
-    assert.equal(g.scene.blocks[0]!.kind, 'card', '후보를 누르면 선수 카드가 보인다');
-    act(g, 'buy');
-    assert.ok(g.squad.some((p) => p.id === d.player.id));
+    assert.equal(g.window!.list.find((x) => x.id === d.id)!.stage, 'fee');
+    act(g, 'fee:100');
+    assert.equal(g.window!.list.find((x) => x.id === d.id)!.stage, 'terms', '요구액을 받아들이면 바로 이적료 합의');
+    assert.ok(g.scene.blocks.some((b) => b.kind === 'form'), '개인 조건 화면에는 계약 제안서가 있다');
+    assert.equal(g.job!.budget, budget, '이적료는 서명할 때 나간다');
+    for (let k = 0; k < 5 && g.window!.view === d.id; k++) {
+      act(g, 't:bonus:1');
+      act(g, 't:wage:1.25');
+      act(g, 'submit');
+    }
+    const p = [...g.squad, ...g.reserves].find((x) => x.id === d.player.id);
+    if (p) {
+      signed++;
+      assert.ok(p.contract && p.contract.wage >= 0 && p.contract.years >= 1);
+      assert.ok(g.job!.budget < budget - d.price + 1e-6, '이적료와 수수료, 계약금이 나갔다');
+    }
   }
-  assert.equal(g.window!.signed, 3);
-  assert.equal(g.squad.length, before, '주전은 언제나 일곱 명이다');
+  assert.ok(signed >= 1);
+  assert.equal(g.squad.length, before, '선발은 언제나 일곱 명이다');
+  const numbers = [...g.squad, ...g.reserves].map((p) => p.no);
+  assert.equal(new Set(numbers).size, numbers.length, '등번호는 겹치지 않는다');
+  // 선발 판매
   const budget = g.job!.budget;
   const star = g.squad[5]!;
   act(g, 'sellmenu');
   act(g, `sell:${star.id}`);
   assert.ok(!g.squad.some((p) => p.id === star.id));
-  assert.ok(g.job!.budget > budget, '팔면 이적료가 들어온다');
+  assert.ok(g.job!.budget > budget);
   assert.equal(g.squad.length, before);
+  // 후보 계약 해지
+  const bench = g.reserves[0]!;
+  act(g, 'sellmenu');
+  act(g, `release:${bench.id}`);
+  assert.ok(!g.reserves.some((p) => p.id === bench.id));
+  act(g, 'back');
   act(g, 'done');
   assert.equal(g.window, null);
-  assert.ok(g.phase === 'half1' || g.phase === 'match', '시장이 닫히면 전반기가 시작된다');
+  assert.ok(g.phase === 'half1' || g.phase === 'match');
 });
 
-test('이적시장: 깎아서 제안하면 싸게 사거나, 요구액이 오르거나, 선수가 떠난다', () => {
+test('이적료 협상: 깎아서 제안하면 합의, 거절, 결렬이 모두 나온다', () => {
   const outcomes = new Set<string>();
-  for (let seed = 0; seed < 40; seed++) {
+  for (let seed = 0; seed < 50; seed++) {
     const g = toMarket(9000 + seed);
-    g.job!.budget = 1e6;
-    const d = g.window!.list.find((x) => x.price > 0)!;
-    const price = d.price;
+    const d = g.window!.list.find((x) => x.kind === 'sign')!;
     act(g, `view:${d.id}`);
-    act(g, 'haggle');
-    const w = g.window!;
-    if (g.squad.some((p) => p.id === d.player.id)) outcomes.add('signed');
-    else if (!w.list.some((x) => x.id === d.id)) outcomes.add('gone');
-    else {
-      assert.ok(w.list.find((x) => x.id === d.id)!.price > price);
-      outcomes.add('up');
-    }
+    act(g, 'fee:80');
+    act(g, 'fee:80');
+    const now = g.window!.list.find((x) => x.id === d.id);
+    outcomes.add(!now ? 'gone' : now.stage === 'terms' ? 'agreed' : 'refused');
   }
-  assert.deepEqual([...outcomes].sort(), ['gone', 'signed', 'up']);
+  assert.deepEqual([...outcomes].sort(), ['agreed', 'gone', 'refused']);
+});
+
+test('계약: 연봉 예산을 넘기는 계약은 서명할 수 없다', () => {
+  const g = toMarket(77, false);
+  g.job!.budget = 1e6;
+  g.job!.wageBudget = 0.1;
+  const d = g.window!.list.find((x) => x.kind === 'sign')!;
+  act(g, `view:${d.id}`);
+  act(g, 'fee:100');
+  const submit = g.scene.choices.find((c) => c.id === 'submit')!;
+  if (d.ask.wage > 0) assert.ok(submit.disabled && submit.detail!.includes('연봉 예산'));
+});
+
+test('계약: 만료 임박 선수와 재계약하거나, 못 하면 시즌 끝에 자유계약으로 떠난다', async () => {
+  const { openWindow } = await import('../src/game/transfer.ts');
+  const { expireContracts } = await import('../src/game/contract.ts');
+  const g = toMarket(4321);
+  const a = g.squad[1]!;
+  const b = g.squad[3]!;
+  a.contract!.years = 1;
+  b.contract!.years = 1;
+  a.unhappy = false;
+  openWindow(g, 'summer');
+  const renew = g.window!.list.find((d) => d.kind === 'renew' && d.player.id === a.id)!;
+  assert.ok(renew, '계약이 1년 남은 선수는 재계약 명단에 오른다');
+  act(g, `view:${renew.id}`);
+  act(g, 't:years:3');
+  act(g, 't:wage:1.25');
+  act(g, 't:bonus:1');
+  for (let k = 0; k < 5 && g.window!.view === renew.id; k++) act(g, 'submit');
+  if (g.squad.includes(a) && a.contract!.years === 3) {
+    expireContracts(g, 50);
+    assert.ok(g.squad.includes(a), '재계약한 선수는 남는다');
+    assert.equal(a.contract!.years, 2);
+  }
+  expireContracts(g, 50);
+  assert.ok(!g.squad.includes(b), '재계약하지 않은 선수는 떠난다(보스만)');
+  assert.equal(g.squad.length, 7, '빈자리는 후보나 새 선수가 메운다');
+});
+
+test('바이아웃이 발동하면 구단은 막을 수 없고, 선수가 응하면 떠난다', async () => {
+  const { windowScene } = await import('../src/game/transfer.ts');
+  const g = toMarket(2468);
+  const p = g.squad[6]!;
+  p.contract!.clause = 1;
+  g.window!.bids = [{ id: 'bx', player: p.id, club: '어느 구단', fee: 1, clause: true, countered: false }];
+  act(g, 'done');
+  // 마감하면 제안은 사라지지만 선수는 남는다. 다시 열어 수락해 본다.
+  const h = toMarket(2468);
+  const q = h.squad[6]!;
+  h.window!.bids = [{ id: 'bx', player: q.id, club: '어느 구단', fee: 1, clause: true, countered: false }];
+  windowScene(h, '');
+  assert.ok(!h.scene.choices.some((c) => c.id === 'bid:bx:no'), '바이아웃 제안에는 거절 선택지가 없다');
+  act(h, 'bid:bx:no');
+  assert.ok(h.window!.bids.length === 1, '바이아웃 제안은 거절할 수 없다');
+  act(h, 'bid:bx:yes');
+  assert.ok(!h.squad.some((x) => x.id === q.id));
+});
+
+test('선발과 후보는 같은 포지션끼리 맞바꾼다. 약속을 어기면 불만이 생긴다', async () => {
+  const { swapLineup, checkPromises } = await import('../src/game/contract.ts');
+  const g = toMarket(1357);
+  act(g, 'done');
+  while (g.phase === 'match') act(g, firstChoice(g));
+  const sub = g.reserves.find((r) => g.squad.some((s) => s.pos === r.pos))!;
+  const starter = g.squad.find((s) => s.pos === sub.pos)!;
+  starter.contract!.promise = 'star';
+  assert.ok(swapLineup(g, sub.id, starter.id));
+  assert.ok(g.squad.includes(sub) && g.reserves.includes(starter));
+  const other = g.squad.find((s) => s.pos !== sub.pos)!;
+  assert.equal(swapLineup(g, starter.id, other.id), false, '다른 포지션끼리는 안 된다');
+  const lines = checkPromises(g);
+  assert.ok(starter.unhappy && lines.length >= 1);
 });
 
 test('선수는 세부 포지션, 주발, 능력치 여섯 개를 가진다', async () => {
@@ -348,14 +440,16 @@ test('선수는 세부 포지션, 주발, 능력치 여섯 개를 가진다', as
 
 test('이전 버전(3)의 저장도 불러와 이어 할 수 있다', async () => {
   const { migrate } = await import('../src/game/career.ts');
-  const g = toMarket(321);
+  const g = toMarket(321, false);
   const old = JSON.parse(JSON.stringify(g)) as Record<string, unknown> & Game;
   old.version = 3;
-  for (const p of old.squad) for (const key of ['spot', 'foot', 'weak', 'height', 'dev']) delete (p as unknown as Record<string, unknown>)[key];
+  for (const p of old.squad) for (const key of ['spot', 'foot', 'weak', 'height', 'dev', 'no', 'contract', 'unhappy']) delete (p as unknown as Record<string, unknown>)[key];
+  delete (old as unknown as Record<string, unknown>).reserves;
   delete (old as unknown as Record<string, unknown>).window;
   (old as unknown as Record<string, unknown>).market = [];
   assert.ok(migrate(old));
-  assert.equal(old.version, 4);
+  assert.equal(old.version, 5);
+  assert.ok(old.squad.every((p) => p.no > 0), '등번호가 생긴다');
   assert.ok(old.squad.every((p) => p.spot && p.dev.length === 6));
   assert.ok(old.window && old.window.list.length > 0, '시장 한가운데 저장이면 시장을 새로 연다');
   act(old, 'done');

@@ -286,7 +286,7 @@ function scoreBlock(g: Game, m: MatchState): Block {
   const mine = (g.clubs[g.job!.club] as { name: string }).name;
   const home = m.venue !== 'away';
   return {
-    kind: 'score', home: home ? mine : m.oppName, away: home ? m.oppName : mine,
+    kind: 'score', home: home ? mine : m.oppName, away: home ? m.oppName : mine, clubs: home ? [g.job!.club, m.oppId] : [m.oppId, g.job!.club],
     score: home ? [m.score[0], m.score[1]] : [m.score[1], m.score[0]], mine: home ? 0 : 1,
     minute: m.seg === 0 ? '경기 전' : m.seg === 3 && m.step !== 'm60' ? '전반 종료' : m.seg >= 6 ? '경기 종료' : `${m.seg * 15}분`,
   };
@@ -615,8 +615,15 @@ function startLive(g: Game, m: MatchState): void {
   const { region } = stage(g);
   const depth = g.depth + g.season.depthMod;
   const name = (foreign: boolean): string => (foreign ? foreignName(rand(g), rand(g)) : koreanName(rand(g), rand(g), rand(g)));
-  const keys: Entrant[] = g.squad.map((p) => ({ name: p.name, pos: p.pos, ovr: p.ovr + p.temp, key: p.id, spot: p.spot, foot: p.foot, dev: p.dev }));
+  const keys: Entrant[] = g.squad.map((p) => ({ name: p.name, pos: p.pos, ovr: p.ovr + p.temp, key: p.id, spot: p.spot, foot: p.foot, dev: p.dev, no: p.no }));
+  // 남는 네 자리는 후보 명단에서 그 자리에 맞는 선수부터 쓴다. 후보가 모자라면 2군 선수가 뛴다.
+  const bench = [...g.reserves].sort((a, b) => b.ovr - a.ovr);
   const mine = lineup(m.me.shape, keys, (pos, spot) => {
+    const pickIdx = [bench.findIndex((r) => r.spot === spot), bench.findIndex((r) => r.pos === pos)].find((i) => i >= 0) ?? -1;
+    if (pickIdx >= 0) {
+      const r = bench.splice(pickIdx, 1)[0] as Player;
+      return { name: r.name, pos: r.pos, ovr: r.ovr + r.temp, key: -1, spot: r.spot, foot: r.foot, dev: r.dev, no: r.no };
+    }
     const d = makeDetail(g, pos, spot);
     return { name: name(!club.nation && (region === 'eu' ? chance(g, 0.95) : chance(g, 0.12))), pos, ovr: Math.round(depth + spread(g, -2, 2)), key: -1, ...d };
   });

@@ -5,15 +5,18 @@ import { act, createGame, legacyScore } from '../manager/src/game/career.ts';
 import { BACKGROUND_IDS } from '../manager/src/game/data.ts';
 import { rand } from '../manager/src/game/rng.ts';
 import { liveAdvice, liveCommand, liveTick } from '../manager/src/game/match.ts';
-import type { StyleId } from '../manager/src/game/types.ts';
+import { weakest } from '../manager/src/game/squad.ts';
+import type { Game, StyleId } from '../manager/src/game/types.ts';
 
 const hintOf = (g: Game, st: StyleId): string | undefined => liveAdvice(g).hints[st];
-import { weakest } from '../manager/src/game/squad.ts';
-import type { Game } from '../manager/src/game/types.ts';
 
 const runs = Number(process.argv[2] ?? 200);
 const mode = process.argv[3] ?? 'smart';
 const view = process.argv[4] ?? 'text';
+/** 이적 시장에서 이미 들여다본 협상. 같은 협상을 되풀이하지 않게 한다. */
+const visited = new Set<string>();
+/** 연봉 예산에 막힌 시장. 이런 시장에서는 후보를 더 적극적으로 정리한다. */
+const wageTight = new Set<string>();
 
 /** 실시간 경기를 봇이 지휘한다. 상대 전술이 읽히면 유리한 전술로, 60분에 뒤지면 공격수, 75분에 점수에 따라 태세. */
 function playLive(g: Game): void {
@@ -65,13 +68,55 @@ function choose(g: Game, dice: { rng: number }): string {
     case 'focus': return 'attack';
     case 'market':
     case 'winter': {
-      // 주전보다 2 이상 좋은 후보 중 가장 큰 보강을 예산 안에서 두 명까지 데려온다.
+      // 이적료는 요구액대로, 개인 조건은 연봉을 10% 얹어 제안한다. 바이아웃 제안은 받아들이고, 다른 제안은 거절한다.
+      // 계약이 끝나 가는 선발과는 재계약하고, 주전보다 2 이상 좋은 후보를 여름에 둘, 겨울에 하나까지 산다.
+      // 후보가 셋을 넘으면(연봉 예산에 막혔으면 하나를 넘으면) 가장 약한 후보를 판다.
       const w = g.window!;
-      if (w.view) return open.some((c) => c.id === 'buy') ? 'buy' : 'back';
+      const key = (id: string): string => `${g.year}-${w.kind}-${id}`;
+      const extra = g.reserves.length > (wageTight.has(key('')) ? 1 : 3) ? [...g.reserves].sort((a, b) => a.ovr - b.ovr)[0] : undefined;
+      if (w.view === 'sell') return extra && open.some((c) => c.id === `sell:${extra.id}`) ? `sell:${extra.id}` : 'back';
+      if (w.view) {
+        const d = w.list.find((x) => x.id === w.view);
+        if (!d) return 'back';
+        if (d.stage === 'fee') return open.some((c) => c.id === 'fee:100') ? 'fee:100' : 'back';
+        if (!open.some((c) => c.id === 'submit')) {
+          const why = g.scene.choices.find((c) => c.id === 'submit')?.detail ?? '?';
+          const reason = why.split('(')[0]!.trim();
+          blocked[reason] = (blocked[reason] ?? 0) + 1;
+          if (why.includes('연봉')) wageTight.add(key(''));
+          return 'back';
+        }
+        // 협상마다 한 번만 연봉을 올린다(작은 연봉은 반올림 때문에 그대로일 수 있다).
+        const wageChip = g.scene.blocks.some((b) => b.kind === 'form' && b.rows.some((r) => r.options.some((o) => o.id === 't:wage:1.1')));
+        const bump = key(`${d.id}-wage-${d.talks}`);
+        if (wageChip && !visited.has(bump)) {
+          visited.add(bump);
+          return 't:wage:1.1';
+        }
+        return 'submit';
+      }
+      const clauseBid = open.find((c) => c.id.startsWith('bid:') && c.id.endsWith(':yes') && c.label.startsWith('바이아웃'));
+      if (clauseBid) return clauseBid.id;
+      const refuse = open.find((c) => c.id.startsWith('bid:') && c.id.endsWith(':no'));
+      if (refuse) return refuse.id;
+      if (extra && !visited.has(key(`sell-${extra.id}`))) {
+        visited.add(key(`sell-${extra.id}`));
+        return 'sellmenu';
+      }
+      const renew = w.list.find((d) => d.kind === 'renew' && g.squad.includes(d.player) && !visited.has(key(d.id)));
+      if (renew) {
+        visited.add(key(renew.id));
+        return `view:${renew.id}`;
+      }
       const best = w.list
-        .filter((d) => d.price <= g.job!.budget && d.player.ovr - weakest(g.squad, d.player.pos).ovr >= 2)
+        .filter((d) => d.kind !== 'renew' && !visited.has(key(d.id)) && d.price * 1.1 <= g.job!.budget && d.player.ovr - weakest(g.squad, d.player.pos).ovr >= 2)
         .sort((a, b) => (b.player.ovr - weakest(g.squad, b.player.pos).ovr) - (a.player.ovr - weakest(g.squad, a.player.pos).ovr))[0];
-      if (best && w.signed < 2 && (w.kind === 'summer' || w.signed < 1)) return `view:${best.id}`;
+      if (best && w.signed < 2 && (w.kind === 'summer' || w.signed < 1)) {
+        visited.add(key(best.id));
+        return `view:${best.id}`;
+      }
+      if (!g.clubs[g.job!.club]!.nation) signedTotal += w.signed;
+      for (const l of w.log) if (l.includes('재계약했다')) moves['재계약'] = (moves['재계약'] ?? 0) + 1;
       return 'done';
     }
     case 'plan': return 'steady';
@@ -82,10 +127,17 @@ function choose(g: Game, dice: { rng: number }): string {
 
 const gaps: number[][] = [[], [], []];
 const big = { w: 0, d: 0, l: 0 };
+/** 시즌 결산에 나온 선수 이동과 재계약 수. */
+const moves: Record<string, number> = {};
+let signedTotal = 0;
+/** 봇의 서명을 막은 사유. */
+const blocked: Record<string, number> = {};
 const stats = { seasons: 0, sacked: 0, titles: 0, promotions: 0, score: [] as number[], peak: [] as number[], top: {} as Record<string, number>, nation: 0, wc: 0, firstTop: [] as number[] };
 const order = ['K5', 'K4', 'K3', 'K리그2', 'K리그1', '잉글랜드 2부', '잉글랜드 1부'];
 for (let i = 0; i < runs; i++) {
   const dice = { rng: 9000 + i };
+  visited.clear();
+  wageTight.clear();
   const g = createGame(1000 + i * 7919, `봇${i}`, BACKGROUND_IDS[i % BACKGROUND_IDS.length]!);
   let guard = 0;
   while (g.phase !== 'retired') {
@@ -93,9 +145,15 @@ for (let i = 0; i < runs; i++) {
       const [a, b] = g.match!.score;
       if (a > b) big.w++; else if (a < b) big.l++; else big.d++;
     }
+    if (g.phase === 'end') {
+      for (const b of g.scene.blocks) {
+        if (b.kind !== 'note') continue;
+        for (const [k, word] of [['계약 만료', '자유계약으로 떠났다'], ['빅클럽', '빅클럽'], ['불만', '불만을 터뜨렸다'], ['은퇴', '유니폼을 벗었다']] as const) if (b.text.includes(word)) moves[k] = (moves[k] ?? 0) + 1;
+      }
+    }
     if (g.phase === 'match' && g.match!.step === 'live') playLive(g);
     else act(g, choose(g, dice));
-    if (++guard > 5000) throw new Error(`끝나지 않는 커리어: seed ${i}, phase ${g.phase}`);
+    if (++guard > 5000) throw new Error(`끝나지 않는 커리어: seed ${i}, phase ${g.phase}, 장면 ${g.scene.title}`);
   }
   g.history.forEach((h, k) => { if (!h.club.endsWith('대표팀')) gaps[Math.min(2, Math.floor(k / 10))]!.push(h.pos); });
   stats.seasons += g.history.length;
@@ -119,4 +177,6 @@ console.log(`커리어 점수 중앙값 ${med(stats.score)}, 최고 ${Math.max(.
 console.log('리그 평균 순위(초반/중반/후반 10시즌):', gaps.map((a) => (a.reduce((x, y) => x + y, 0) / Math.max(1, a.length)).toFixed(1)).join(' / '));
 console.log('도달한 가장 높은 무대:', Object.entries(stats.top).map(([k, v]) => `${k} ${v}`).join(', '));
 console.log(`직접 지휘한 라이벌전: ${big.w}승 ${big.d}무 ${big.l}패 (승률 ${((big.w / Math.max(1, big.w + big.d + big.l)) * 100).toFixed(0)}%)`);
+console.log(`구단 영입 ${(signedTotal / runs).toFixed(1)}명/커리어, 서명이 막힌 사유: ${Object.entries(blocked).map(([k, v]) => `${k} ${(v / runs).toFixed(1)}`).join(', ') || '없음'}`);
+console.log('선수 이동(커리어당):', Object.entries(moves).map(([k, v]) => `${k} ${(v / runs).toFixed(1)}`).join(', '));
 console.log(`국가대표 감독 ${stats.nation}회, 월드컵 우승 ${stats.wc}회, 1부 첫 도달까지 시즌 중앙값 ${med(stats.firstTop)} (${stats.firstTop.length}명)`);

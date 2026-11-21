@@ -115,6 +115,8 @@ export interface Entrant {
   spot: Spot;
   foot: Foot;
   dev: number[];
+  /** 정해진 등번호가 있으면 그 번호를 쓴다. */
+  no?: number;
 }
 
 /** 선수들을 자리에 앉힌다. 주전부터, 잘하는 선수부터 자기 포지션에 가장 가까운 빈자리를 고른다. */
@@ -138,11 +140,13 @@ function seat<T extends { spot: Spot; ovr: number; key: number }>(list: T[], slo
 export function lineup(shape: ShapeId, keys: Entrant[], filler: (pos: Pos, spot: Spot) => Entrant): LivePlayer[] {
   const slots = SLOTS[shape];
   const seated = seat(keys.slice(0, 11), slots, slots.map((_, i) => i));
-  const used = new Set<number>();
+  const entrants = slots.map((slot, i) => seated.get(i) ?? filler(slot.line, slotSpot(slot)));
+  // 정해진 등번호를 먼저 찜하고, 나머지는 관례 번호를 준다.
+  const used = new Set<number>(entrants.map((e) => e.no ?? 0).filter((n) => n > 0));
   return slots.map((slot, i) => {
-    const e = seated.get(i) ?? filler(slot.line, slotSpot(slot));
+    const e = entrants[i] as Entrant;
     return {
-      n: shirt(e.key >= 0 ? e.spot : slotSpot(slot), used), name: e.name, line: e.pos, slot: i, key: e.key, ovr: e.ovr,
+      n: e.no && e.no > 0 ? e.no : shirt(e.key >= 0 ? e.spot : slotSpot(slot), used), name: e.name, line: e.pos, slot: i, key: e.key, ovr: e.ovr,
       x: 0, y: 0, px: 0, py: 0, off: false, spot: e.spot, foot: e.foot, dev: e.dev,
     };
   });

@@ -9,9 +9,10 @@ import {
 import { eventById, pickEvent } from './events.ts';
 import { chance, int, pick, shuffle, spread } from './rng.ts';
 import {
-  departures, develop, generateSquad, myClub, ratings, shareGoals, stage,
+  departures, develop, generateSquad, makePlayer, myClub, ratings, shareGoals, stage,
 } from './squad.ts';
 import { ensureDetail } from './player.ts';
+import { assignNumber, checkPromises, depthOf, existingContract, expireContracts, relegationCut, settle, totalWages, wageBudgetFor } from './contract.ts';
 import { actWindow, openWindow, windowScene } from './transfer.ts';
 import { legacyTitle, reactions } from './talk.ts';
 import type { Mood } from './talk.ts';
@@ -24,7 +25,7 @@ import {
 } from './world.ts';
 import type {
   AttrId, BackgroundId, Block, Choice, Club, ClubLeagueId, FocusId, Game, Knockout, LeagueId, MatchLine, MatchState, NationYear,
-  Offer, PlanId, Player, Row, SeasonState, ShapeId, StyleId, Tone,
+  Offer, PlanId, Player, Pos, Row, SeasonState, ShapeId, StyleId, Tone,
 } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
@@ -45,13 +46,13 @@ export function createGame(seed: number, name: string, background: BackgroundId)
   const attrs: Record<AttrId, number> = { tactics: 6, lead: 6, youth: 6, deal: 6, eye: 6 };
   for (const [key, value] of Object.entries(BACKGROUNDS[background].bonus)) attrs[key as AttrId] += value as number;
   const g: Game = {
-    rng: seed | 0, version: 4, year: START_YEAR, nextId: 1,
+    rng: seed | 0, version: 5, year: START_YEAR, nextId: 1,
     manager: { name: name.trim() || '김감독', age: START_AGE, background, attrs, rep: 2, peakRep: 2 },
     clubs: [],
     leagues: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
     tables: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
     fixtures: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
-    round: 0, job: null, squad: [], depth: 0, morale: 60, cohesion: 25, season: blankSeason(), match: null, lastStyle: null,
+    round: 0, job: null, squad: [], reserves: [], depth: 0, morale: 60, cohesion: 25, season: blankSeason(), match: null, lastStyle: null,
     phase: 'offers', scene: { eyebrow: '', title: '', blocks: [], choices: [] }, eventId: null, offers: [], window: null,
     wcTicket: false, sacked: false, points: 0, history: [], trophies: [], promotions: 0,
   };
@@ -167,7 +168,7 @@ function beginSeason(g: Game): void {
     job.objective = 0;
   } else {
     const meta = LEAGUES[club.league as ClubLeagueId];
-    const r = ratings(g.squad, g.depth);
+    const r = ratings(g.squad, depthOf(g));
     club.att = r.att;
     club.def = r.def;
     const ids = g.leagues[club.league];
@@ -177,6 +178,9 @@ function beginSeason(g: Game): void {
     // 전력이 가장 비슷한 팀이 올 시즌의 라이벌이다. 그 팀과의 두 경기는 직접 지휘한다.
     g.season.rival = ids.filter((id) => id !== club.id).sort((a, b) => Math.abs(power(a) - power(club.id)) - Math.abs(power(b) - power(club.id)))[0] as number;
     job.budget = round1(job.budget + meta.money * (1 + club.wealth * 0.12));
+    // 연봉 예산. 이미 맺은 계약을 감당할 만큼은 늘 준다.
+    settle(g);
+    job.wageBudget = round1(Math.max(wageBudgetFor(g), totalWages(g) * 1.15));
     g.season.cup = newKnockout(meta.region === 'kr' ? '코리아컵' : 'FA컵', ['32강', '16강', '8강', '4강', '결승']);
     if (club.conti) g.season.conti = newKnockout(meta.region === 'kr' ? '아시아 챔피언스리그' : '유럽 챔피언스리그', ['16강', '8강', '4강', '결승']);
   }
@@ -251,20 +255,34 @@ function enterMarket(g: Game, window: 'summer' | 'winter'): void {
 
 /** 이전 버전의 저장을 지금 버전에 맞춘다. 맞출 수 없으면 false. */
 export function migrate(g: Game): boolean {
-  if (g.version !== 3 && g.version !== 4) return false;
+  if (g.version < 3 || g.version > 5) return false;
   for (const p of g.squad) ensureDetail(p);
   if (g.version === 3) {
     g.version = 4;
     delete (g as unknown as { market?: unknown }).market;
     g.window = null;
-    // 이적 시장 한가운데서 저장했다면 새 시장으로 다시 연다.
-    if (g.phase === 'market' || g.phase === 'winter') enterMarket(g, g.phase === 'market' ? 'summer' : 'winter');
-    // 경기 중이었다면 실시간 화면에 필요한 값을 채운다.
     const L = g.match?.live;
     if (L) {
       L.calls = [];
       for (const team of L.teams) for (const p of team.players) Object.assign(p, { spot: p.spot ?? 'CM', foot: p.foot ?? 'R', dev: p.dev ?? [0, 0, 0, 0, 0, 0] });
     }
+  }
+  if (g.version === 4) {
+    // 계약 개편: 기존 선수들에게 계약과 등번호를 주고, 후보 명단과 연봉 예산을 만든다.
+    g.version = 5;
+    g.reserves = [];
+    g.window = null;
+    for (const p of g.squad) Object.assign(p, { no: 0, contract: null, unhappy: false });
+    if (g.job) {
+      g.job.wageBudget = 0;
+      if (!myClub(g).nation) {
+        for (const p of g.squad) p.contract = existingContract(g, p, true, 1 + (p.id % 3));
+        g.job.wageBudget = round1(Math.max(wageBudgetFor(g), totalWages(g) * 1.08));
+      }
+      for (const p of g.squad) assignNumber(g, p);
+    }
+    // 이적 시장 한가운데서 저장했다면 새 시장으로 다시 연다.
+    if (g.phase === 'market' || g.phase === 'winter') enterMarket(g, g.phase === 'market' ? 'summer' : 'winter');
   }
   return true;
 }
@@ -561,8 +579,16 @@ function finishClubSeason(g: Game, midSack: boolean): void {
       blocks.push({ kind: 'text', text: '한 시즌 사이 선수들이 달라졌다.' });
       blocks.push({ kind: 'players', items: changes.map((c) => ({ player: c.player, delta: c.delta })) });
     }
+    // 계약 기간이 한 시즌 줄고, 끝난 선수는 자유계약으로 떠난다. 그다음 은퇴와 빅클럽 이적이 있다.
+    for (const text of expireContracts(g, nextLevel)) blocks.push({ kind: 'note', text, tone: 'plain' });
     const moves = departures(g, nextLevel);
     for (const text of moves.lines) blocks.push({ kind: 'note', text, tone: 'plain' });
+    // 출전 보장을 어긴 선수는 불만을 품는다.
+    for (const text of checkPromises(g)) blocks.push({ kind: 'note', text, tone: 'plain' });
+    if (relegated) {
+      const text = relegationCut(g, meta.down as ClubLeagueId);
+      if (text) blocks.push({ kind: 'note', text, tone: 'plain' });
+    }
     job.budget = round1((job.budget + moves.income) * 0.5);
     g.depth += (nextLevel - 2 + club.wealth * 0.8 - g.depth) * 0.3;
     for (const p of g.squad) p.goals = 0;
@@ -740,9 +766,19 @@ function takeOffer(g: Game, offer: Offer): void {
   if (!offer.stay) {
     const club = g.clubs[offer.club] as Club;
     const region = club.nation ? 'kr' : LEAGUES[club.league as ClubLeagueId].region;
-    g.job = { kind: offer.kind, club: club.id, confidence: 50 + g.manager.attrs.deal / 2, objective: 0, budget: 0, seasons: 0 };
+    g.job = { kind: offer.kind, club: club.id, confidence: 50 + g.manager.attrs.deal / 2, objective: 0, budget: 0, wageBudget: 0, seasons: 0 };
     g.squad = generateSquad(g, club, region);
     g.depth = (club.att + club.def) / 2 - 2;
+    g.reserves = [];
+    if (!club.nation) {
+      // 후보 명단: 포지션마다 한 명씩, 스쿼드 뎁스 수준의 선수들.
+      for (const pos of ['GK', 'DF', 'MF', 'FW'] as Pos[]) g.reserves.push(makePlayer(g, pos, g.depth + spread(g, -2, 2), int(g, 18, 31), region));
+      // 원래 있던 선수들은 대개 로테이션 계약이다. 가장 잘하는 두 명만 주전을 약속받았다.
+      const top = [...g.squad].sort((a, b) => b.ovr - a.ovr).slice(0, 2);
+      for (const p of g.squad) p.contract = existingContract(g, p, top.includes(p), int(g, 1, 4));
+      for (const p of g.reserves) p.contract = existingContract(g, p, false, int(g, 1, 3));
+    }
+    for (const p of [...g.squad, ...g.reserves]) assignNumber(g, p);
     g.cohesion = 25;
     g.morale = 60;
     g.lastStyle = null;
@@ -782,7 +818,9 @@ function retire(g: Game, why: string): void {
 
 /** 지금 장면에서 선택지 하나를 고른다. 없는 선택지이거나 고를 수 없으면 아무 일도 일어나지 않는다. */
 export function act(g: Game, id: string): void {
-  const choice = g.scene.choices.find((c) => c.id === id);
+  // 선택지 말고도 양식(계약 제안서)의 칩도 고를 수 있다.
+  const choice = g.scene.choices.find((c) => c.id === id)
+    ?? g.scene.blocks.flatMap((b) => (b.kind === 'form' ? b.rows.flatMap((r) => r.options) : [])).find((o) => o.id === id);
   if (!choice || choice.disabled) return;
   const nation = g.job ? myClub(g).nation : false;
   switch (g.phase) {

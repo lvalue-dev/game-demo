@@ -4,11 +4,16 @@ import {
   ATTRS, ATTR_IDS, BACKGROUNDS, BACKGROUND_IDS, CLUB_LEAGUES, LEAGUES, POS_NAME, STYLES, won,
 } from '../game/data.ts';
 import { potentialText, ratings, stage, valueOf } from '../game/squad.ts';
-import { playerCard, playerRow } from './cards.ts';
+import { formationBoard, formationMini, playerCard, playerRow } from './cards.ts';
+import type { BoardSpot } from './cards.ts';
+import { PROMISES, contractText, depthOf, promiseKept, swapLineup, totalWages } from '../game/contract.ts';
+import { SLOTS, lineup } from '../game/live.ts';
+import type { Entrant } from '../game/live.ts';
+import { SHAPES, SHAPE_IDS, usualShape } from '../game/tactics.ts';
 import { legacyTitle } from '../game/talk.ts';
 import { dropCount, sortTable, zone } from '../game/world.ts';
 import { isLive, mountLive, onLiveClick, pauseLive, renderLive, unmountLive } from './live.ts';
-import type { BackgroundId, Block, Club, ClubLeagueId, Game, LeagueId, MatchLine, Phase, Pos } from '../game/types.ts';
+import type { BackgroundId, Block, Club, ClubLeagueId, Game, LeagueId, MatchLine, Phase, Player, Pos, ShapeId } from '../game/types.ts';
 
 type Tab = 'play' | 'table' | 'squad' | 'record';
 
@@ -106,6 +111,12 @@ function onClick(e: Event): void {
       game = null;
       store(SAVE_KEY, null);
     }
+    render();
+    return;
+  }
+  if (el.dataset.do?.startsWith('swap:') && game) {
+    const [, a, b] = el.dataset.do.split(':');
+    if (swapLineup(game, Number(a), Number(b))) store(SAVE_KEY, game);
     render();
     return;
   }
@@ -273,6 +284,7 @@ function renderScene(g: Game): string {
         ${s.choices.map((c, i) => `${c.group && c.group !== s.choices[i - 1]?.group ? `<p class="choices__group">${esc(c.group.trim())}</p>` : ''}
           <button type="button" class="choice${c.tone === 'primary' ? ' choice--primary' : c.tone === 'danger' ? ' choice--danger' : ''}${s.choices.length === 1 ? ' choice--solo' : ''}${c.club !== undefined ? ' choice--club' : ''}" data-act="${esc(c.id)}"${c.disabled ? ' disabled' : ''}>
             ${c.club !== undefined ? crest(g.clubs[c.club] as Club, 30) : ''}
+            ${g.phase === 'match' && g.match?.step === 'shape' && SHAPE_IDS.includes(c.id as ShapeId) ? miniFor(c.id as ShapeId) : ''}
             <span class="choice__label">${esc(c.label)}</span>
             ${c.detail ? `<span class="choice__detail">${esc(c.detail)}</span>` : ''}
             ${c.disabled ? '<span class="choice__detail">예산이 모자란다</span>' : ''}
@@ -281,6 +293,11 @@ function renderScene(g: Game): string {
     </article>`;
 }
 
+
+/** 대형 미리보기: 자리를 세로 경기장 좌표로. */
+function miniFor(shape: ShapeId): string {
+  return formationMini(SLOTS[shape].map((slot) => ({ x: slot.v / 68, y: 1 - slot.u / 80 })));
+}
 
 function renderMatches(items: MatchLine[]): string {
   return `<ul class="matches">${items.map((m) => `
@@ -299,14 +316,15 @@ function renderTable(g: Game, league: LeagueId): string {
   return `
     <div class="table-wrap">
       <table class="table">
-        <thead><tr><th class="num">#</th><th>팀</th><th class="num">경기</th><th class="num">승</th><th class="num">무</th><th class="num">패</th><th class="num">득실</th><th class="num">승점</th></tr></thead>
+        <thead><tr><th class="num">#</th><th>팀</th><th class="num">경기</th><th class="num">승</th><th class="num">무</th><th class="num">패</th><th class="num">득실</th><th class="num">승점</th><th class="table__form">최근 5경기</th></tr></thead>
         <tbody>${rows.map((r, i) => {
           const z = zone(league, i + 1, rows.length);
           const gd = r.gf - r.ga;
           return `<tr class="${r.club === mine ? 'is-mine' : ''}${z === 1 ? ' is-up' : z === -1 ? ' is-down' : ''}">
             <td class="num table__pos">${i + 1}</td><td class="table__team"><span class="team">${crest(g.clubs[r.club] as Club, 14)}${esc((g.clubs[r.club] as Club).name)}</span></td>
             <td class="num">${r.p}</td><td class="num">${r.w}</td><td class="num">${r.d}</td><td class="num">${r.l}</td>
-            <td class="num">${gd > 0 ? '+' : ''}${gd}</td><td class="num table__pts">${r.pts}</td></tr>`;
+            <td class="num">${gd > 0 ? '+' : ''}${gd}</td><td class="num table__pts">${r.pts}</td>
+            <td class="table__form"><span class="form">${r.form.map((f) => `<span class="form__dot form__dot--${f}" title="${f === 'W' ? '승' : f === 'D' ? '무' : '패'}">${f === 'W' ? '승' : f === 'D' ? '무' : '패'}</span>`).join('')}</span></td></tr>`;
         }).join('')}</tbody>
       </table>
     </div>`;
@@ -316,9 +334,9 @@ function renderBlock(g: Game, b: Block): string {
   switch (b.kind) {
     case 'score': return `
       <div class="score" role="group" aria-label="점수">
-        <span class="score__team${b.mine === 0 ? ' is-mine' : ''}">${esc(b.home)}</span>
+        <span class="score__team${b.mine === 0 ? ' is-mine' : ''}">${b.clubs ? crest(g.clubs[b.clubs[0]] as Club, 22) : ''}${esc(b.home)}</span>
         <span class="score__num">${b.score[0]}<span class="score__sep">:</span>${b.score[1]}</span>
-        <span class="score__team score__team--away${b.mine === 1 ? ' is-mine' : ''}">${esc(b.away)}</span>
+        <span class="score__team score__team--away${b.mine === 1 ? ' is-mine' : ''}">${esc(b.away)}${b.clubs ? crest(g.clubs[b.clubs[1]] as Club, 22) : ''}</span>
         <span class="score__minute">${esc(b.minute)}</span>
       </div>`;
     case 'log': return `<ol class="log">${b.items.map((l) => `
@@ -330,6 +348,16 @@ function renderBlock(g: Game, b: Block): string {
     case 'table': return renderTable(g, b.league);
     case 'players': return `<ul class="plist">${b.items.map((it) => playerRow(it.player, { note: it.note, delta: it.delta })).join('')}</ul>`;
     case 'card': return playerCard(b.player, { price: b.price, note: b.note, compare: b.compare });
+    case 'form': return `
+      <section class="contract" aria-label="${esc(b.title)}">
+        <header class="contract__head"><span class="contract__seal">계약서</span><h3 class="contract__title">${esc(b.title)}</h3></header>
+        ${b.rows.map((r) => `
+          <div class="contract__row">
+            <p class="contract__label">${esc(r.label)}${r.note ? `<span class="contract__note">${esc(r.note)}</span>` : ''}</p>
+            <div class="chips">${r.options.map((o) => `<button type="button" class="chip${o.on ? ' is-on' : ''}" data-act="${esc(o.id)}" aria-pressed="${o.on}"${o.disabled ? ' disabled' : ''}>${esc(o.label)}</button>`).join('')}</div>
+          </div>`).join('')}
+        <p class="contract__sign">구단 대표 ______ &nbsp; 선수 ______</p>
+      </section>`;
     case 'feed': return `<ul class="feed">${b.items.map((f) => `
       <li class="feed__item feed__item--${f.tone}"><p class="feed__text">${esc(f.text)}</p><p class="feed__who">${esc(f.who)} · ${esc(f.where)}</p></li>`).join('')}</ul>`;
   }
@@ -359,38 +387,66 @@ function zoneNote(league: ClubLeagueId): string {
   return `${meta.blurb}. ${top}${drop > 0 ? `, 아래 ${drop}팀은 강등` : ''}.`;
 }
 
+/** 베스트 11: 선발 일곱에 후보 명단으로 남는 네 자리를 채운다. 실시간 경기와 같은 규칙이다. */
+function bestEleven(g: Game, shape: ShapeId): BoardSpot[] {
+  const entrant = (p: Player, key: number): Entrant => ({ name: p.name, pos: p.pos, ovr: p.ovr + p.temp, key, spot: p.spot, foot: p.foot, dev: p.dev, no: p.no });
+  const bench = [...g.reserves].sort((a, b) => b.ovr - a.ovr);
+  const eleven = lineup(shape, g.squad.map((p) => entrant(p, p.id)), (pos, spot) => {
+    const i = [bench.findIndex((r) => r.spot === spot), bench.findIndex((r) => r.pos === pos)].find((k) => k >= 0) ?? -1;
+    if (i >= 0) return entrant(bench.splice(i, 1)[0] as Player, -1);
+    return { name: '2군', pos, ovr: 0, key: -2, spot, foot: 'R', dev: [0, 0, 0, 0, 0, 0], no: 0 };
+  });
+  return eleven.map((p) => {
+    const slot = SLOTS[shape][p.slot]!;
+    return { x: slot.v / 68, y: 1 - slot.u / 80, no: p.n, name: p.name, keeper: p.line === 'GK', ghost: p.key === -2 };
+  });
+}
+
 function renderSquad(g: Game): string {
   if (!g.job) return '<p class="prose">아직 맡은 팀이 없다.</p>';
-  const r = ratings(g.squad, g.depth + g.season.depthMod);
+  const club = g.clubs[g.job.club] as Club;
+  const r = ratings(g.squad, depthOf(g));
   const a = g.manager.attrs;
   const { level, money } = stage(g);
-  const nation = (g.clubs[g.job.club] as Club).nation;
+  const nation = club.nation;
+  const shape = usualShape(g.lastStyle ?? 'possess', 0);
   const lines = ['GK', 'DF', 'MF', 'FW'] as Pos[];
+  const extra = (p: Player): string[] => [
+    ...(nation ? [] : [`계약|${contractText(g, p.contract)}`, `시장가|${won(valueOf(p, level, money))}`]),
+    `성장|${potentialText(g, p)}`,
+    `이번 시즌|${p.goals}골 · 팀에서 ${p.years + 1}번째 시즌${p.homegrown ? ' · 유스 출신' : ''}`,
+  ];
+  const flag = (p: Player): string | undefined => (p.unhappy ? '불만' : p.contract && p.contract.years <= 1 ? '계약 만료 임박' : undefined);
+  const busy = g.phase === 'match';
   return `
     <section class="section">
-      <p class="eyebrow">${esc((g.clubs[g.job.club] as Club).name)}</p>
+      <p class="eyebrow">${esc(club.name)}</p>
       <h2 class="scene__title">스쿼드</h2>
       <dl class="teamrate" aria-label="팀 지표">
         <div><dt>ATT</dt><dd>${Math.round(r.att)}</dd></div>
         <div><dt>MID</dt><dd>${Math.round(r.mid)}</dd></div>
         <div><dt>DEF</dt><dd>${Math.round(r.def)}</dd></div>
-        <div><dt>뎁스</dt><dd>${Math.round(g.depth + g.season.depthMod)}</dd></div>
+        <div><dt>뎁스</dt><dd>${Math.round(depthOf(g))}</dd></div>
       </dl>
+      ${formationBoard(bestEleven(g, shape), club.colors, `베스트 11 · ${SHAPES[shape].name}(전술에 어울리는 기본 대형, 경기마다 바꿀 수 있다). 흐린 자리는 이름 없는 2군 선수다.`)}
       <dl class="stats">
         <div class="stats__row"><dt>전술</dt><dd>${g.lastStyle ? esc(STYLES[g.lastStyle].name) : '미정'} · 전술 완성도 ${Math.round(g.cohesion)}</dd></div>
         <div class="stats__row"><dt>라커룸 분위기</dt><dd>${Math.round(g.morale)}</dd></div>
-        ${g.job.kind === 'club' ? `<div class="stats__row"><dt>이적 예산</dt><dd>${esc(won(g.job.budget))}</dd></div>` : ''}
+        ${g.job.kind === 'club' ? `<div class="stats__row"><dt>이적 예산</dt><dd>${esc(won(g.job.budget))}</dd></div>
+        <div class="stats__row"><dt>연봉 총액 / 예산</dt><dd>${g.job.wageBudget > 0 ? `${esc(won(totalWages(g)))} / ${esc(won(g.job.wageBudget))}` : '무급(아마추어)'}</dd></div>` : ''}
       </dl>
-      <p class="fine">선수를 누르면 세부 능력치가 펼쳐진다. 실시간 경기에서는 주전 일곱 명 말고 네 자리를 스쿼드 뎁스 수준의 후보가 채운다.</p>
-      ${lines.map((pos) => `
-        <h3 class="section__sub">${esc(POS_NAME[pos])}</h3>
-        <ul class="plist">${g.squad.filter((p) => p.pos === pos).map((p) => playerRow(p, {
-          note: potentialText(g, p),
-          extra: [
-            ...(nation ? [] : [`시장가|${won(valueOf(p, level, money))}`]),
-            `이번 시즌|${p.goals}골 · 팀에서 ${p.years + 1}번째 시즌${p.homegrown ? ' · 유스 출신' : ''}`,
-          ],
-        })).join('')}</ul>`).join('')}
+      <p class="fine">선수를 누르면 능력치와 계약이 펼쳐진다. 핵심 선수나 주전으로 약속한 선수를 후보로 돌리면 불만을 품는다.</p>
+      <h3 class="section__sub">선발 ${g.squad.length}명</h3>
+      ${lines.map((pos) => `<ul class="plist plist--tight">${g.squad.filter((p) => p.pos === pos).map((p) => playerRow(p, {
+        note: `${POS_NAME[pos]}${p.contract ? ` · ${PROMISES[p.contract.promise].name}` : ''}`, extra: extra(p), kit: club.colors, flag: flag(p),
+      })).join('')}</ul>`).join('')}
+      ${nation ? '' : `
+      <h3 class="section__sub">후보 ${g.reserves.length}명</h3>
+      ${g.reserves.length === 0 ? '<p class="muted">후보 명단이 비어 있다. 이적시장에서 백업이나 로테이션으로 영입하면 여기에 들어온다.</p>' : `<ul class="plist">${g.reserves.map((p) => playerRow(p, {
+        note: `${POS_NAME[p.pos]}${p.contract ? ` · ${PROMISES[p.contract.promise].name}` : ''}${promiseKept(g, p) ? '' : ' · 약속 위반 중'}`,
+        extra: extra(p), kit: club.colors, flag: flag(p),
+        actions: busy ? '' : `<div class="chips">${g.squad.filter((s2) => s2.pos === p.pos).map((s2) => `<button type="button" class="chip" data-do="swap:${p.id}:${s2.id}">${esc(s2.name)} 대신 선발로</button>`).join('')}</div>`,
+      })).join('')}</ul>`}`}
     </section>
     <section class="section">
       <h2 class="section__title">${esc(g.manager.name)} 감독의 지도자 역량</h2>
