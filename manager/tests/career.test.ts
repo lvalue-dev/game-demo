@@ -348,7 +348,6 @@ test('이적: 이적료 합의 → 개인 조건 협상 → 서명. 여러 명�
   // 선발 판매
   const budget = g.job!.budget;
   const star = g.squad[5]!;
-  act(g, 'sellmenu');
   act(g, `sale:${star.id}`);
   // 희망가를 낮게 잡으면 사려는 구단이 나올 가능성이 높다.
   const low = (g.scene.blocks.find((b) => b.kind === 'form') as { rows: { range?: { min: number } }[] }).rows[0]!.range!.min;
@@ -360,7 +359,6 @@ test('이적: 이적료 합의 → 개인 조건 협상 → 서명. 여러 명�
   assert.equal(g.squad.length, before);
   // 후보 계약 해지
   const bench = g.reserves[0]!;
-  act(g, 'sellmenu');
   act(g, `release:${bench.id}`);
   assert.ok(!g.reserves.some((p) => p.id === bench.id));
   act(g, 'back');
@@ -517,7 +515,6 @@ test('임대: 빌려 온 선수는 기간이 끝나면 돌아가고, 빌려준 �
   // 임대 보내기
   const h = toMarket(3031);
   const young = h.reserves[0]!;
-  act(h, 'sellmenu');
   act(h, `lend:${young.id}`);
   act(h, 'l:share=1');
   for (let k = 0; k < 6 && !h.loaned.includes(young); k++) act(h, 'lend');
@@ -824,4 +821,26 @@ test('이전 버전(7)의 저장: 잉글랜드 리그 이름이 바뀌고 새 �
   assert.ok(old.window && old.window.list.length > 0);
   act(old, 'done');
   assert.ok(old.phase === 'half1' || old.phase === 'match');
+});
+
+test('이적시장 화면: 탭으로 나눈 선수 카드에서 바로 협상, 판매로 간다. 협상 화면은 요구와 제안을 나란히 보여 준다', () => {
+  const g = toMarket(9191);
+  const market = g.scene.blocks.find((b) => b.kind === 'market') as Extract<Game['scene']['blocks'][number], { kind: 'market' }>;
+  assert.ok(market, '시장 첫 화면에 카드 묶음이 있다');
+  assert.deepEqual(market.tabs.map((t) => t.id).filter((id) => id !== 'bids'), ['sign', 'loan', 'renew', 'mine']);
+  const mine = market.tabs.find((t) => t.id === 'mine')!;
+  assert.equal(mine.cards.length, g.squad.length + g.reserves.length + g.loaned.length);
+  // 카드의 버튼은 숨은 선택지로 들어 있어 act가 받아 준다.
+  const first = market.tabs.find((t) => t.id === 'sign')!.cards[0]!;
+  assert.ok(g.scene.choices.some((c) => c.id === first.act && c.hidden));
+  act(g, first.act!);
+  const deal = g.scene.blocks.find((b) => b.kind === 'deal') as Extract<Game['scene']['blocks'][number], { kind: 'deal' }>;
+  assert.ok(deal && deal.rows.length >= 1 && deal.odds !== null);
+  assert.equal(deal.rows[0]!.label, '이적료');
+  act(g, 'back');
+  const p = g.reserves[0]!;
+  act(g, `sale:${p.id}`);
+  assert.equal(g.window!.view, `sale:${p.id}`, '내 선수 카드에서 바로 판매 화면');
+  act(g, 'back');
+  assert.equal(g.window!.view, null, '판매 화면에서 돌아오면 시장 첫 화면');
 });

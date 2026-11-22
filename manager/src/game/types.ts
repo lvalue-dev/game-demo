@@ -523,6 +523,10 @@ export type Block =
   | { kind: 'table'; league: LeagueId }
   | { kind: 'players'; items: { player: Player; delta?: number; note?: string }[] }
   | { kind: 'card'; player: Player; price?: string; compare?: Player; note?: string }
+  /** 이적시장: 탭으로 나눈 선수 카드들. */
+  | { kind: 'market'; tabs: MarketTab[] }
+  /** 협상 테이블: 선수 요약, 상대 요구와 우리 제안의 비교, 합의 가능성. 선택지는 화면 아래에 붙는다. */
+  | { kind: 'deal'; player: Player; note: string; gain?: number; side: string; rows: DealRow[]; odds: number | null; oddsLabel: string; money: { label: string; value: string; tone?: Tone }[] }
   /** 칩을 눌러 고르는 양식. 계약 제안서에 쓴다. 칩의 id는 선택지 id처럼 act()로 간다. */
   | { kind: 'form'; title: string; rows: FormRow[] }
   | { kind: 'feed'; items: { who: string; where: string; text: string; tone: Tone }[] };
@@ -538,6 +542,39 @@ export interface FormRow {
   range?: { id: string; min: number; max: number; step: number; value: number; unit: 'money' | 'pct' | 'pct100' | 'years' };
 }
 
+export interface MarketCard {
+  /** 카드를 누르면 고르는 선택지. 장면의 선택지에는 숨김으로 들어 있다. */
+  act: string | null;
+  player: Player;
+  /** 소속이나 출처. */
+  from: string;
+  /** 카드에 크게 적는 금액이나 조건. */
+  price: string;
+  /** 같은 포지션 가장 약한 선발 대비 OVR. */
+  gain?: number;
+  tags: string[];
+  status?: { text: string; tone: Tone };
+  /** 카드 아래 버튼들(내 선수, 들어온 제안). */
+  actions?: { act: string; label: string; tone?: 'primary' | 'danger'; disabled?: boolean }[];
+}
+
+export interface MarketTab {
+  id: string;
+  label: string;
+  hint: string;
+  cards: MarketCard[];
+}
+
+export interface DealRow {
+  label: string;
+  /** 상대가 바라는 것. */
+  ask: string;
+  /** 지금 우리 제안. */
+  offer: string;
+  /** 우리 제안이 상대 요구에 비해 어떤지: good 맞춰 줌, bad 모자람. */
+  tone: Tone;
+}
+
 export interface Choice {
   id: string;
   /** 구단을 고르는 선택지면 그 구단 번호. 문장을 함께 보여 준다. */
@@ -548,6 +585,8 @@ export interface Choice {
   disabled?: boolean;
   /** 선택지 묶음의 제목. 앞 선택지와 다르면 화면에 제목을 넣는다. */
   group?: string;
+  /** 고를 수는 있지만 선택지 목록에는 그리지 않는다(카드나 표 안의 버튼으로 고른다). */
+  hidden?: boolean;
 }
 
 export type Phase =

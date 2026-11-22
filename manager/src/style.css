@@ -1832,3 +1832,378 @@ button {
   font-size: 0.9375rem;
   text-align: right;
 }
+
+/* ---------- 이적시장: 탭과 선수 카드 ---------- */
+
+.market {
+  margin: 18px 0 8px;
+}
+
+.mtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+
+.mtabs::-webkit-scrollbar {
+  display: none;
+}
+
+.mtab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.mtab.is-on {
+  background: var(--board);
+  border-color: var(--board);
+  color: var(--on-board);
+}
+
+.mtab__n {
+  min-width: 1.5em;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--chalk);
+  font-family: var(--font-num);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+.mtab:not(.is-on) .mtab__n {
+  background: var(--bg);
+}
+
+.mtab--alert:not(.is-on) {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.mgrid {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+@media (min-width: 560px) {
+  .mgrid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.mcard {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.mcard.is-warn {
+  border-color: color-mix(in srgb, var(--red) 45%, var(--line));
+}
+
+.mcard__main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 12px 10px;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  font: inherit;
+  width: 100%;
+}
+
+button.mcard__main {
+  cursor: pointer;
+}
+
+button.mcard__main:hover,
+button.mcard__main:focus-visible {
+  background: var(--tint-mine);
+}
+
+.mcard__top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mcard__who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  line-height: 1.3;
+}
+
+.mcard__name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcard__meta {
+  font-size: 0.8125rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcard__ovr {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1;
+}
+
+.mcard__ovrn {
+  font-family: var(--font-num);
+  font-weight: 700;
+  font-size: 1.75rem;
+}
+
+.mcard__gain {
+  font-family: var(--font-num);
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.mcard__gain--up {
+  color: var(--pitch);
+}
+
+.mcard__gain--down {
+  color: var(--red);
+}
+
+.mcard__gain--flat {
+  color: var(--muted);
+}
+
+.mcard__price {
+  font-family: var(--font-num);
+  font-weight: 600;
+  font-size: 1.0625rem;
+}
+
+.mcard__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag {
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.mcard__status {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.mcard__status--good {
+  color: var(--pitch);
+}
+
+.mcard__status--bad {
+  color: var(--red);
+}
+
+.mcard__status--plain {
+  color: var(--muted);
+}
+
+.mcard__go {
+  align-self: flex-end;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--pitch);
+}
+
+.mcard__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.chip--primary {
+  background: var(--pitch);
+  border-color: var(--pitch);
+  color: var(--on-pitch);
+  font-weight: 600;
+}
+
+.chip--danger {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 40%, var(--line));
+}
+
+.chip:disabled {
+  opacity: 0.45;
+}
+
+/* ---------- 협상 테이블 ---------- */
+
+.deal {
+  margin: 14px 0;
+}
+
+.dealtable {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.dealtable__row {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 12px;
+  border-top: 1px solid var(--line);
+  font-size: 0.9375rem;
+}
+
+.dealtable__row--head {
+  border-top: 0;
+  background: var(--board);
+  color: var(--on-board);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.dealtable__label {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.dealtable__ask {
+  font-family: var(--font-num);
+  font-weight: 600;
+}
+
+.dealtable__offer {
+  font-family: var(--font-num);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  justify-self: start;
+}
+
+.dealtable__offer.is-good {
+  background: var(--tint-good);
+  color: var(--pitch);
+}
+
+.dealtable__offer.is-bad {
+  background: var(--tint-bad);
+  color: var(--red);
+}
+
+.stats--tight {
+  margin-top: 10px;
+}
+
+.stats--tight .stats__row {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  font-size: 0.875rem;
+}
+
+/* 협상 화면 아래에 붙는 합의 가능성과 제출 버튼. 하단 탭 바로 위에 머문다. */
+.dealbar {
+  position: sticky;
+  bottom: calc(var(--tabs-h, 70px) + env(safe-area-inset-bottom, 0px));
+  z-index: 5;
+  display: grid;
+  gap: 8px;
+  margin: 16px calc(var(--gutter-l) * -1) 0 calc(var(--gutter-r) * -1);
+  padding: 10px var(--gutter-r) 12px var(--gutter-l);
+  background: var(--surface);
+  border-top: 2px solid var(--ink);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.dealbar .choice {
+  margin: 0;
+}
+
+.gauge {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  align-items: baseline;
+}
+
+.gauge__label {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.gauge__val {
+  font-family: var(--font-num);
+  font-weight: 700;
+  font-size: 1.125rem;
+}
+
+.gauge__track {
+  grid-column: 1 / -1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.gauge__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--muted);
+  transition: width 0.2s ease;
+}
+
+.gauge--good .gauge__val {
+  color: var(--pitch);
+}
+
+.gauge--good .gauge__fill {
+  background: var(--pitch);
+}
+
+.gauge--bad .gauge__val {
+  color: var(--red);
+}
+
+.gauge--bad .gauge__fill {
+  background: var(--red);
+}
+
+.gauge--plain .gauge__fill {
+  background: var(--amber);
+}

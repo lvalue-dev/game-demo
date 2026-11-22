@@ -31,7 +31,7 @@ export function jersey(colors: [string, string], no: number, size = 30, keeper =
   </svg>`;
 }
 
-function spotBadge(p: Player): string {
+export function spotBadge(p: Player): string {
   return `<span class="spot spot--${p.pos}" title="${esc(SPOTS[p.spot].name)}">${p.spot}</span>`;
 }
 

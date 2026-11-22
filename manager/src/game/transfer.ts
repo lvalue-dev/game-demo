@@ -8,13 +8,14 @@ import { ko } from './josa.ts';
 import { LEAGUES, won } from './data.ts';
 import {
   PROMISES, PROMISE_IDS, RESERVE_LIMIT, agentFee, amateur, askOf, assignNumber, checkPromises, clauseAmount, contractText,
-  defaultTerms, enforceQuota, englandCheck, englandStatus, englandText, ESC_SLOTS, feeOdds, foreignCount, gbePoints, inEngland, isForeign, makeContract, marketValue, NON_HG_LIMIT, nonEu, nonEuSigningLimit, oddsText, quota, quotaWord, settle,
+  defaultTerms, enforceQuota, englandCheck, englandStatus, englandText, ESC_SLOTS, feeOdds, foreignCount, gbePoints, inEngland, isForeign, makeContract, marketValue, NON_HG_LIMIT, nonEu, nonEuSigningLimit, quota, quotaWord, settle,
   signingBonus, termsOdds, totalWages, wageFor,
 } from './contract.ts';
 import { profileText } from './player.ts';
+import { COUNTRIES, countryOf } from './countries.ts';
 import { chance, int, pick, spread } from './rng.ts';
 import { fillSlot, makePlayer, myClub, potentialText, priceFor, stage, weakest } from './squad.ts';
-import type { Block, Choice, Club, Deal, Game, Player, Pos, PromiseId, TransferWindow } from './types.ts';
+import type { Block, Choice, Club, Deal, DealRow, Game, MarketCard, MarketTab, Player, Pos, PromiseId, Tone, TransferWindow } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 const round1 = (v: number): number => Math.round(v * 10) / 10;
@@ -263,6 +264,17 @@ function dealLabel(d: Deal): string {
   return `${p.spot} ${p.name} · ${p.age}세 · OVR ${p.ovr}`;
 }
 
+/** 맡은 팀 나라의 국적. */
+const localNat = (g: Game): string => (myClub(g).nation ? '대한민국' : COUNTRIES[countryOf(myClub(g).league)].name);
+
+/** 비교 표의 색: 우리 제안이 요구 이상이면 good, 모자라면 bad. */
+const vs = (offer: number, ask: number): Tone => (offer >= ask - 1e-9 ? 'good' : 'bad');
+
+/** 협상 테이블 블록. */
+function dealBlock(g: Game, p: Player, note: string, side: string, rows: DealRow[], odds: number | null, oddsLabel: string, money: { label: string; value: string; tone?: Tone }[], compare = true): Block {
+  return { kind: 'deal', player: p, note, gain: compare ? p.ovr - weakest(g.squad, p.pos).ovr : undefined, side, rows, odds, oddsLabel, money };
+}
+
 const natText = (g: Game, p: Player): string => (isForeign(g, p) ? ` · ${quotaWord(g)}(${p.nat})` : inEngland(g) ? ` · ${p.nat} · ${englandText(g, p)}` : ` · ${p.nat}`);
 
 function feeScene(g: Game, d: Deal, eyebrow: string): void {
@@ -274,15 +286,15 @@ function feeScene(g: Game, d: Deal, eyebrow: string): void {
   const odds = feeOdds(g, d, frac, draft.sellOn, draft.inst);
   const now = round1(draft.fee / draft.inst);
   const blocks: Block[] = [
-    { kind: 'card', player: p, price: `요구 이적료 ${won(d.price)}`, compare: weakest(g.squad, p.pos), note: `${d.tag} · ${potentialText(g, p)}${natText(g, p)}` },
-    {
-      kind: 'stats', rows: [
-        { label: '현 소속', value: d.from },
-        { label: '지금 계약', value: c ? `${c.years}년 남음 · 연봉 ${won(c.wage)}` : '-' },
-        { label: '바이아웃', value: c?.clause ? won(c.clause) : '없음' },
-        { label: '이적 예산', value: won(budget) },
-      ],
-    },
+    dealBlock(g, p, `${d.tag} · ${potentialText(g, p)}${natText(g, p)}`, `${d.from} 요구`, [
+      { label: '이적료', ask: won(d.price), offer: won(draft.fee), tone: vs(draft.fee, d.price) },
+      { label: '셀온 조항', ask: '없음', offer: draft.sellOn > 0 ? pct(draft.sellOn) : '없음', tone: draft.sellOn > 0 ? 'good' : 'plain' },
+      { label: '지급 방식', ask: '일시불', offer: draft.inst > 1 ? `${draft.inst}시즌 분할` : '일시불', tone: draft.inst > 1 ? 'bad' : 'good' },
+    ], odds, '수락 가능성', [
+      { label: '지금 나갈 이적료 / 예산', value: `${won(now)} / ${won(budget)}`, tone: now > budget ? 'bad' : 'plain' },
+      { label: '지금 계약', value: c ? `${c.years}년 남음 · 연봉 ${won(c.wage)}` : '-' },
+      { label: '바이아웃', value: c?.clause ? won(c.clause) : '없음' },
+    ]),
     {
       kind: 'form', title: `${d.from}에 보내는 이적 제안`, rows: [
         { label: '이적료', note: `요구액의 ${pct(frac)}`, range: { id: 'f:fee', min: round1(d.price * 0.4), max: round1(Math.max(d.price * 1.6, c?.clause ?? 0)), step: stepFor(d.price), value: draft.fee, unit: 'money' } },
@@ -290,20 +302,14 @@ function feeScene(g: Game, d: Deal, eyebrow: string): void {
         { label: '지급 방식', note: draft.inst > 1 ? `지금 ${won(now)}, 다음 ${draft.inst - 1}시즌 동안 시즌마다 ${won(now)}` : '일시불', options: [1, 2, 3].map((n) => ({ id: `f:inst:${n}`, label: n === 1 ? '일시불' : `${n}시즌 분할`, on: draft.inst === n })) },
       ],
     },
-    {
-      kind: 'stats', rows: [
-        { label: '지금 나갈 이적료', value: `${won(now)}${now > budget ? ' · 예산 부족' : ''}`, tone: now > budget ? 'bad' : 'plain' },
-        { label: '수락 가능성', value: `${oddsText(odds)} (${pct(odds)})`, tone: odds >= 0.6 ? 'good' : odds < 0.35 ? 'bad' : 'plain' },
-      ],
-    },
-    { kind: 'text', text: ko`먼저 ${d.from}과 이적료를 합의해야 한다. 합의하면 선수 측과 개인 조건을 협상하고, 이적료는 서명할 때 나간다.${d.tries > 0 ? ` 지금까지 ${d.tries}번 거절당했다.` : ''}` },
+    { kind: 'text', text: ko`1단계: ${d.from}과 이적료 합의 → 2단계: 선수 측과 개인 조건 → 서명. 이적료는 서명할 때 나간다.${d.tries > 0 ? ` 지금까지 ${d.tries}번 거절당했다.` : ''}` },
   ];
   const choices: Choice[] = [
     { id: 'submit', label: `${won(draft.fee)} 제안을 보낸다`, tone: 'primary', disabled: now > budget, detail: now > budget ? '이적 예산이 모자란다' : frac >= 1 && draft.inst === 1 ? '요구액 이상이라 바로 합의한다' : '거절되면 다시 제안할 수 있지만, 판매 구단이 협상을 끊을 수도 있다' },
   ];
   if (c?.clause) choices.push({ id: 'fee:clause', label: `바이아웃 ${won(c.clause)} 지불`, detail: '판매 구단은 거절할 수 없다. 곧장 개인 조건 협상으로 간다', disabled: c.clause > budget });
   choices.push({ id: 'back', label: '목록으로' });
-  g.scene = { eyebrow, title: dealLabel(d), blocks, choices };
+  g.scene = { eyebrow, title: `${p.name} 이적료 협상`, blocks, choices };
 }
 
 function termsScene(g: Game, d: Deal, eyebrow: string): void {
@@ -327,13 +333,21 @@ function termsScene(g: Game, d: Deal, eyebrow: string): void {
   const value = Math.max(0.1, marketValue(g, p));
   const wageMax = Math.max(1, d.ask.wage * 2.5);
   const blocks: Block[] = [];
-  blocks.push({ kind: 'card', player: p, compare: d.kind === 'renew' ? undefined : weakest(g.squad, p.pos), note: `${d.tag} · ${potentialText(g, p)}${natText(g, p)}` });
-  blocks.push({
-    kind: 'text',
-    text: d.kind === 'renew'
-      ? ko`${p.name}의 계약은 이번 시즌으로 끝난다. 재계약하지 못하면 시즌이 끝나고 자유계약으로 떠난다(보스만 룰).${p.unhappy ? ' 지금 팀에 불만이 있어 협상이 어렵다.' : ''}`
-      : ko`${d.kind === 'sign' ? `이적료 ${won(d.fee)}에 합의했다. ` : ''}${p.name} 측의 요구는 ${free ? '무급(아마추어 리그)' : `연봉 ${won(d.ask.wage)}`}, ${PROMISES[d.ask.promise].name} 보장, ${d.ask.years}년 계약, 에이전트 수수료 ${d.ask.agent}%다.`,
-  });
+  const why = blocker(g, d);
+  blocks.push(dealBlock(g, p, `${d.tag} · ${potentialText(g, p)}${natText(g, p)}`, `${p.name} 측 요구`, [
+    ...(free ? [] : [{ label: '연봉', ask: won(d.ask.wage), offer: won(t.wage), tone: vs(t.wage, d.ask.wage) }]),
+    { label: '계약 기간', ask: `${d.ask.years}년`, offer: `${t.years}년`, tone: t.years === d.ask.years ? ('good' as Tone) : ('plain' as Tone) },
+    { label: '출전 보장', ask: PROMISES[d.ask.promise].name, offer: PROMISES[t.promise].name, tone: vs(PROMISES[d.ask.promise].rank, PROMISES[t.promise].rank) },
+    { label: '바이아웃', ask: '낮을수록', offer: t.clause > 0 ? won(t.clause) : '없음', tone: t.clause > 0 ? 'good' : 'bad' },
+    ...(free ? [] : [{ label: '계약금', ask: '있으면 좋다', offer: t.bonus > 0 ? won(t.bonus) : '없음', tone: (t.bonus > 0 ? 'good' : 'plain') as Tone }]),
+    { label: '에이전트 수수료', ask: `${d.ask.agent}%`, offer: `${t.agent}%`, tone: vs(t.agent, d.ask.agent) },
+  ], odds, '합의 가능성', [
+    ...(d.kind === 'sign' ? [{ label: d.inst > 1 ? `이적료(${d.inst}시즌 분할 첫 회)` : '합의한 이적료', value: won(cost.fee) }] : []),
+    ...(cost.later > 0 ? [{ label: '다음 시즌부터 낼 이적료', value: won(cost.later) }] : []),
+    { label: '지금 나갈 돈 / 이적 예산', value: `${won(cost.total)} / ${won(g.job!.budget)}`, tone: cost.total > g.job!.budget ? 'bad' : 'plain' },
+    ...(free ? [] : [{ label: '서명 후 연봉 총액 / 예산', value: `${won(wagesAfter(g, d))} / ${won(g.job!.wageBudget)}`, tone: wagesAfter(g, d) > g.job!.wageBudget ? ('bad' as const) : ('plain' as const) }]),
+  ], d.kind !== 'renew'));
+  if (d.kind === 'renew') blocks.push({ kind: 'text', text: ko`${p.name}의 계약은 이번 시즌으로 끝난다. 재계약하지 못하면 시즌이 끝나고 자유계약으로 떠난다(보스만 룰).${p.unhappy ? ' 지금 팀에 불만이 있어 협상이 어렵다.' : ''}` });
   blocks.push({
     kind: 'form', title: `${p.name} 계약 제안서`, rows: [
       ...(free ? [] : [{ label: '연봉(한 시즌)', note: `요구액의 ${pct(t.wage / Math.max(0.1, d.ask.wage))}`, range: { id: 't:wage', min: round1(Math.max(0.1, d.ask.wage * 0.4)), max: round1(wageMax), step: stepFor(d.ask.wage), value: t.wage, unit: 'money' as const } }]),
@@ -342,18 +356,6 @@ function termsScene(g: Game, d: Deal, eyebrow: string): void {
       { label: '바이아웃', note: t.clause > 0 ? `${won(t.clause)}(시장가의 ${(t.clause / value).toFixed(1)}배)에 다른 구단이 데려갈 수 있다` : '없음. 좋은 선수는 싫어한다', range: { id: 't:clause', min: 0, max: round1(value * 5), step: stepFor(value), value: t.clause, unit: 'money' } },
       ...(free ? [] : [{ label: '계약금', note: t.bonus > 0 ? `연봉의 ${pct(t.bonus / Math.max(0.1, t.wage))} 일시불` : '없음', range: { id: 't:bonus', min: 0, max: round1(Math.max(1, t.wage * 1.5)), step: stepFor(t.wage), value: t.bonus, unit: 'money' as const } }]),
       { label: '에이전트 수수료율', note: `요구 ${d.ask.agent}% · ${won(cost.agent)}`, range: { id: 't:agent', min: 0, max: 15, step: 1, value: t.agent, unit: 'pct100' } },
-    ],
-  });
-  const why = blocker(g, d);
-  blocks.push({
-    kind: 'stats', rows: [
-      ...(d.kind === 'sign' ? [{ label: d.inst > 1 ? `이적료(${d.inst}시즌 분할 첫 회)` : '이적료', value: won(cost.fee) }] : []),
-      ...(cost.later > 0 ? [{ label: '다음 시즌부터 낼 이적료', value: won(cost.later) }] : []),
-      ...(cost.agent > 0 ? [{ label: '에이전트 수수료', value: won(cost.agent) }] : []),
-      ...(cost.bonus > 0 ? [{ label: '계약금', value: won(cost.bonus) }] : []),
-      { label: '지금 나갈 돈 / 이적 예산', value: `${won(cost.total)} / ${won(g.job!.budget)}`, tone: cost.total > g.job!.budget ? 'bad' : 'plain' },
-      ...(free ? [] : [{ label: '서명 후 연봉 총액 / 예산', value: `${won(wagesAfter(g, d))} / ${won(g.job!.wageBudget)}`, tone: wagesAfter(g, d) > g.job!.wageBudget ? ('bad' as const) : ('plain' as const) }]),
-      { label: '합의 가능성', value: `${oddsText(odds)} (${pct(odds)})`, tone: odds >= 0.6 ? 'good' : odds < 0.35 ? 'bad' : 'plain' },
     ],
   });
   if (d.talks > 0) blocks.push({ kind: 'note', text: `${d.talks}번 거절당했다. ${MAX_TALKS}번 거절당하면 협상이 끝난다.`, tone: 'bad' });
@@ -384,21 +386,22 @@ function loanScene(g: Game, d: Deal, eyebrow: string): void {
   g.scene = {
     eyebrow, title: `${dealLabel(d)} 임대`,
     blocks: [
-      { kind: 'card', player: p, compare: weakest(g.squad, p.pos), note: `${d.from} 소속 · ${potentialText(g, p)}${natText(g, p)}` },
-      { kind: 'text', text: ko`${d.from}은 ${p.name}이 경기를 뛰며 크기를 바란다. 요구는 연봉의 ${pct(l.askShare)} 부담, 임대료 ${won(l.askFee)}, 주전 보장이다. 임대가 끝나면 원 소속 구단으로 돌아간다.` },
+      dealBlock(g, p, `${d.from} 소속 · ${potentialText(g, p)}${natText(g, p)}`, `${d.from} 요구`, [
+        { label: '우리가 낼 연봉', ask: pct(l.askShare), offer: pct(l.share), tone: vs(l.share, l.askShare) },
+        { label: '임대료', ask: won(l.askFee), offer: won(l.fee), tone: vs(l.fee, l.askFee) },
+        { label: '출전 보장', ask: '주전', offer: PROMISES[d.offer.promise].name, tone: vs(PROMISES[d.offer.promise].rank, PROMISES.starter.rank) },
+        { label: '기간', ask: '-', offer: l.until === 'winter' ? '반 시즌' : w.kind === 'summer' ? '한 시즌' : '시즌 끝까지', tone: 'plain' },
+      ], odds, '수락 가능성', [
+        { label: '임대료 / 이적 예산', value: `${won(l.fee)} / ${won(g.job!.budget)}`, tone: l.fee > g.job!.budget ? 'bad' : 'plain' },
+        ...(amateur(g) ? [] : [{ label: '서명 후 연봉 총액 / 예산', value: `${won(wagesAfter(g, d))} / ${won(g.job!.wageBudget)}`, tone: wagesAfter(g, d) > g.job!.wageBudget ? ('bad' as const) : ('plain' as const) }]),
+      ]),
+      { kind: 'text', text: ko`${d.from}은 ${p.name}이 경기를 뛰며 크기를 바란다. 임대가 끝나면 원 소속 구단으로 돌아간다.` },
       {
         kind: 'form', title: `${d.from}에 보내는 임대 제안`, rows: [
           { label: '임대 기간', note: l.until === 'winter' ? '겨울 이적시장에 돌아간다' : '시즌이 끝나면 돌아간다', options: (w.kind === 'summer' ? (['winter', 'end'] as const) : (['end'] as const)).map((u) => ({ id: `l:until:${u}`, label: u === 'winter' ? '반 시즌' : w.kind === 'summer' ? '한 시즌' : '시즌 끝까지', on: l.until === u })) },
           { label: '우리가 낼 연봉', note: `${won(round1(wage * l.share))}(연봉 ${won(wage)}의 ${pct(l.share)})`, range: { id: 'l:share', min: 0, max: 1, step: 0.05, value: l.share, unit: 'pct' } },
           { label: '임대료', note: `요구 ${won(l.askFee)}`, range: { id: 'l:fee', min: 0, max: round1(Math.max(1, l.askFee * 3)), step: stepFor(l.askFee), value: l.fee, unit: 'money' } },
           { label: '출전 보장', note: PROMISES[d.offer.promise].desc, options: (['starter', 'rotation', 'backup'] as PromiseId[]).map((id) => ({ id: `t:promise:${id}`, label: PROMISES[id].name, on: d.offer.promise === id })) },
-        ],
-      },
-      {
-        kind: 'stats', rows: [
-          { label: '임대료 / 이적 예산', value: `${won(l.fee)} / ${won(g.job!.budget)}`, tone: l.fee > g.job!.budget ? 'bad' : 'plain' },
-          ...(amateur(g) ? [] : [{ label: '서명 후 연봉 총액 / 예산', value: `${won(wagesAfter(g, d))} / ${won(g.job!.wageBudget)}`, tone: wagesAfter(g, d) > g.job!.wageBudget ? ('bad' as const) : ('plain' as const) }]),
-          { label: '수락 가능성', value: `${oddsText(odds)} (${pct(odds)})`, tone: odds >= 0.6 ? 'good' : odds < 0.35 ? 'bad' : 'plain' },
         ],
       },
     ],
@@ -464,15 +467,13 @@ function saleScene(g: Game, p: Player, eyebrow: string): void {
   g.scene = {
     eyebrow, title: `${p.name} 판매`,
     blocks: [
-      { kind: 'card', player: p, note: `${contractText(g, p.contract)}${natText(g, p)}` },
+      dealBlock(g, p, `${contractText(g, p.contract)}${natText(g, p)}`, '시장 평가', [
+        { label: '이적료', ask: won(value), offer: won(w.sale.price), tone: w.sale.price <= value ? 'good' : 'bad' },
+      ], odds, '사려는 구단이 나올 가능성', [
+        ...(share > 0 ? [{ label: '셀온 조항으로 전 소속 구단 몫', value: won(share) }] : []),
+        { label: '이번 시장 남은 시도', value: `${left}번`, tone: left <= 0 ? ('bad' as const) : undefined },
+      ], false),
       { kind: 'form', title: '판매 조건', rows: [{ label: '희망 이적료', note: `시장가 ${won(value)}의 ${pct(w.sale.price / Math.max(0.1, value))}`, range: { id: 's:price', min: round1(value * 0.3), max: round1(value * 2.5), step: stepFor(value), value: w.sale.price, unit: 'money' } }] },
-      {
-        kind: 'stats', rows: [
-          { label: '사려는 구단이 나올 가능성', value: `${oddsText(odds)} (${pct(odds)})`, tone: odds >= 0.6 ? 'good' : odds < 0.35 ? 'bad' : 'plain' },
-          ...(share > 0 ? [{ label: '셀온 조항으로 전 소속 구단 몫', value: won(share) }] : []),
-          { label: '이번 시장 남은 시도', value: `${left}번` },
-        ],
-      },
     ],
     choices: [
       { id: 'sell', label: `${won(w.sale.price)}에 내놓는다`, tone: 'primary', disabled: left <= 0, detail: left <= 0 ? '이번 시장에서는 더 시도할 수 없다' : '사려는 구단이 나오면 바로 팔린다' },
@@ -489,7 +490,11 @@ function lendScene(g: Game, p: Player, eyebrow: string): void {
   g.scene = {
     eyebrow, title: `${p.name} 임대 보내기`,
     blocks: [
-      { kind: 'card', player: p, note: contractText(g, p.contract) },
+      dealBlock(g, p, contractText(g, p.contract), '상대 구단이 바라는 것', [
+        { label: '상대가 낼 연봉', ask: '낮을수록', offer: pct(l.share), tone: l.share <= 0.5 ? 'good' : 'bad' },
+        { label: '받을 임대료', ask: '없을수록', offer: won(l.fee), tone: l.fee > 0 ? 'bad' : 'good' },
+        { label: '기간', ask: '-', offer: l.until === 'winter' ? '반 시즌' : w.kind === 'summer' ? '한 시즌' : '시즌 끝까지', tone: 'plain' },
+      ], odds, '받아 줄 구단이 나올 가능성', [{ label: '우리가 계속 낼 연봉', value: won(round1(wage * (1 - l.share))) }], false),
       {
         kind: 'form', title: '임대 조건', rows: [
           { label: '임대 기간', note: l.until === 'winter' ? '겨울 이적시장에 돌아온다' : '시즌이 끝나면 돌아온다', options: (w.kind === 'summer' ? (['winter', 'end'] as const) : (['end'] as const)).map((u) => ({ id: `l:until:${u}`, label: u === 'winter' ? '반 시즌' : w.kind === 'summer' ? '한 시즌' : '시즌 끝까지', on: l.until === u })) },
@@ -497,7 +502,6 @@ function lendScene(g: Game, p: Player, eyebrow: string): void {
           { label: '받을 임대료', range: { id: 'l:fee', min: 0, max: round1(Math.max(1, marketValue(g, p) * 0.3)), step: stepFor(marketValue(g, p) * 0.1), value: l.fee, unit: 'money' } },
         ],
       },
-      { kind: 'stats', rows: [{ label: '받아 줄 구단이 나올 가능성', value: `${oddsText(odds)} (${pct(odds)})`, tone: odds >= 0.6 ? 'good' : odds < 0.35 ? 'bad' : 'plain' }] },
       { kind: 'text', text: '임대 간 선수는 등록 인원에 세지 않고, 경기를 뛰며 조금 더 큰다. 연봉은 상대 구단이 내는 몫을 빼고 우리가 낸다.' },
     ],
     choices: [
@@ -507,12 +511,24 @@ function lendScene(g: Game, p: Player, eyebrow: string): void {
   };
 }
 
+/** 계약 한 줄 요약(카드용). */
+function contractShort(g: Game, p: Player): string {
+  const c = p.contract;
+  if (!c) return '계약 없음';
+  return `${amateur(g) ? '무급' : `연봉 ${won(c.wage)}`} · ${c.years}년 남음`;
+}
+
+/** 이적시장 첫 화면: 위에는 예산과 규정, 가운데는 탭으로 나눈 선수 카드, 아래는 구단 운영과 마감. */
 function listScene(g: Game, eyebrow: string): void {
   const w = g.window as TransferWindow;
   const nation = nationOf(g);
   const job = g.job!;
   const title = nation ? '대표팀 소집 명단' : w.kind === 'summer' ? '여름 이적시장' : '겨울 이적시장';
   const blocks: Block[] = [];
+  const choices: Choice[] = [];
+  const hide = (id: string, label = id): void => {
+    choices.push({ id, label, hidden: true });
+  };
   if (nation) blocks.push({ kind: 'text', text: `이번 소집에서 ${NATION_CHANGES - w.signed}자리를 더 바꿀 수 있다.` });
   else {
     const q = quota(g);
@@ -529,38 +545,72 @@ function listScene(g: Game, eyebrow: string): void {
     });
   }
   if (w.log.length > 0) blocks.push({ kind: 'log', items: w.log.map((text) => ({ min: 0, text, tone: 'plain' as const })) });
-  const choices: Choice[] = [];
+
+  const tabs: MarketTab[] = [];
+  // 들어온 제안: 바로 답할 수 있게 카드에 버튼을 단다.
+  const bidCards: MarketCard[] = [];
   for (const b of w.bids) {
     const p = all(g).find((x) => x.id === b.player);
     if (!p) continue;
-    const share = p.contract?.sellOn ? ` · 셀온 ${pct(p.contract.sellOn)} 제외 실수령 ${won(round1(b.fee * (1 - p.contract.sellOn)))}` : '';
-    if (b.clause) {
-      choices.push({ id: `bid:${b.id}:yes`, group: '들어온 제안', label: `바이아웃 발동! ${b.club} → ${p.name} ${won(b.fee)}`, detail: `구단은 막을 수 없다. 선수가 응하면 떠난다${share}` });
-      choices.push({ id: `bid:${b.id}:stay`, group: '들어온 제안', label: ko`${p.name}을 직접 설득한다`, detail: '선수단 장악력 판정. 실패하면 떠나고, 성공해도 연봉 10% 인상을 약속한다' });
-    } else {
-      choices.push({ id: `bid:${b.id}:yes`, group: '들어온 제안', label: `${b.club}의 제안 수락: ${p.name}(${p.spot}) ${won(b.fee)}`, detail: `OVR ${p.ovr} · ${contractText(g, p.contract)}${share}` });
-      if (!b.countered) choices.push({ id: `bid:${b.id}:counter`, group: '들어온 제안', label: `20% 올려 역제안: ${won(round1(b.fee * 1.2))}`, detail: '받아들이거나 제안을 거둔다' });
-      choices.push({ id: `bid:${b.id}:no`, group: '들어온 제안', label: `${b.club}의 제안 거절`, detail: p.unhappy ? '이적을 원하던 선수라 크게 실망한다' : ko`${p.name}이 실망할 수도 있다` });
-    }
-  }
-  for (const d of w.list) {
-    if (d.kind === 'renew') {
-      choices.push({ id: `view:${d.id}`, group: '재계약 협상', label: `${d.player.spot} ${d.player.name} · OVR ${d.player.ovr} · 계약 만료 임박`, detail: `${contractText(g, d.player.contract)}${d.player.unhappy ? ' · 불만 있음' : ''}` });
-      continue;
-    }
-    const gain = d.player.ovr - weakest(g.squad, d.player.pos).ovr;
-    if (d.kind === 'loan') {
-      choices.push({ id: `view:${d.id}`, group: '임대 영입 후보', label: dealLabel(d), detail: `${d.from} · ${profileText(d.player)}${natText(g, d.player)} · 요구: 연봉 ${pct(d.loan!.askShare)} 부담, 임대료 ${won(d.loan!.askFee)} · 주전 대비 ${gain > 0 ? `+${gain}` : gain}` });
-      continue;
-    }
-    const stageText = d.stage === 'terms' && d.kind === 'sign' ? ` · 이적료 ${won(d.fee)} 합의, 개인 조건 협상 중` : '';
-    choices.push({
-      id: `view:${d.id}`, group: nation ? '발탁 후보' : '영입 후보', label: dealLabel(d),
-      detail: `${d.tag} · ${profileText(d.player)}${natText(g, d.player)}${nation ? '' : ` · ${d.from} · ${d.kind === 'sign' ? `요구 ${won(d.price)}` : '이적료 없음'}`} · 주전 대비 ${gain > 0 ? `+${gain}` : gain}${stageText}`,
+    const net = p.contract?.sellOn ? `실수령 ${won(round1(b.fee * (1 - p.contract.sellOn)))}(셀온 ${pct(p.contract.sellOn)} 제외)` : '';
+    const actions: NonNullable<MarketCard['actions']> = b.clause
+      ? [{ act: `bid:${b.id}:yes`, label: '보내 준다', tone: 'primary' }, { act: `bid:${b.id}:stay`, label: '직접 설득(장악력 판정)' }]
+      : [
+        { act: `bid:${b.id}:yes`, label: '수락', tone: 'primary' },
+        ...(!b.countered ? [{ act: `bid:${b.id}:counter`, label: `역제안 ${won(round1(b.fee * 1.2))}` }] : []),
+        { act: `bid:${b.id}:no`, label: '거절', tone: 'danger' as const },
+      ];
+    for (const x of actions) hide(x.act, `${b.clause ? '바이아웃 ' : ''}${x.label} · ${p.name}`);
+    bidCards.push({
+      act: null, player: p, from: b.club, price: `${b.clause ? '바이아웃 발동 ' : '제안 '}${won(b.fee)}`,
+      tags: [contractShort(g, p), ...(net ? [net] : [])],
+      status: b.clause ? { text: '구단은 막을 수 없다. 선수가 응하면 떠난다', tone: 'bad' } : p.unhappy ? { text: '이적을 원하는 선수', tone: 'bad' } : undefined,
+      actions,
     });
   }
+  if (bidCards.length) tabs.push({ id: 'bids', label: '들어온 제안', hint: '답하지 않으면 시장이 닫힐 때 사라진다.', cards: bidCards });
+
+  const card = (d: Deal): MarketCard => {
+    const p = d.player;
+    hide(`view:${d.id}`);
+    const gain = p.ovr - weakest(g.squad, p.pos).ovr;
+    const why = d.kind === 'renew' ? null : blocker(g, d);
+    const status = d.stage === 'terms' && d.kind === 'sign' ? { text: `이적료 ${won(d.fee)} 합의 · 개인 조건 협상 중`, tone: 'good' as const }
+      : why ? { text: why, tone: 'bad' as const }
+      : d.tries + d.talks > 0 ? { text: `거절 ${d.tries + d.talks}번`, tone: 'plain' as const } : undefined;
+    const tags = [d.tag, profileText(p), ...(isForeign(g, p) ? [`${quotaWord(g)} ${p.nat}`] : p.nat !== localNat(g) ? [p.nat] : []), potentialText(g, p)].filter(Boolean);
+    if (d.kind === 'renew') {
+      return { act: `view:${d.id}`, player: p, from: '재계약', price: contractShort(g, p), tags: [profileText(p), PROMISES[p.contract?.promise ?? 'rotation'].name], status: p.unhappy ? { text: '불만 있음 · 협상이 어렵다', tone: 'bad' } : { text: '재계약하지 못하면 시즌 끝에 떠난다', tone: 'plain' } };
+    }
+    if (d.kind === 'loan') {
+      return { act: `view:${d.id}`, player: p, from: `${d.from} 소속`, price: `연봉 ${pct(d.loan!.askShare)} 부담 · 임대료 ${won(d.loan!.askFee)}`, gain, tags, status };
+    }
+    return { act: `view:${d.id}`, player: p, from: nation ? d.from : d.from, price: nation ? '발탁' : d.kind === 'sign' ? `요구 ${won(d.price)}` : '이적료 없음', gain, tags, status };
+  };
+  const signs = w.list.filter((d) => d.kind === 'sign' || d.kind === 'free' || d.kind === 'youth');
+  tabs.push({ id: 'sign', label: nation ? '발탁 후보' : '영입', hint: nation ? '' : '카드를 누르면 이적료 협상, 개인 조건 협상 순으로 진행한다. 숫자는 같은 포지션 가장 약한 선발 대비 OVR.', cards: signs.map(card) });
   if (!nation) {
-    choices.push({ id: 'sellmenu', group: '구단 운영', label: '판매 · 임대 · 방출', detail: '희망가를 정해 팔거나, 임대 보내거나, 후보의 계약을 해지한다' });
+    tabs.push({ id: 'loan', label: '임대 영입', hint: '빌려 온 선수는 기간이 끝나면 돌아간다.', cards: w.list.filter((d) => d.kind === 'loan').map(card) });
+    tabs.push({ id: 'renew', label: '재계약', hint: '계약이 1년 남은 선수들.', cards: w.list.filter((d) => d.kind === 'renew').map(card) });
+    const mine: MarketCard[] = [];
+    const own = (p: Player, starter: boolean): void => {
+      if (p.loan?.dir === 'in') {
+        mine.push({ act: null, player: p, from: starter ? '선발' : '후보', price: `${p.loan.club}에서 임대 중`, tags: [profileText(p)], status: { text: '빌려 온 선수는 팔거나 다시 빌려줄 수 없다', tone: 'plain' } });
+        return;
+      }
+      const actions: NonNullable<MarketCard['actions']> = [{ act: `sale:${p.id}`, label: '판매' }, { act: `lend:${p.id}`, label: '임대 보내기' }];
+      if (!starter) actions.push({ act: `release:${p.id}`, label: `해지 ${won(releaseCost(p))}`, tone: 'danger', disabled: releaseCost(p) > job.budget });
+      for (const x of actions) if (!x.disabled) hide(x.act, `${x.label} · ${p.name}`);
+      mine.push({ act: null, player: p, from: starter ? '선발' : '후보', price: `시장가 ${won(saleValue(g, p))}`, tags: [profileText(p), contractShort(g, p), ...(p.unhappy ? ['불만'] : [])], actions });
+    };
+    for (const p of g.squad) own(p, true);
+    for (const p of g.reserves) own(p, false);
+    for (const p of g.loaned) mine.push({ act: null, player: p, from: '임대 보냄', price: `${p.loan?.club} · ${p.loan?.until === 'winter' ? '겨울 복귀' : '시즌 끝 복귀'}`, tags: [profileText(p)] });
+    tabs.push({ id: 'mine', label: '내 선수', hint: '판매는 희망가를 정해 구매 구단을 찾는다. 선발을 내보내면 같은 포지션 후보 중 가장 좋은 선수가 올라간다. 해지는 남은 연봉의 절반을 위약금으로 낸다.', cards: mine });
+  }
+  blocks.push({ kind: 'market', tabs });
+
+  if (!nation) {
     if (!w.depthDone) {
       const price = depthPrice(g);
       choices.push({ id: 'depth', group: '구단 운영', label: '유소년·2군 보강', detail: `이름 없는 2군 선수들을 데려와 스쿼드 뎁스 +3 · ${won(price)}`, disabled: price > job.budget });
@@ -734,7 +784,7 @@ export function actWindow(g: Game, id: string): boolean {
   if (!w) return true;
   const nation = nationOf(g);
   if (id === 'back') {
-    w.view = w.view?.startsWith('sale:') || w.view?.startsWith('lend:') ? 'sell' : null;
+    w.view = null;
     return false;
   }
   if (w.view?.startsWith('sale:') || w.view?.startsWith('lend:')) {
@@ -747,7 +797,7 @@ export function actWindow(g: Game, id: string): boolean {
     actDeal(g, w, d, id);
     return false;
   }
-  if (w.view === 'sell') {
+  if (w.view === 'sell' || (!w.view && /^(sale|lend|release):/.test(id))) {
     const [verb, raw] = id.split(':');
     const p = all(g).find((x) => x.id === Number(raw));
     if (!p || p.loan) return false;
@@ -818,7 +868,7 @@ function actPlayer(g: Game, w: TransferWindow, p: Player, id: string): void {
       w.sale.tries[p.id] = (w.sale.tries[p.id] ?? 0) + 1;
       if (chance(g, saleOdds(g, p, w.sale.price))) {
         letGo(g, p, w.sale.price, ko`${leagueClub(g, int(g, 0, 1))}이 ${p.name}(${p.spot})을 ${won(w.sale.price)}에 사 갔다.`);
-        w.view = 'sell';
+        w.view = null;
       } else {
         w.log.push(ko`${won(w.sale.price)}에 ${p.name}을 사려는 구단이 나오지 않았다.`);
       }
@@ -846,7 +896,7 @@ function actPlayer(g: Game, w: TransferWindow, p: Player, id: string): void {
       w.list = w.list.filter((x) => !(x.kind === 'renew' && x.player.id === p.id));
       w.log.push(line);
       g.season.notes.push(line);
-      w.view = 'sell';
+      w.view = null;
     } else {
       w.log.push(ko`그 조건으로 ${p.name}을 받아 줄 구단이 나오지 않았다.`);
     }

@@ -140,9 +140,10 @@ function choose(g: Game, dice: { rng: number }): string {
       if (clauseBid) return clauseBid.id;
       const refuse = open.find((c) => c.id.startsWith('bid:') && c.id.endsWith(':no'));
       if (refuse) return refuse.id;
-      if (extra && !visited.has(key(`sell-${extra.id}`))) {
-        visited.add(key(`sell-${extra.id}`));
-        return 'sellmenu';
+      // 내 선수 카드에서 바로 판매 화면으로 간다.
+      if (extra && !visited.has(key(`sale-${extra.id}`)) && open.some((c) => c.id === `sale:${extra.id}`)) {
+        visited.add(key(`sale-${extra.id}`));
+        return `sale:${extra.id}`;
       }
       const renew = w.list.find((d) => d.kind === 'renew' && g.squad.includes(d.player) && !visited.has(key(d.id)));
       if (renew) {

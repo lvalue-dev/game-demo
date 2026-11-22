@@ -8,9 +8,9 @@ import type { CountryId } from '../game/countries.ts';
 import { licenseName } from '../game/hiring.ts';
 import { ko } from '../game/josa.ts';
 import { effOvr, lineAt, potentialText, ratings, stage, valueOf } from '../game/squad.ts';
-import { formationBoard, formationMini, playerCard, playerRow } from './cards.ts';
+import { formationBoard, formationMini, playerCard, playerRow, spotBadge } from './cards.ts';
 import type { BoardSpot } from './cards.ts';
-import { ESC_SLOTS, NON_HG_LIMIT, PROMISES, contractText, depthOf, englandStatus, englandText, foreignCount, inEngland, isForeign, placeAt, promiseKept, quota, swapLineup, totalWages } from '../game/contract.ts';
+import { ESC_SLOTS, NON_HG_LIMIT, PROMISES, oddsText, contractText, depthOf, englandStatus, englandText, foreignCount, inEngland, isForeign, placeAt, promiseKept, quota, swapLineup, totalWages } from '../game/contract.ts';
 import { SLOTS, lineup } from '../game/live.ts';
 import { agenda } from '../game/agenda.ts';
 import { posPenalty } from '../game/player.ts';
@@ -19,7 +19,7 @@ import { SHAPES, SHAPE_IDS, usualShape } from '../game/tactics.ts';
 import { legacyTitle } from '../game/talk.ts';
 import { dropCount, sortTable, zone } from '../game/world.ts';
 import { isLive, mountLive, onLiveClick, pauseLive, renderLive, unmountLive } from './live.ts';
-import type { BackgroundId, Block, Club, FormRow, Game, LeagueId, MatchLine, Phase, Player, ShapeId } from '../game/types.ts';
+import type { BackgroundId, Block, Choice, Club, FormRow, MarketCard, MarketTab, Game, LeagueId, MatchLine, Phase, Player, ShapeId } from '../game/types.ts';
 
 type Tab = 'play' | 'table' | 'squad' | 'record';
 
@@ -45,6 +45,8 @@ let root: HTMLElement;
 let game: Game | null = null;
 let tab: Tab = 'play';
 let tableLeague: LeagueId | null = null;
+/** 이적시장에서 보고 있는 탭. */
+let marketTab: string | null = null;
 let confirmReset = false;
 /** 선발 배치가 거절됐을 때 잠깐 보여 줄 이유. */
 let notice: string | null = null;
@@ -96,7 +98,9 @@ export function start(data: { game?: unknown }): void {
       const [pid, at] = select.value.split(':');
       notice = placeAt(game, Number(pid), Number(at));
       store(SAVE_KEY, game);
+      const y = window.scrollY;
       render();
+      window.scrollTo(0, y);
     }
   });
   root.addEventListener('submit', (e) => {
@@ -117,7 +121,7 @@ function begin(): void {
 }
 
 function onClick(e: Event): void {
-  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-country],[data-do],[data-live],[data-live-do],[data-step]');
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-country],[data-mtab],[data-do],[data-live],[data-live-do],[data-step]');
   if (!el) return;
   if (el.dataset.step && el.dataset.for) {
     const slider = root.querySelector<HTMLInputElement>(`input[type="range"][data-range="${CSS.escape(el.dataset.for)}"]`);
@@ -164,6 +168,13 @@ function onClick(e: Event): void {
     window.scrollTo(0, 0);
     return;
   }
+  if (el.dataset.mtab) {
+    marketTab = el.dataset.mtab;
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+    return;
+  }
   if (el.dataset.country) {
     tableLeague = el.dataset.country === 'intl' ? 'intl' : `${el.dataset.country}1`;
     render();
@@ -189,10 +200,18 @@ function onClick(e: Event): void {
     window.scrollTo(0, 0);
     return;
   }
+  const before = screenKey(game);
+  const y = window.scrollY;
   act(game, id);
   store(SAVE_KEY, game);
   render();
-  window.scrollTo(0, 0);
+  // 같은 화면 안에서 고른 것(칩, 지원 표시, 슬라이더 버튼 등)은 보던 자리를 지키고, 화면이 바뀔 때만 맨 위로 간다.
+  window.scrollTo(0, screenKey(game) === before ? y : 0);
+}
+
+/** 화면을 가르는 값. 이 값이 그대로면 같은 화면을 다시 그린 것이다. */
+function screenKey(g: Game): string {
+  return [g.year, g.phase, g.scene.title, g.window?.view ?? '', g.hiring?.step ?? '', g.hiring?.talk?.at ?? '', g.hiring?.talk?.i ?? '', g.match?.step ?? '', g.match?.seg ?? ''].join('|');
 }
 
 // ---------- 그리기 ----------
@@ -334,24 +353,83 @@ function renderTodo(g: Game): string {
 
 const TODO_PHASES: Phase[] = ['style', 'focus', 'market', 'winter', 'half1', 'event', 'outcome', 'plan', 'end', 'growth'];
 
+function choiceButton(g: Game, c: Choice, solo: boolean): string {
+  const shape = g.phase === 'match' && g.match?.step === 'shape' && SHAPE_IDS.includes(c.id as ShapeId);
+  return `<button type="button" class="choice${shape ? ' choice--icon' : ''}${c.tone === 'primary' ? ' choice--primary' : c.tone === 'danger' ? ' choice--danger' : ''}${solo ? ' choice--solo' : ''}${c.club !== undefined ? ' choice--club' : ''}" data-act="${esc(c.id)}"${c.disabled ? ' disabled' : ''}>
+    ${c.club !== undefined ? crest(g.clubs[c.club] as Club, 30) : ''}
+    ${shape ? miniFor(c.id as ShapeId) : ''}
+    <span class="choice__label">${esc(c.label)}</span>
+    ${c.detail ? `<span class="choice__detail">${esc(c.detail)}</span>` : ''}
+  </button>`;
+}
+
 function renderScene(g: Game): string {
   const s = g.scene;
+  const deal = s.blocks.find((b): b is Extract<Block, { kind: 'deal' }> => b.kind === 'deal');
+  const visible = s.choices.filter((c) => !c.hidden);
+  // 협상 화면에서는 합의 가능성과 제출 버튼을 화면 아래에 붙여, 조건을 바꾸면서 바로 본다.
+  const main = deal ? visible.find((c) => c.tone === 'primary') : undefined;
+  const rest = visible.filter((c) => c !== main);
   return `
-    ${TODO_PHASES.includes(g.phase) ? renderTodo(g) : ''}
-    <article class="scene">
+    ${TODO_PHASES.includes(g.phase) && !deal ? renderTodo(g) : ''}
+    <article class="scene${deal ? ' scene--deal' : ''}">
       <p class="eyebrow">${esc(s.eyebrow)}</p>
       <h2 class="scene__title">${esc(s.title)}</h2>
       ${s.blocks.map((b) => renderBlock(g, b)).join('')}
       <div class="choices">
-        ${s.choices.map((c, i) => `${c.group && c.group !== s.choices[i - 1]?.group ? `<p class="choices__group">${esc(c.group.trim())}</p>` : ''}
-          <button type="button" class="choice${g.phase === 'match' && g.match?.step === 'shape' && SHAPE_IDS.includes(c.id as ShapeId) ? ' choice--icon' : ''}${c.tone === 'primary' ? ' choice--primary' : c.tone === 'danger' ? ' choice--danger' : ''}${s.choices.length === 1 ? ' choice--solo' : ''}${c.club !== undefined ? ' choice--club' : ''}" data-act="${esc(c.id)}"${c.disabled ? ' disabled' : ''}>
-            ${c.club !== undefined ? crest(g.clubs[c.club] as Club, 30) : ''}
-            ${g.phase === 'match' && g.match?.step === 'shape' && SHAPE_IDS.includes(c.id as ShapeId) ? miniFor(c.id as ShapeId) : ''}
-            <span class="choice__label">${esc(c.label)}</span>
-            ${c.detail ? `<span class="choice__detail">${esc(c.detail)}</span>` : ''}
-          </button>`).join('')}
+        ${rest.map((c, i) => `${c.group && c.group !== rest[i - 1]?.group ? `<p class="choices__group">${esc(c.group.trim())}</p>` : ''}${choiceButton(g, c, visible.length === 1)}`).join('')}
       </div>
+      ${deal && main ? `<div class="dealbar">${gauge(deal.odds, deal.oddsLabel)}${choiceButton(g, main, false)}</div>` : ''}
     </article>`;
+}
+
+/** 합의 가능성 막대. */
+function gauge(odds: number | null, label: string): string {
+  if (odds === null) return '';
+  const v = Math.round(odds * 100);
+  const tone = odds >= 0.6 ? 'good' : odds < 0.35 ? 'bad' : 'plain';
+  return `<div class="gauge gauge--${tone}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${v}" aria-label="${esc(label)}">
+    <span class="gauge__label">${esc(label)}</span><span class="gauge__val">${esc(oddsText(odds))} ${v}%</span>
+    <span class="gauge__track"><span class="gauge__fill" style="width:${v}%"></span></span>
+  </div>`;
+}
+
+/** 이적시장 카드 묶음. 탭은 화면 상태(marketTab)로 고른다. */
+function renderMarket(tabs: MarketTab[]): string {
+  const cur = tabs.find((t) => t.id === marketTab) ?? tabs.find((t) => t.cards.length > 0) ?? tabs[0];
+  if (!cur) return '';
+  return `<section class="market">
+    <div class="mtabs" role="tablist" aria-label="이적시장 구분">${tabs.map((t) => `<button type="button" role="tab" class="mtab${t.id === cur.id ? ' is-on' : ''}${t.id === 'bids' ? ' mtab--alert' : ''}" data-mtab="${esc(t.id)}" aria-selected="${t.id === cur.id}">${esc(t.label)}<span class="mtab__n">${t.cards.length}</span></button>`).join('')}</div>
+    ${cur.hint ? `<p class="fine">${esc(cur.hint)}</p>` : ''}
+    ${cur.cards.length ? `<ul class="mgrid">${cur.cards.map((c) => marketCard(c)).join('')}</ul>` : '<p class="muted">지금은 없다.</p>'}
+  </section>`;
+}
+
+function marketCard(c: MarketCard): string {
+  const p = c.player;
+  const gain = c.gain === undefined ? '' : `<span class="mcard__gain mcard__gain--${c.gain > 0 ? 'up' : c.gain < 0 ? 'down' : 'flat'}" title="같은 포지션 가장 약한 선발 대비">${c.gain > 0 ? '+' : ''}${c.gain}</span>`;
+  const body = `
+    <span class="mcard__top">${spotBadge(p)}<span class="mcard__who"><span class="mcard__name">${esc(p.name)}</span><span class="mcard__meta">${p.age}세 · ${esc(c.from)}</span></span><span class="mcard__ovr"><span class="mcard__ovrn">${p.ovr + p.temp}</span>${gain}</span></span>
+    <span class="mcard__price">${esc(c.price)}</span>
+    ${c.tags.length ? `<span class="mcard__tags">${c.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</span>` : ''}
+    ${c.status ? `<span class="mcard__status mcard__status--${c.status.tone}">${esc(c.status.text)}</span>` : ''}`;
+  return `<li class="mcard${c.status?.tone === 'bad' ? ' is-warn' : ''}">
+    ${c.act ? `<button type="button" class="mcard__main" data-act="${esc(c.act)}">${body}<span class="mcard__go" aria-hidden="true">협상 ›</span></button>` : `<div class="mcard__main">${body}</div>`}
+    ${c.actions?.length ? `<div class="mcard__acts">${c.actions.map((a) => `<button type="button" class="chip${a.tone === 'primary' ? ' chip--primary' : a.tone === 'danger' ? ' chip--danger' : ''}" data-act="${esc(a.act)}"${a.disabled ? ' disabled' : ''}>${esc(a.label)}</button>`).join('')}</div>` : ''}
+  </li>`;
+}
+
+/** 협상 테이블: 선수 한 줄(누르면 능력치), 상대 요구와 우리 제안의 비교, 돈 계산. */
+function renderDeal(b: Extract<Block, { kind: 'deal' }>): string {
+  const note = `${b.gain !== undefined ? `주전 대비 ${b.gain > 0 ? '+' : ''}${b.gain} · ` : ''}${b.note}`;
+  return `<section class="deal">
+    <ul class="plist">${playerRow(b.player, { note })}</ul>
+    <div class="dealtable" role="table" aria-label="협상 조건 비교">
+      <div class="dealtable__row dealtable__row--head" role="row"><span role="columnheader">조건</span><span role="columnheader">${esc(b.side)}</span><span role="columnheader">우리 제안</span></div>
+      ${b.rows.map((r) => `<div class="dealtable__row" role="row"><span class="dealtable__label" role="cell">${esc(r.label)}</span><span class="dealtable__ask" role="cell">${esc(r.ask)}</span><span class="dealtable__offer is-${r.tone}" role="cell">${esc(r.offer)}</span></div>`).join('')}
+    </div>
+    ${b.money.length ? `<dl class="stats stats--tight">${b.money.map((r) => `<div class="stats__row"><dt>${esc(r.label)}</dt><dd class="${r.tone ? `is-${r.tone}` : ''}">${esc(r.value)}</dd></div>`).join('')}</dl>` : ''}
+  </section>`;
 }
 
 
@@ -409,6 +487,8 @@ function renderBlock(g: Game, b: Block): string {
     case 'table': return renderTable(g, b.league);
     case 'players': return `<ul class="plist">${b.items.map((it) => playerRow(it.player, { note: it.note, delta: it.delta })).join('')}</ul>`;
     case 'card': return playerCard(b.player, { price: b.price, note: b.note, compare: b.compare });
+    case 'market': return renderMarket(b.tabs);
+    case 'deal': return renderDeal(b);
     case 'form': return `
       <section class="contract" aria-label="${esc(b.title)}">
         <header class="contract__head"><span class="contract__seal">제안서</span><h3 class="contract__title">${esc(b.title)}</h3></header>
@@ -470,9 +550,11 @@ function commitRange(el: HTMLInputElement): void {
   let v = el.type === 'range' ? Number(el.value) : fromInput(unit, Number(el.value));
   if (!Number.isFinite(v)) return;
   v = Math.min(max, Math.max(min, v));
+  const y = window.scrollY;
   act(game, `${id}=${Math.round(v * 1000) / 1000}`);
   store(SAVE_KEY, game);
   render();
+  window.scrollTo(0, y);
 }
 
 /** 슬라이더를 끄는 동안 값 글자만 바꾼다. */
