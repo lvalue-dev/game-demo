@@ -610,14 +610,14 @@ const LIVE_CONCEDED: Record<LiveHow, string[]> = {
   pen: ['페널티킥을 내줬고, 골키퍼는 반대로 뛰었다.'],
 };
 
-/** 실시간 경기를 시작한다. 주전 일곱 명에 후보 넷을 보태 열한 명을 세우고, 상대 열한 명을 만든다. */
+/** 실시간 경기를 시작한다. 선발 열한 명을 세우고(모자라면 후보, 그다음 2군), 상대 열한 명을 만든다. */
 function startLive(g: Game, m: MatchState): void {
   const club = myClub(g);
   const { where } = stage(g);
   const depth = g.depth + g.season.depthMod;
   // 선발은 감독이 정한 자리(줄)에서 뛴다. 자기 포지션이 아니면 그 줄의 대표 자리에 서고 OVR이 깎인다.
   const keys: Entrant[] = g.squad.map((p, i) => {
-    const line = lineAt(i);
+    const line = lineAt(g, i);
     return { name: p.name, pos: line, ovr: effOvr(p, line), key: p.id, spot: p.pos === line ? p.spot : LINE_SPOT[line], foot: p.foot, dev: p.dev, no: p.no, pid: p.id, nat: p.nat };
   });
   // 남는 네 자리는 후보 명단에서 그 자리에 맞는 선수부터 쓴다. 외국인 출전 한도를 넘지 않게 한다. 후보가 모자라면 2군 선수가 뛴다.

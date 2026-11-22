@@ -2,10 +2,11 @@
 // 그리고 이적시장에서만 할 수 있는 일(재계약, 판매, 들어온 제안)로 곧장 가기.
 // 할 일 목록(agenda.ts)의 버튼이 여기 있는 동작을 부른다.
 import { ko } from './josa.ts';
-import { effOvr, lineAt } from './squad.ts';
+import { effOvr, lineAt, linesOf } from './squad.ts';
 import { enforceQuota, isForeign, placeAt, promiseKept, quota } from './contract.ts';
 import { windowScene } from './transfer.ts';
-import type { Game, Player } from './types.ts';
+import { SHAPES, SHAPE_IDS } from './tactics.ts';
+import type { Game, Player, ShapeId } from './types.ts';
 
 /** 시장이 열려 있는지(여름·겨울 이적시장 화면). */
 export const marketOpen = (g: Game): boolean => (g.phase === 'market' || g.phase === 'winter') && !!g.window;
@@ -14,16 +15,17 @@ export const marketOpen = (g: Game): boolean => (g.phase === 'market' || g.phase
 const promiseBonus = (p: Player): number => (p.contract?.promise === 'star' ? 4 : p.contract?.promise === 'starter' ? 2.5 : 0);
 
 /**
- * 가장 강한 선발 일곱 명을 자리에 맞게 세운다. 자리마다 그 줄에서 낸 OVR(포지션 감점 포함)에 출전 약속의 덤을 더해 고르고,
+ * 가장 강한 선발 열한 명을 자리에 맞게 세운다. 자리마다 그 줄에서 낸 OVR(포지션 감점 포함)에 출전 약속의 덤을 더해 고르고,
  * 외국인 선발 한도를 지킨다. 골키퍼 자리부터, 고를 사람이 적은 자리부터 채운 뒤, 두 자리씩 맞바꿔 더 나아지면 바꾼다.
  */
 export function autoLineup(g: Game): string {
   if (g.phase === 'match') return '경기 중에는 바꿀 수 없다.';
   const pool = [...g.squad, ...g.reserves].filter((p) => !p.loan || p.loan.dir === 'in');
   const limit = quota(g).pitch;
-  const score = (p: Player, i: number): number => effOvr(p, lineAt(i)) + p.temp + promiseBonus(p);
-  const order = [0, 1, 2, 3, 4, 5, 6];
-  const pick: (Player | null)[] = [null, null, null, null, null, null, null];
+  const score = (p: Player, i: number): number => effOvr(p, lineAt(g, i)) + p.temp + promiseBonus(p);
+  const n = linesOf(g).length;
+  const order = Array.from({ length: n }, (_, i) => i);
+  const pick: (Player | null)[] = order.map(() => null);
   const used = new Set<number>();
   let foreign = 0;
   for (const i of order) {
@@ -36,8 +38,8 @@ export function autoLineup(g: Game): string {
   }
   // 두 자리씩 맞바꿔 합이 커지면 바꾼다(골키퍼를 공격수로 세우는 식의 실수를 고친다).
   for (let pass = 0; pass < 3; pass++) {
-    for (let a = 0; a < 7; a++) {
-      for (let b = a + 1; b < 7; b++) {
+    for (let a = 0; a < n; a++) {
+      for (let b = a + 1; b < n; b++) {
         const pa = pick[a];
         const pb = pick[b];
         if (!pa || !pb) continue;
@@ -55,7 +57,7 @@ export function autoLineup(g: Game): string {
   g.squad = squad;
   refresh(g);
   if (before === squad.map((p) => p.id).join(',')) return '지금이 가장 강한 배치다.';
-  const gain = squad.reduce((s, p, i) => s + effOvr(p, lineAt(i)), 0);
+  const gain = squad.reduce((s, p, i) => s + effOvr(p, lineAt(g, i)), 0);
   return `가장 강한 배치로 바꿨다(선발 OVR 합 ${Math.round(gain)}).`;
 }
 
@@ -63,9 +65,9 @@ export function autoLineup(g: Game): string {
 export function promote(g: Game, id: number): string {
   const p = g.reserves.find((x) => x.id === id);
   if (!p) return '후보 명단에 없는 선수다.';
-  const slots = g.squad.map((q, i) => ({ q, i })).filter(({ i }) => lineAt(i) === p.pos);
+  const slots = g.squad.map((q, i) => ({ q, i })).filter(({ i }) => lineAt(g, i) === p.pos);
   const candidates = (slots.length ? slots : g.squad.map((q, i) => ({ q, i })))
-    .sort((a, b) => promiseBonus(a.q) - promiseBonus(b.q) || effOvr(a.q, lineAt(a.i)) - effOvr(b.q, lineAt(b.i)));
+    .sort((a, b) => promiseBonus(a.q) - promiseBonus(b.q) || effOvr(a.q, lineAt(g, a.i)) - effOvr(b.q, lineAt(g, b.i)));
   const at = candidates[0];
   if (!at) return '바꿀 자리가 없다.';
   const why = placeAt(g, p.id, at.i);
@@ -117,6 +119,13 @@ export function manage(g: Game, id: string): ManageResult {
   const [verb, arg = ''] = id.split(':');
   switch (verb) {
     case 'auto': return { msg: autoLineup(g), go: false };
+    case 'formation': {
+      if (!SHAPE_IDS.includes(arg as ShapeId) || g.phase === 'match') return { msg: null, go: false };
+      g.formation = arg as ShapeId;
+      // 자리가 바뀌었으니 가장 강한 배치로 다시 세운다.
+      autoLineup(g);
+      return { msg: `대형을 ${SHAPES[arg as ShapeId].name}으로 바꾸고 선발을 다시 세웠다.`, go: false };
+    }
     case 'up': return { msg: promote(g, Number(arg)), go: false };
     case 'quota': return { msg: fixQuota(g), go: false };
     case 'renew': {

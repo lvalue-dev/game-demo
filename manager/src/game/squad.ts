@@ -1,10 +1,11 @@
-// 선수단: 주전 일곱 명과 그 밖의 선수층. 선수는 나이에 따라 크고 지며, 너무 잘하면 큰 구단이 데려간다.
+// 선수단: 선발 열한 명과 그 밖의 선수층. 선수는 나이에 따라 크고 지며, 너무 잘하면 큰 구단이 데려간다.
 import { ko } from './josa.ts';
-import { LEAGUES, LINEUP, TRAIT_IDS, foreignName, koreanName, won } from './data.ts';
+import { LEAGUES, TRAIT_IDS, foreignName, koreanName, won } from './data.ts';
+import { SLOTS, slotSpot } from './live.ts';
 import { COUNTRIES, FOREIGN_POOL, countryOf, foreignShare, nativeName } from './countries.ts';
 import { chance, int, pick, rand, spread } from './rng.ts';
 import { makeDetail, posPenalty } from './player.ts';
-import type { Club, Game, Player, Pos, Spot } from './types.ts';
+import type { Club, Game, Player, Pos, ShapeId, Spot } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 
@@ -63,38 +64,45 @@ function makeRaw(g: Game, pos: Pos, ovr: number, age: number, where: string, loc
   };
 }
 
-/** 구단의 전력에 맞는 주전 일곱 명을 만든다. */
+/** 선발 대형. 예전 저장에는 없어서 4-4-2로 본다. */
+export const formationOf = (g: Game): ShapeId => g.formation ?? '442';
+
+/** 선발 열한 자리의 줄. g.squad의 순서가 곧 자리다(대형의 자리 순서: 골키퍼, 수비, 미드필더, 공격). */
+export const linesOf = (g: Game): Pos[] => SLOTS[formationOf(g)].map((s) => s.line);
+
+/** i번 자리의 줄과 세부 자리(LB, CDM 같은). */
+export const lineAt = (g: Game, i: number): Pos => linesOf(g)[i] ?? 'MF';
+export const spotAt = (g: Game, i: number): Spot => slotSpot(SLOTS[formationOf(g)][i] ?? SLOTS[formationOf(g)][0]!);
+
+/** 구단의 전력에 맞는 선발 열한 명을 대형의 자리대로 만든다. */
 export function generateSquad(g: Game, club: Club, where: string): Player[] {
   const mid = (club.att + club.def) / 2;
-  return LINEUP.map((pos) => {
+  return linesOf(g).map((pos, i) => {
     const base = pos === 'FW' ? club.att + 1 : pos === 'MF' ? mid : club.def + 1;
-    return makePlayer(g, pos, base + spread(g, -4, 4), int(g, 19, 33), where, club.nation);
+    return makePlayer(g, pos, base + spread(g, -4, 4), int(g, 19, 33), where, club.nation, spotAt(g, i));
   });
 }
-
-/** 선발 일곱 자리의 포지션. g.squad의 순서가 곧 자리다. */
-export const lineAt = (i: number): Pos => (LINEUP[i] ?? 'MF') as Pos;
 
 /** 선발에서 이 선수가 맡은 줄. 선발이 아니면 본래 포지션. */
 export function lineOf(g: Game, p: Player): Pos {
   const i = g.squad.findIndex((q) => q.id === p.id);
-  return i >= 0 ? lineAt(i) : p.pos;
+  return i >= 0 ? lineAt(g, i) : p.pos;
 }
 
 /** 그 줄에서 내는 OVR. 자기 포지션이 아니면 깎인다. */
 export const effOvr = (p: Player, line: Pos): number => p.ovr + p.temp - posPenalty(p.spot, line);
 
-const avg = (players: Player[], pos: Pos): number => {
-  const list = players.map((p, i) => ({ p, line: lineAt(i) })).filter((x) => x.line === pos);
+const avg = (g: Game, pos: Pos): number => {
+  const list = g.squad.map((p, i) => ({ p, line: lineAt(g, i) })).filter((x) => x.line === pos);
   return list.reduce((sum, x) => sum + effOvr(x.p, x.line), 0) / Math.max(1, list.length);
 };
 
-/** 주전과 선수층에서 팀의 공격력과 수비력을 낸다. */
-export function ratings(squad: Player[], depth: number): { att: number; def: number; mid: number } {
-  const mid = avg(squad, 'MF');
+/** 선발과 선수층에서 팀의 공격력과 수비력을 낸다. 줄마다 평균을 쓰므로 대형이 달라도 같은 눈금이다. */
+export function ratings(g: Game, depth: number): { att: number; def: number; mid: number } {
+  const mid = avg(g, 'MF');
   return {
-    att: 0.55 * avg(squad, 'FW') + 0.25 * mid + 0.2 * depth,
-    def: 0.4 * avg(squad, 'DF') + 0.2 * avg(squad, 'GK') + 0.2 * mid + 0.2 * depth,
+    att: 0.55 * avg(g, 'FW') + 0.25 * mid + 0.2 * depth,
+    def: 0.4 * avg(g, 'DF') + 0.2 * avg(g, 'GK') + 0.2 * mid + 0.2 * depth,
     mid,
   };
 }
@@ -111,10 +119,11 @@ export function priceFor(g: Game, p: Player): number {
   return Math.round(valueOf(p, level, money) * (1 - g.manager.attrs.deal * 0.015) * 10) / 10;
 }
 
-/** 그 줄의 선발 중 가장 약한 선수(자리 기준). 선발 명단을 넘겨야 한다. */
-export function weakest(squad: Player[], pos: Pos): Player {
-  return squad.map((p, i) => ({ p, line: lineAt(i) })).filter((x) => x.line === pos)
-    .sort((a, b) => (a.p.ovr - posPenalty(a.p.spot, a.line)) - (b.p.ovr - posPenalty(b.p.spot, b.line)))[0]!.p;
+/** 그 줄의 선발 중 가장 약한 선수(자리 기준). 그 줄이 대형에 없으면(예: 공격수 없는 대형) 가장 약한 선발. */
+export function weakest(g: Game, pos: Pos): Player {
+  const all = g.squad.map((p, i) => ({ p, line: lineAt(g, i) }));
+  const same = all.filter((x) => x.line === pos);
+  return (same.length ? same : all).sort((a, b) => (a.p.ovr - posPenalty(a.p.spot, a.line)) - (b.p.ovr - posPenalty(b.p.spot, b.line)))[0]!.p;
 }
 
 /** 잠재력을 감독의 안목만큼만 알려 준다. */
@@ -128,7 +137,7 @@ export function potentialText(g: Game, p: Player): string {
 
 /** 새 선수를 주전에 넣고, 밀려난 선수를 돌려준다. */
 export function addPlayer(g: Game, player: Player): Player {
-  const out = weakest(g.squad, player.pos);
+  const out = weakest(g, player.pos);
   g.squad = g.squad.map((p) => (p.id === out.id ? player : p));
   return out;
 }
@@ -225,8 +234,8 @@ export function fillSlot(g: Game, out: Player, level: number, where: string): st
 export function shareGoals(g: Game, total: number): void {
   const weights = g.squad.map((p) => (p.pos === 'FW' ? 6 : p.pos === 'MF' ? 2.5 : p.pos === 'DF' ? 0.6 : 0) * (0.6 + (p.ovr + p.temp) / 100));
   const sum = weights.reduce((a, b) => a + b, 0);
-  // 주전 일곱 명이 팀 득점의 약 80%를 넣는다.
-  for (let i = 0; i < Math.round(total * 0.8); i++) {
+  // 선발 열한 명이 팀 득점의 약 85%를 넣는다.
+  for (let i = 0; i < Math.round(total * 0.85); i++) {
     let roll = rand(g) * sum;
     for (let k = 0; k < weights.length; k++) {
       roll -= weights[k] as number;

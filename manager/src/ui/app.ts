@@ -7,17 +7,15 @@ import { COUNTRIES, COUNTRY_IDS, countryOf, leaguesOf, quotaOf } from '../game/c
 import type { CountryId } from '../game/countries.ts';
 import { licenseName } from '../game/hiring.ts';
 import { ko } from '../game/josa.ts';
-import { effOvr, lineAt, potentialText, ratings, stage, valueOf } from '../game/squad.ts';
-import { formationBoard, formationMini, playerCard, playerRow, spotBadge } from './cards.ts';
+import { effOvr, formationOf, lineAt, potentialText, ratings, spotAt, stage, valueOf } from '../game/squad.ts';
+import { formationMini, playerCard, playerRow, spotBadge } from './cards.ts';
 import { face } from './face.ts';
-import type { BoardSpot } from './cards.ts';
 import { ESC_SLOTS, NON_HG_LIMIT, PROMISES, RESERVE_LIMIT, oddsText, quotaWord, contractText, depthOf, englandStatus, englandText, foreignCount, inEngland, isForeign, placeAt, promiseKept, quota, swapLineup, totalWages } from '../game/contract.ts';
-import { SLOTS, lineup } from '../game/live.ts';
+import { SLOTS } from '../game/live.ts';
 import { agenda } from '../game/agenda.ts';
 import { manage } from '../game/manage.ts';
 import { posPenalty } from '../game/player.ts';
-import type { Entrant } from '../game/live.ts';
-import { SHAPES, SHAPE_IDS, usualShape } from '../game/tactics.ts';
+import { SHAPES, SHAPE_IDS } from '../game/tactics.ts';
 import { legacyTitle } from '../game/talk.ts';
 import { dropCount, sortTable, zone } from '../game/world.ts';
 import { isLive, mountLive, onLiveClick, pauseLive, renderLive, unmountLive } from './live.ts';
@@ -653,21 +651,6 @@ function zoneNote(league: string): string {
   return `${meta.blurb}. ${top}${drop > 0 ? `, 아래 ${drop}팀은 강등` : ''}. 감독 자격: ${licenseName(meta.license, meta.country)}. ${quotaOf(league).note}.`;
 }
 
-/** 베스트 11: 선발 일곱에 후보 명단으로 남는 네 자리를 채운다. 실시간 경기와 같은 규칙이다. */
-function bestEleven(g: Game, shape: ShapeId): BoardSpot[] {
-  const entrant = (p: Player, key: number): Entrant => ({ name: p.name, pos: p.pos, ovr: p.ovr + p.temp, key, spot: p.spot, foot: p.foot, dev: p.dev, no: p.no });
-  const bench = [...g.reserves].sort((a, b) => b.ovr - a.ovr);
-  const eleven = lineup(shape, g.squad.map((p) => entrant(p, p.id)), (pos, spot) => {
-    const i = [bench.findIndex((r) => r.spot === spot), bench.findIndex((r) => r.pos === pos)].find((k) => k >= 0) ?? -1;
-    if (i >= 0) return entrant(bench.splice(i, 1)[0] as Player, -1);
-    return { name: '2군', pos, ovr: 0, key: -2, spot, foot: 'R', dev: [0, 0, 0, 0, 0, 0], no: 0 };
-  });
-  return eleven.map((p) => {
-    const slot = SLOTS[shape][p.slot]!;
-    return { x: slot.v / 68, y: 1 - slot.u / 80, no: p.n, name: p.name, keeper: p.line === 'GK', ghost: p.key === -2 };
-  });
-}
-
 /** 할 일 한 줄과 바로 처리하는 버튼들. */
 function todoItem(t: ReturnType<typeof agenda>[number]): string {
   return `<li class="todo__item todo__item--${t.tone}">
@@ -679,11 +662,11 @@ function todoItem(t: ReturnType<typeof agenda>[number]): string {
 function renderSquad(g: Game): string {
   if (!g.job) return '<p class="prose">아직 맡은 팀이 없다. 구직 화면에서 지원서를 낸다.</p>';
   const club = g.clubs[g.job.club] as Club;
-  const r = ratings(g.squad, depthOf(g));
+  const r = ratings(g, depthOf(g));
   const a = g.manager.attrs;
   const { level, money } = stage(g);
   const nation = club.nation;
-  const shape = usualShape(g.lastStyle ?? 'possess', 0);
+  const shape = formationOf(g);
   const extra = (p: Player): string[] => [
     ...(nation ? [] : [`계약|${contractText(g, p.contract)}`, `시장가|${won(valueOf(p, level, money))}`]),
     `성장|${potentialText(g, p)}`,
@@ -698,23 +681,27 @@ function renderSquad(g: Game): string {
   const items = agenda(g);
   const pickSlot = squadPick?.kind === 'slot' ? squadPick.at : -1;
   const pickRes = squadPick?.kind === 'res' ? squadPick.id : -1;
-  const target = pickSlot >= 0 ? lineAt(pickSlot) : null;
+  const target = pickSlot >= 0 ? lineAt(g, pickSlot) : null;
 
-  const slotCard = (p: Player, i: number): string => {
-    const line = lineAt(i);
+  // 선발 열한 명을 대형의 자리대로 세로 경기장 위에 세운다. 누르면 고르고, 다른 자리나 후보를 누르면 맞바꾼다.
+  const slotsNow = SLOTS[shape];
+  const token = (p: Player, i: number): string => {
+    const line = lineAt(g, i);
+    const sl = slotsNow[i]!;
     const pen = posPenalty(p.spot, line);
     const v = effOvr(p, line) + p.temp;
+    const x = 6 + (sl.v / 68) * 88;
+    const y = 94 - (sl.u / 80) * 88;
+    const fl = flags(p);
     const hint = pickRes >= 0 ? (() => {
-      const rp = g.reserves.find((x) => x.id === pickRes);
-      return rp ? `<span class="xi__hint">넣으면 ${effOvr(rp, line) + rp.temp}</span>` : '';
-    })() : pickSlot >= 0 && pickSlot !== i ? `<span class="xi__hint">맞바꾸기</span>` : '';
-    return `<button type="button" class="xi${i === pickSlot ? ' is-picked' : ''}${pen ? ' is-off' : ''}" data-lineup="s:${i}"${busy ? ' disabled' : ''}>
-      <span class="xi__line xi__line--${line}">${line}</span>
-      ${face(p.id, p.nat, 38, club.colors, p.name)}
-      <span class="xi__name">${esc(p.name)}</span>
-      <span class="xi__meta">${p.spot}${pen ? ` <b class="xi__pen">-${pen}</b>` : ''} · ${PROMISES[p.contract?.promise ?? 'rotation'].name}</span>
-      <span class="xi__ovr">${v}</span>
-      ${flags(p).length ? `<span class="xi__flags">${flags(p).map((f) => `<span class="tag tag--warn">${esc(f)}</span>`).join('')}</span>` : ''}
+      const rp = g.reserves.find((q) => q.id === pickRes);
+      return rp ? `<span class="xi-tok__hint">${effOvr(rp, line) + rp.temp}</span>` : '';
+    })() : '';
+    return `<button type="button" class="xi-tok${i === pickSlot ? ' is-picked' : ''}${pickSlot >= 0 && i !== pickSlot ? ' is-target' : ''}${pen ? ' is-off' : ''}${fl.length ? ' is-warn' : ''}" style="left:${x.toFixed(1)}%;top:${y.toFixed(1)}%" data-lineup="s:${i}"${busy ? ' disabled' : ''} aria-label="${esc(`${spotAt(g, i)} 자리 ${p.name} OVR ${v}${pen ? ` 포지션 밖 -${pen}` : ''}${fl.length ? ` ${fl.join(', ')}` : ''}`)}">
+      ${face(p.id, p.nat, 34, club.colors, p.name)}
+      <span class="xi-tok__ovr">${v}</span>
+      <span class="xi-tok__name">${esc(p.name.includes(' ') ? (p.nat === '일본' ? p.name.split(' ')[0] as string : p.name.split(' ').pop() as string) : p.name)}</span>
+      <span class="xi-tok__spot">${spotAt(g, i)}${pen ? ` <b>-${pen}</b>` : ''}</span>
       ${hint}
     </button>`;
   };
@@ -742,13 +729,23 @@ function renderSquad(g: Game): string {
       <h3 class="section__sub">할 일 ${items.length ? `<span class="muted">${items.length}건 · 버튼으로 바로 처리한다</span>` : ''}</h3>
       ${items.length ? `<ul class="todo__list todo__list--open">${items.map(todoItem).join('')}</ul>` : '<p class="muted">지금 챙길 일이 없다.</p>'}
 
-      <h3 class="section__sub">선발 7자리</h3>
+      <h3 class="section__sub">선발 11명 <span class="muted">${esc(SHAPES[shape].name)}</span></h3>
       <p class="fine">${busy ? '경기 중에는 바꿀 수 없다.' : squadPick ? '바꿀 상대(다른 자리나 아래 후보)를 누른다. 같은 칸을 다시 누르면 취소.' : '자리를 누르고, 바꿀 선수(다른 자리나 후보)를 누르면 맞바꾼다. 자기 포지션이 아니면 OVR이 깎인다(빨간 숫자).'}</p>
+      <div class="xi-actions" role="group" aria-label="대형">
+        ${SHAPE_IDS.map((id) => `<button type="button" class="chip${id === shape ? ' is-on' : ''}" data-todo="formation:${id}" aria-pressed="${id === shape}"${busy ? ' disabled' : ''}>${esc(SHAPES[id].name)}</button>`).join('')}
+      </div>
       <div class="xi-actions">
         <button type="button" class="chip chip--primary" data-todo="auto"${busy ? ' disabled' : ''}>가장 강한 배치로</button>
         ${squadPick ? '<button type="button" class="chip" data-lineup="clear">선택 취소</button>' : ''}
       </div>
-      <div class="xi-grid">${g.squad.map(slotCard).join('')}</div>
+      <div class="xi-pitch" role="group" aria-label="선발 11명">
+        <svg class="xi-pitch__lines" viewBox="0 0 68 86" preserveAspectRatio="none" aria-hidden="true">
+          <rect x="1" y="1" width="66" height="84" fill="none"/><line x1="1" y1="43" x2="67" y2="43"/><circle cx="34" cy="43" r="7"/>
+          <rect x="14" y="1" width="40" height="13" fill="none"/><rect x="14" y="72" width="40" height="13" fill="none"/>
+        </svg>
+        ${g.squad.map(token).join('')}
+      </div>
+      <p class="fine">경기마다 대형과 전술을 다시 고를 수 있다. 여기서 정한 대형은 선발의 자리와 포지션 감점(빨간 숫자)을 정한다.</p>
 
       ${nation ? '' : `
       <h3 class="section__sub">후보 ${g.reserves.length}/${RESERVE_LIMIT}${q.reg !== null || q.pitch !== null ? ` <span class="muted">${quotaWord(g)} 등록 ${foreignCount(g, [...g.squad, ...g.reserves])}${q.reg !== null ? `/${q.reg}` : ''} · 선발 ${foreignCount(g, g.squad)}/${q.pitch ?? '-'}</span>` : ''}${inEngland(g) ? ` <span class="muted">비홈그로운 ${englandStatus(g).nonHg}/${NON_HG_LIMIT} · ESC ${englandStatus(g).esc}/${ESC_SLOTS}</span>` : ''}</h3>
@@ -756,7 +753,6 @@ function renderSquad(g: Game): string {
       ${g.loaned.length ? `<p class="fine">임대 보낸 선수: ${g.loaned.map((p) => `${esc(p.name)}(${esc(p.loan!.club)}, ${p.loan!.until === 'winter' ? '겨울 복귀' : '시즌 끝 복귀'})`).join(', ')}</p>` : ''}
       <div class="xi-actions">${marketOpenNow(g) ? '<button type="button" class="chip" data-todo="market:mine">이적시장에서 판매 · 임대 · 해지</button><button type="button" class="chip" data-todo="market:sign">영입 후보 보기</button>' : '<span class="fine">영입, 판매, 임대, 재계약은 여름·겨울 이적시장에서 한다.</span>'}</div>`}
 
-      ${formationBoard(bestEleven(g, shape), club.colors, `베스트 11 · ${SHAPES[shape].name}(전술에 어울리는 기본 대형, 경기마다 바꿀 수 있다). 흐린 자리는 이름 없는 2군 선수다.`)}
       <details class="squad-more">
         <summary class="section__sub">선수 정보 자세히 보기(능력치, 계약, 성장)</summary>
         <ul class="plist">${[...g.squad, ...g.reserves].map((p) => playerRow(p, {

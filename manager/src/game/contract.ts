@@ -16,7 +16,7 @@ const round1 = (v: number): number => Math.round(v * 10) / 10;
 
 export const PROMISES: Record<PromiseId, { name: string; desc: string; rank: number }> = {
   star: { name: '핵심 선수', desc: '팀의 중심으로 늘 선발 출전', rank: 3 },
-  starter: { name: '주전', desc: '선발 일곱 명 안에 든다', rank: 2 },
+  starter: { name: '주전', desc: '선발 열한 명 안에 든다', rank: 2 },
   rotation: { name: '로테이션', desc: '선발과 후보를 오간다', rank: 1 },
   backup: { name: '백업', desc: '후보로 기회를 기다린다', rank: 0 },
 };
@@ -25,8 +25,8 @@ export const PROMISE_IDS: PromiseId[] = ['star', 'starter', 'rotation', 'backup'
 /** 아마추어 리그면 연봉이 없다. */
 export const amateur = (g: Game): boolean => !myClub(g).nation && myClub(g).league === 'kr5';
 
-/** 등록 선수 한도: 선발 일곱에 후보 아홉. */
-export const RESERVE_LIMIT = 9;
+/** 등록 선수 한도: 선발 열한에 후보 열둘(23명). */
+export const RESERVE_LIMIT = 12;
 
 /** 선수의 시장 연봉(백만 원, 한 시즌). */
 export function wageFor(g: Game, p: Player): number {
@@ -38,7 +38,7 @@ export function wageFor(g: Game, p: Player): number {
 
 /** 이 팀에 오면 기대하는 출전 시간. 지금 같은 포지션 주전들과 견준다. */
 export function expectedPromise(g: Game, p: Player): PromiseId {
-  const same = g.squad.filter((q, i) => lineAt(i) === p.pos && q.id !== p.id).map((q) => q.ovr);
+  const same = g.squad.filter((q, i) => lineAt(g, i) === p.pos && q.id !== p.id).map((q) => q.ovr);
   const best = same.length ? Math.max(...same) : 0;
   const worst = same.length ? Math.min(...same) : 0;
   if (p.ovr >= best + 2 && p.ovr >= stage(g).level + 2) return 'star';
@@ -75,7 +75,7 @@ export function totalWages(g: Game, except?: number): number {
 /** 한 시즌 연봉 예산. 구단의 재정 형편을 따른다. */
 export function wageBudgetFor(g: Game): number {
   if (amateur(g) || myClub(g).nation) return 0;
-  return round1(stage(g).money * 1.8 * (1 + myClub(g).wealth * 0.05));
+  return round1(stage(g).money * 2.6 * (1 + myClub(g).wealth * 0.05));
 }
 
 /** 선수가 처음 내놓는 요구. */
@@ -311,7 +311,7 @@ export function enforceQuota(g: Game): string[] {
   const lines: string[] = [];
   while (limit !== null && foreignCount(g, g.squad) > limit) {
     const at = g.squad.map((p, i) => ({ p, i })).filter((x) => isForeign(g, x.p)).sort((a, b) => a.p.ovr - b.p.ovr)[0]!;
-    const line = lineAt(at.i);
+    const line = lineAt(g, at.i);
     const sub = g.reserves.filter((r) => !isForeign(g, r) && !r.loan).sort((a, b) => (b.pos === line ? 5 : 0) + b.ovr - ((a.pos === line ? 5 : 0) + a.ovr))[0];
     if (sub) {
       placeAt(g, sub.id, at.i);
@@ -354,8 +354,8 @@ export const inEngland = (g: Game): boolean => !myClub(g).nation && countryOf(my
 export const GBE_NEED = 15;
 export const ESC_SLOTS = 4;
 export const ESC_MAX_AGE = 23;
-/** 홈그로운이 아닌 21세 이상 선수의 등록 한도. 25명 중 17명을 우리 등록 인원 16명에 맞춰 줄였다. */
-export const NON_HG_LIMIT = 11;
+/** 홈그로운이 아닌 21세 이상 선수의 등록 한도. 25명 중 17명을 우리 등록 인원 23명에 맞춰 줄였다. */
+export const NON_HG_LIMIT = 16;
 
 /** 잉글랜드 국적이 아니면 워크퍼밋이 필요하다. */
 export const needsPermit = (g: Game, p: Player): boolean => inEngland(g) && p.nat !== '잉글랜드';

@@ -8,11 +8,12 @@ import {
 } from './data.ts';
 import { eventById, pickEvent } from './events.ts';
 import { COUNTRIES, CONTI_NAME, CONTI_WEIGHT, countryOf, leaguesOf } from './countries.ts';
+import { autoLineup } from './manage.ts';
 import { actHiring, enroll, finishCourses, hiringScene, licenseName, openHiring, requiredLicense, startingLicense, courseStatus } from './hiring.ts';
 import type { Vacancy } from './types.ts';
 import { chance, int, pick, shuffle, spread } from './rng.ts';
 import {
-  departures, develop, generateSquad, makePlayer, myClub, ratings, shareGoals,
+  departures, develop, generateSquad, linesOf, makePlayer, myClub, ratings, shareGoals,
 } from './squad.ts';
 import { ensureDetail, guessNat } from './player.ts';
 import { assignNumber, checkPromises, depthOf, enforceQuota, existingContract, expireContracts, relegationCut, settle, totalWages, wageBudgetFor } from './contract.ts';
@@ -46,7 +47,7 @@ function blankSeason(): SeasonState {
   };
 }
 
-export const SAVE_VERSION = 8;
+export const SAVE_VERSION = 9;
 
 /**
  * 새 커리어. 감독은 출신에 따라 자격증을 가지고(없을 수도 있다) 구직부터 시작한다.
@@ -193,7 +194,7 @@ function beginSeason(g: Game): void {
     job.objective = 0;
   } else {
     const meta = LEAGUES[club.league]!;
-    const r = ratings(g.squad, depthOf(g));
+    const r = ratings(g, depthOf(g));
     club.att = r.att;
     club.def = r.def;
     const ids = g.leagues[club.league];
@@ -340,6 +341,12 @@ export function migrate(g: Game): boolean {
     migrateWorld(g);
     reopen = true;
   }
+  if (g.version === 8) {
+    // 선발이 일곱 명에서 열한 명이 됐다. 대형을 정하고, 후보에서 빈자리를 채우고(모자라면 새 선수), 가장 강한 배치로 세운다.
+    g.version = 9;
+    if (g.job) migrateEleven(g);
+    reopen = true;
+  }
   // 구단 유니폼 색이 새로 생기거나 바뀌었으면 저장된 구단에도 입힌다.
   const seeds = new Map(CLUB_LEAGUES.flatMap((l) => CLUB_SEEDS[l] ?? []).filter((x) => x.colors).map((x) => [x.name, x]));
   for (const c of g.clubs) {
@@ -386,6 +393,28 @@ function migrateWorld(g: Game): void {
   Object.assign(g.manager, { license: level, licensed, course: null, idle: 0, countries: job && !job.nation ? [countryOf(job.league)] : [] });
   g.hiring = null;
   if (g.phase === 'offers') enterCareer(g);
+}
+
+/** 버전 8 → 9: 선발 열한 명. */
+function migrateEleven(g: Game): void {
+  const club = myClub(g);
+  g.formation = usualShape(g.lastStyle ?? club.style, club.id);
+  const need = linesOf(g).length;
+  const pool = [...g.squad, ...g.reserves].filter((p) => !p.loan || p.loan.dir === 'in');
+  const where = club.nation ? 'kr1' : club.league;
+  // 모자란 줄부터 채운다: 대형에서 필요한 줄 수와 지금 있는 선수의 줄 수를 견준다.
+  const lines = linesOf(g);
+  while (pool.length < need + 3) {
+    const short = (['GK', 'DF', 'MF', 'FW'] as Pos[]).find((pos) => pool.filter((p) => p.pos === pos).length < lines.filter((l) => l === pos).length + (pos === 'GK' ? 1 : 0)) ?? 'MF';
+    const p = makePlayer(g, short, g.depth + spread(g, -1, 2), int(g, 20, 29), where, club.nation);
+    if (!club.nation) p.contract = existingContract(g, p, false, int(g, 1, 3));
+    assignNumber(g, p);
+    pool.push(p);
+    g.reserves.push(p);
+  }
+  g.squad = pool.slice(0, need);
+  g.reserves = pool.slice(need);
+  autoLineup(g);
 }
 
 function recordOf(lines: MatchLine[]): { w: number; d: number; l: number; text: string } {
@@ -898,12 +927,14 @@ function startJob(g: Game, v: Vacancy): void {
   }
   g.job = { kind: v.kind, club: club.id, confidence: clamp(50 + g.manager.attrs.deal / 2 + v.confidence, 20, 90), objective: 0, budget: 0, wageBudget: 0, debts: [], seasons: 0, promise: v.objective };
   g.loaned = [];
+  // 선발 대형은 구단이 해 오던 전술에 어울리는 것으로 시작한다. 구단 관리 탭에서 바꿀 수 있다.
+  g.formation = usualShape(club.style, club.id);
   g.squad = generateSquad(g, club, where);
   g.depth = (club.att + club.def) / 2 - 2;
   g.reserves = [];
   if (!club.nation) {
     // 후보 명단: 포지션마다 한 명씩, 스쿼드 뎁스 수준의 선수들.
-    for (const pos of ['GK', 'DF', 'MF', 'FW'] as Pos[]) g.reserves.push(makePlayer(g, pos, g.depth + spread(g, -2, 2), int(g, 18, 31), where));
+    for (const pos of ['GK', 'DF', 'DF', 'MF', 'MF', 'FW'] as Pos[]) g.reserves.push(makePlayer(g, pos, g.depth + spread(g, -2, 2), int(g, 18, 31), where));
     // 원래 있던 선수들은 대개 로테이션 계약이다. 가장 잘하는 두 명만 주전을 약속받았다.
     const top = [...g.squad].sort((a, b) => b.ovr - a.ovr).slice(0, 2);
     for (const p of g.squad) p.contract = existingContract(g, p, top.includes(p), int(g, 1, 4));

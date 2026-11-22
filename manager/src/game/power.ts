@@ -24,7 +24,7 @@ export const drilled = (g: Game): number => (g.cohesion / 100) * (1 + g.manager.
 /** 전술과 무관한 바탕 전력: 선수단, 사기, 훈련, 시즌 중 사건의 여파. mid는 미드필더 실력이다. */
 export function baseSide(g: Game, half: 1 | 2): Side & { mid: number } {
   const s = g.season;
-  const r = ratings(g.squad, depthOf(g));
+  const r = ratings(g, depthOf(g));
   const mood = (g.morale - 55) / 15;
   const fit = s.focus === 'fitness' && half === 2 ? 1 : 0;
   return {
@@ -35,7 +35,7 @@ export function baseSide(g: Game, half: 1 | 2): Side & { mid: number } {
 }
 
 /** 우리 미드필더가 이 무대의 평균보다 얼마나 좋은지. 압박과 점유의 싸움을 가른다. */
-export const midEdge = (g: Game): number => ratings(g.squad, depthOf(g)).mid - stage(g).level;
+export const midEdge = (g: Game): number => ratings(g, depthOf(g)).mid - stage(g).level;
 
 /**
  * 자동으로 진행되는 경기의 전력. 시즌 전에 고른 전술을 그대로 쓴다.

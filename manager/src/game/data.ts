@@ -144,8 +144,6 @@ export const BACKGROUNDS: Record<BackgroundId, { name: string; desc: string; bon
 export const BACKGROUND_IDS: BackgroundId[] = ['pro', 'teacher', 'analyst', 'scout', 'sales'];
 
 export const POS_NAME: Record<Pos, string> = { GK: '골키퍼', DF: '수비수', MF: '미드필더', FW: '공격수' };
-/** 주전 일곱 명의 구성. */
-export const LINEUP: Pos[] = ['GK', 'DF', 'DF', 'MF', 'MF', 'FW', 'FW'];
 
 export const TRAITS: Record<TraitId, { name: string; desc: string }> = {
   leader: { name: '리더', desc: '라커룸 분위기가 덜 흔들린다' },

@@ -625,11 +625,13 @@ export interface Game {
   round: number;
   job: Job | null;
   squad: Player[];
-  /** 후보 명단. 선발 일곱 명 밖의 등록 선수들. */
+  /** 후보 명단. 선발 열한 명 밖의 등록 선수들. */
   reserves: Player[];
   /** 다른 구단에 임대 보낸 선수들. 등록 인원에 세지 않는다. */
   loaned: Player[];
-  /** 주전 일곱 명을 뺀 나머지 선수층의 수준. */
+  /** 선발 열한 명의 대형. 자리마다의 줄(GK, DF, MF, FW)이 여기서 나온다. 예전 저장에는 없다. */
+  formation?: ShapeId;
+  /** 주전 열한 명을 뺀 나머지 선수층의 수준. */
   depth: number;
   morale: number;
   /** 전술 숙련도 0~100. 같은 전술을 오래 쓸수록 오른다. */

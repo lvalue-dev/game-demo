@@ -151,8 +151,8 @@ function choose(g: Game, dice: { rng: number }): string {
         return `view:${renew.id}`;
       }
       const best = w.list
-        .filter((d) => d.kind !== 'renew' && d.kind !== 'loan' && !visited.has(key(d.id)) && d.price * 1.1 <= g.job!.budget && d.player.ovr - weakest(g.squad, d.player.pos).ovr >= 2)
-        .sort((a, b) => (b.player.ovr - weakest(g.squad, b.player.pos).ovr) - (a.player.ovr - weakest(g.squad, a.player.pos).ovr))[0];
+        .filter((d) => d.kind !== 'renew' && d.kind !== 'loan' && !visited.has(key(d.id)) && d.price * 1.1 <= g.job!.budget && d.player.ovr - weakest(g, d.player.pos).ovr >= 2)
+        .sort((a, b) => (b.player.ovr - weakest(g, b.player.pos).ovr) - (a.player.ovr - weakest(g, a.player.pos).ovr))[0];
       if (best && w.signed < 2 && (w.kind === 'summer' || w.signed < 1)) {
         visited.add(key(best.id));
         return `view:${best.id}`;

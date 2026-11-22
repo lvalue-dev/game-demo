@@ -230,7 +230,7 @@ export const EVENTS: GameEvent[] = [
         {
           id: 'sign', label: '믿고 계약한다', detail: `예산 ${won(money(g) * 0.12)}`,
           run: (h) => {
-            const gemPlayer = makePlayer(h, weakest(h.squad, 'FW').ovr < weakest(h.squad, 'DF').ovr ? 'FW' : 'DF', level + 1, int(h, 19, 21), where);
+            const gemPlayer = makePlayer(h, weakest(h, 'FW').ovr < weakest(h, 'DF').ovr ? 'FW' : 'DF', level + 1, int(h, 19, 21), where);
             gemPlayer.pot = Math.min(99, gemPlayer.ovr + int(h, 8, 14) + Math.round(h.manager.attrs.eye / 3));
             const out = addPlayer(h, gemPlayer);
             return { text: ko`${gemPlayer.name}이 합류했다. ${gemPlayer.age}세, OVR ${gemPlayer.ovr}, ${potentialText(h, gemPlayer)}. ${out.name} 대신 주전으로 뛴다. 첫 훈련을 본 코치들이 서로 얼굴을 쳐다봤다.`, tone: 'good', effects: fx(h, { budget: -Math.min(h.job!.budget, money(h) * 0.12) }) };

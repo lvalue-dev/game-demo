@@ -95,7 +95,7 @@ export function agenda(g: Game): Todo[] {
     if (st.ok) todo.push({ text: `${licenseName(st.level)} 강습을 신청할 수 있다. 시즌이 끝나면 구직 화면에서 신청한다.`, tone: 'plain', where: '시즌 뒤 강습' });
   }
 
-  const off = g.squad.map((p, i) => ({ p, line: lineAt(i) })).filter((x) => posPenalty(x.p.spot, x.line) > 0);
+  const off = g.squad.map((p, i) => ({ p, line: lineAt(g, i) })).filter((x) => posPenalty(x.p.spot, x.line) > 0);
   if (off.length && g.phase !== 'match') todo.push({ text: `포지션 밖 기용: ${off.map((x) => `${x.p.name}(${x.p.spot}→${x.line}, OVR -${posPenalty(x.p.spot, x.line)})`).join(', ')}.`, tone: 'plain', where: '스쿼드 선발 배치', actions: [{ id: 'auto', label: '가장 강한 배치로' }] });
 
   const loanIn = everyone.filter((p) => p.loan?.dir === 'in');

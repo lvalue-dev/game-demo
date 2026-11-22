@@ -64,7 +64,7 @@ function candidate(g: Game, id: string, pos: Pos, tag: string): Deal {
   const { level, where } = stage(g);
   const nation = nationOf(g);
   const eye = (g.manager.attrs.eye - 6) / 4;
-  const current = weakest(g.squad, pos);
+  const current = weakest(g, pos);
   let ovr: number;
   let age: number;
   if (tag === '유망주') {
@@ -250,7 +250,7 @@ function blocker(g: Game, d: Deal): string | null {
   if (isForeign(g, d.player)) {
     if (q.reg !== null && foreignCount(g, all(g)) >= q.reg) return `${quotaWord(g)} 등록 한도(${q.reg}명)가 찼다`;
     if (q.pitch !== null && startsOnSign(d)) {
-      const out = weakest(g.squad, d.player.pos);
+      const out = weakest(g, d.player.pos);
       if (foreignCount(g, g.squad) - (isForeign(g, out) ? 1 : 0) + 1 > q.pitch) return `${quotaWord(g)} 선발 한도(${q.pitch}명)를 넘는다. 출전 보장을 로테이션 이하로 하거나 ${quotaWord(g)} 선발을 먼저 빼라`;
     }
   }
@@ -272,7 +272,7 @@ const vs = (offer: number, ask: number): Tone => (offer >= ask - 1e-9 ? 'good' :
 
 /** 협상 테이블 블록. */
 function dealBlock(g: Game, p: Player, note: string, side: string, rows: DealRow[], odds: number | null, oddsLabel: string, money: { label: string; value: string; tone?: Tone }[], compare = true): Block {
-  return { kind: 'deal', player: p, note, gain: compare ? p.ovr - weakest(g.squad, p.pos).ovr : undefined, side, rows, odds, oddsLabel, money };
+  return { kind: 'deal', player: p, note, gain: compare ? p.ovr - weakest(g, p.pos).ovr : undefined, side, rows, odds, oddsLabel, money };
 }
 
 const natText = (g: Game, p: Player): string => (isForeign(g, p) ? ` · ${quotaWord(g)}(${p.nat})` : inEngland(g) ? ` · ${p.nat} · ${englandText(g, p)}` : ` · ${p.nat}`);
@@ -319,7 +319,7 @@ function termsScene(g: Game, d: Deal, eyebrow: string): void {
     const why = blocker(g, d);
     g.scene = {
       eyebrow, title: dealLabel(d),
-      blocks: [{ kind: 'card', player: p, compare: weakest(g.squad, p.pos), note: `${d.tag} · ${potentialText(g, p)}` }],
+      blocks: [{ kind: 'card', player: p, compare: weakest(g, p.pos), note: `${d.tag} · ${potentialText(g, p)}` }],
       choices: [
         { id: 'submit', label: `${p.name} 발탁`, tone: 'primary', disabled: !!why, detail: why ?? '소집 명단에 넣는다' },
         { id: 'back', label: '목록으로' },
@@ -573,7 +573,7 @@ function listScene(g: Game, eyebrow: string): void {
   const card = (d: Deal): MarketCard => {
     const p = d.player;
     hide(`view:${d.id}`);
-    const gain = p.ovr - weakest(g.squad, p.pos).ovr;
+    const gain = p.ovr - weakest(g, p.pos).ovr;
     const why = d.kind === 'renew' ? null : blocker(g, d);
     const status = d.stage === 'terms' && d.kind === 'sign' ? { text: `이적료 ${won(d.fee)} 합의 · 개인 조건 협상 중`, tone: 'good' as const }
       : why ? { text: why, tone: 'bad' as const }
@@ -690,7 +690,7 @@ function sign(g: Game, d: Deal): void {
   const p = d.player;
   w.list = w.list.filter((x) => x.id !== d.id);
   if (nationOf(g)) {
-    const out = weakest(g.squad, p.pos);
+    const out = weakest(g, p.pos);
     g.squad = g.squad.map((q) => (q.id === out.id ? p : q));
     w.signed++;
     const line = ko`${p.name}이 처음 대표팀에 뽑혔다. ${out.name}은 명단에서 빠졌다.`;
@@ -729,7 +729,7 @@ function sign(g: Game, d: Deal): void {
   }
   assignNumber(g, p);
   if (startsOnSign(d)) {
-    const out = weakest(g.squad, p.pos);
+    const out = weakest(g, p.pos);
     g.squad = g.squad.map((q) => (q.id === out.id ? p : q));
     g.reserves.push(out);
     line += ko` 등번호 ${p.no}. 선발로 들어가고 ${out.name}은 후보로 밀려났다.`;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { act, createGame, legacyScore } from '../src/game/career.ts';
-import { CLUB_LEAGUES, CLUB_SEEDS, LEAGUES, LINEUP } from '../src/game/data.ts';
+import { CLUB_LEAGUES, CLUB_SEEDS, LEAGUES } from '../src/game/data.ts';
 import { rand } from '../src/game/rng.ts';
 import { roundRobin, sortTable } from '../src/game/world.ts';
 import type { Game } from '../src/game/types.ts';
@@ -101,7 +101,7 @@ test('끝까지 돌려도 상태가 망가지지 않는다', () => {
     const g = createGame(seed * 31 + 5, '봇', 'teacher');
     playOut(g, seed, (h) => {
       if (!h.job) return;
-      assert.equal(h.squad.length, LINEUP.length, '선발은 늘 일곱 명이다');
+      assert.equal(h.squad.length, 11, '선발은 늘 열한 명이다');
       assert.ok(h.job.confidence >= 0 && h.job.confidence <= 100);
       assert.ok(h.job.budget >= 0, `예산이 음수다: ${h.job.budget}`);
       assert.ok(h.morale >= 0 && h.morale <= 100 && h.cohesion >= 0 && h.cohesion <= 100);
@@ -416,7 +416,7 @@ test('계약: 만료 임박 선수와 재계약하거나, 못 하면 시즌 끝�
   }
   expireContracts(g, 50);
   assert.ok(!g.squad.includes(b), '재계약하지 않은 선수는 떠난다(보스만)');
-  assert.equal(g.squad.length, 7, '빈자리는 후보나 새 선수가 메운다');
+  assert.equal(g.squad.length, 11, '빈자리는 후보나 새 선수가 메운다');
 });
 
 test('바이아웃이 발동하면 구단은 막을 수 없고, 선수가 응하면 떠난다', async () => {
@@ -446,7 +446,7 @@ test('선수를 아무 자리에나 세울 수 있지만 포지션 밖이면 OVR
   while (g.phase === 'match') act(g, firstChoice(g));
   // 후보를 같은 포지션 선발 자리에
   const sub = g.reserves.find((r) => r.pos === 'MF')!;
-  const at = g.squad.findIndex((_, i) => lineAt(i) === 'MF');
+  const at = g.squad.findIndex((_, i) => lineAt(g, i) === 'MF');
   const starter = g.squad[at]!;
   starter.contract!.promise = 'star';
   assert.equal(placeAt(g, sub.id, at), null);
@@ -454,14 +454,14 @@ test('선수를 아무 자리에나 세울 수 있지만 포지션 밖이면 OVR
   const lines = checkPromises(g);
   assert.ok(starter.unhappy && lines.length >= 1, '핵심 선수로 약속한 선수를 빼면 불만');
   // 선발 공격수를 미드필더 자리로(선발끼리 맞바꿈)
-  const fwAt = g.squad.findIndex((_, i) => lineAt(i) === 'FW');
+  const fwAt = g.squad.findIndex((_, i) => lineAt(g, i) === 'FW');
   const fw = g.squad[fwAt]!;
-  const mfAt = g.squad.findIndex((_, i) => lineAt(i) === 'MF' && i !== at);
-  const before = ratings(g.squad, 30);
+  const mfAt = g.squad.findIndex((_, i) => lineAt(g, i) === 'MF' && i !== at);
+  const before = ratings(g, 30);
   assert.equal(placeAt(g, fw.id, mfAt), null);
   assert.equal(g.squad[mfAt], fw);
   assert.ok(effOvr(fw, 'MF') < fw.ovr + fw.temp, '포지션 밖이면 깎인다');
-  assert.notDeepEqual(ratings(g.squad, 30), before);
+  assert.notDeepEqual(ratings(g, 30), before);
   // 골키퍼를 공격수로 세우면 크게 깎인다
   const gk = g.squad[0]!;
   assert.ok(effOvr(gk, 'FW') <= gk.ovr - 25);
@@ -510,7 +510,7 @@ test('임대: 빌려 온 선수는 기간이 끝나면 돌아가고, 빌려준 �
     assert.equal(p.loan?.dir, 'in');
     returnLoans(g, 'end');
     assert.ok(![...g.squad, ...g.reserves].some((x) => x.id === p.id), '시즌 끝에 원 소속 구단으로 돌아간다');
-    assert.equal(g.squad.length, 7);
+    assert.equal(g.squad.length, 11);
   }
   // 임대 보내기
   const h = toMarket(3031);
@@ -569,7 +569,7 @@ test('이전 버전(3)의 저장도 불러와 이어 할 수 있다', async () =
   delete (old as unknown as Record<string, unknown>).window;
   (old as unknown as Record<string, unknown>).market = [];
   assert.ok(migrate(old));
-  assert.equal(old.version, 8);
+  assert.equal(old.version, 9);
   assert.ok(old.squad.every((p) => typeof p.nat === 'string'), '국적이 생긴다');
   assert.ok(old.squad.every((p) => p.no > 0), '등번호가 생긴다');
   assert.ok(old.squad.every((p) => p.spot && p.dev.length === 6));
@@ -625,7 +625,7 @@ test('워크퍼밋: GBE 점수가 모자라면 23세 이하만 ESC 슬롯으로 
   assert.equal(englandCheck(g, p).why, null);
 });
 
-test('홈그로운: 21세 이상 비홈그로운이 11명이면 더 등록할 수 없고, 21세 이하나 홈그로운은 된다', async () => {
+test('홈그로운: 21세 이상 비홈그로운이 한도(16명)에 차면 더 등록할 수 없고, 21세 이하나 홈그로운은 된다', async () => {
   const { englandCheck, NON_HG_LIMIT } = await import('../src/game/contract.ts');
   const g = toEngland(707);
   const everyone = [...g.squad, ...g.reserves];
@@ -656,8 +656,10 @@ test('이전 버전(6)의 저장도 불러오면 홈그로운과 ESC 표시가 �
     delete (p as unknown as Record<string, unknown>).esc;
   }
   assert.ok(migrate(old));
-  assert.equal(old.version, 8);
+  assert.equal(old.version, 9);
   assert.ok(old.squad.every((p) => typeof p.hg === 'boolean' && p.esc === false));
+  assert.equal(old.version, 9);
+  assert.equal(old.squad.length, 11, '예전 저장의 선발 일곱 명이 열한 명이 된다');
 });
 
 // ---------- 세계 리그와 감독 채용 ----------
@@ -814,7 +816,7 @@ test('이전 버전(7)의 저장: 잉글랜드 리그 이름이 바뀌고 새 �
   for (const k of ['license', 'licensed', 'course', 'idle', 'countries']) delete (old.manager as unknown as Record<string, unknown>)[k];
   delete (old as unknown as Record<string, unknown>).hiring;
   assert.ok(migrate(old));
-  assert.equal(old.version, 8);
+  assert.equal(old.version, 9);
   assert.equal(old.clubs[old.job!.club]!.league, 'eng1');
   for (const id of CLUB_LEAGUES) assert.ok(old.leagues[id]!.length > 0, `${id}가 생긴다`);
   assert.equal(old.manager.license, 4, '프리미어리그 감독은 Pro를 가진 것으로 본다');
@@ -881,18 +883,18 @@ test('구단 관리: 할 일 버튼으로 바로 처리한다(자동 배치, 선
   const { agenda } = await import('../src/game/agenda.ts');
   const { effOvr, lineAt } = await import('../src/game/squad.ts');
   const g = toMarket(5151);
-  const sum = (): number => g.squad.reduce((s, p, i) => s + effOvr(p, lineAt(i)), 0);
+  const sum = (): number => g.squad.reduce((s, p, i) => s + effOvr(p, lineAt(g, i)), 0);
   // 골키퍼를 공격수 자리에 세워 일부러 망가뜨린다.
   const gk = g.squad[0]!;
-  const fw = g.squad[6]!;
+  const fw = g.squad[10]!;
   g.squad[0] = fw;
-  g.squad[6] = gk;
+  g.squad[10] = gk;
   const broken = sum();
   assert.ok(agenda(g).some((t) => t.actions?.some((a) => a.id === 'auto')), '포지션 밖 기용이면 자동 배치 버튼이 있다');
   manage(g, 'auto');
   assert.ok(sum() > broken, '자동 배치가 선발을 더 강하게 만든다');
   assert.equal(g.squad[0]!.pos, 'GK', '골키퍼가 골키퍼 자리로 돌아간다');
-  assert.equal(g.squad.length, 7);
+  assert.equal(g.squad.length, 11);
   // 후보를 선발로.
   const r = g.reserves[0]!;
   manage(g, `up:${r.id}`);
@@ -905,4 +907,34 @@ test('구단 관리: 할 일 버튼으로 바로 처리한다(자동 배치, 선
   assert.equal(res.go, true);
   assert.equal(g.window!.view, `r${exp.id}`);
   assert.match(g.scene.title, /재계약/);
+});
+
+test('선발은 열한 명이고 대형을 따른다. 예전(8) 저장의 선발 일곱 명은 열한 명으로 늘어난다', async () => {
+  const { migrate } = await import('../src/game/career.ts');
+  const { manage } = await import('../src/game/manage.ts');
+  const { lineAt, linesOf } = await import('../src/game/squad.ts');
+  const g = toMarket(6262, false);
+  assert.equal(g.squad.length, 11);
+  assert.equal(linesOf(g).filter((l) => l === 'GK').length, 1);
+  assert.equal(g.squad[0]!.pos, 'GK');
+  // 대형을 바꾸면 자리의 줄이 바뀌고 다시 세운다.
+  manage(g, 'formation:352');
+  assert.equal(g.formation, '352');
+  assert.equal(linesOf(g).filter((l) => l === 'DF').length, 3);
+  assert.equal(g.squad.length, 11);
+  assert.equal(lineAt(g, 0), 'GK');
+  // 예전 저장: 선발 일곱 명(GK, DF, DF, MF, MF, FW, FW), 대형 없음.
+  const old = JSON.parse(JSON.stringify(g)) as Game;
+  old.version = 8;
+  delete (old as unknown as Record<string, unknown>).formation;
+  const keep = [old.squad.find((p) => p.pos === 'GK')!, ...old.squad.filter((p) => p.pos === 'DF').slice(0, 2), ...old.squad.filter((p) => p.pos === 'MF').slice(0, 2), ...old.squad.filter((p) => p.pos === 'FW').slice(0, 2)];
+  old.reserves = [...old.squad.filter((p) => !keep.includes(p)).slice(0, 2), ...old.reserves].slice(0, 6);
+  old.squad = keep;
+  assert.ok(migrate(old));
+  assert.equal(old.version, 9);
+  assert.ok(old.formation);
+  assert.equal(old.squad.length, 11);
+  assert.equal(old.squad[0]!.pos, 'GK');
+  const ids = [...old.squad, ...old.reserves].map((p) => p.id);
+  assert.equal(new Set(ids).size, ids.length, '같은 선수가 두 번 들어가지 않는다');
 });
