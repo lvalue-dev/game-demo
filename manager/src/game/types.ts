@@ -13,9 +13,12 @@ export type FocusId = 'attack' | 'defense' | 'fitness' | 'youth';
 export type PlanId = 'allout' | 'steady' | 'rotate';
 export type AttrId = 'tactics' | 'lead' | 'youth' | 'deal' | 'eye';
 export type BackgroundId = 'pro' | 'teacher' | 'analyst' | 'scout' | 'sales';
-export type ClubLeagueId = 'kr5' | 'kr4' | 'kr3' | 'kr2' | 'kr1' | 'eu2' | 'eu1';
+/** 클럽 리그 번호: 나라 앞글자와 단계(kr1, eng3, jpn5 …). 목록은 countries.ts. */
+export type ClubLeagueId = string;
 /** intl은 국가대표 대회의 조별 리그에 쓰는 임시 리그다. */
-export type LeagueId = ClubLeagueId | 'intl';
+export type LeagueId = string;
+/** 구단이 새 감독에게 바라는 것. 구인 공고와 면접 질문을 정한다. */
+export type WantId = 'results' | 'promotion' | 'survival' | 'youth' | 'budget' | 'attack' | 'defense';
 export type TraitId = 'leader' | 'glass' | 'clutch' | 'rebel' | 'grinder';
 export type Tone = 'good' | 'bad' | 'plain';
 
@@ -146,8 +149,51 @@ export interface Manager {
   /** 평판 0~100. 어느 구단이 불러 주는지를 정한다. */
   rep: number;
   peakRep: number;
-  /** 커리어를 시작한 무대. */
+  /** 이전 버전에서 고른 출발 무대. 지금은 쓰지 않는다. */
   start?: ClubLeagueId;
+  /** 감독 자격 단계(0 없음, 1 C급, 2 B급, 3 A급, 4 P급). */
+  license: number;
+  /** 단계마다 자격을 딴 해. 아직 못 땄으면 0. */
+  licensed: number[];
+  /** 듣고 있는 강습. ends 해의 시즌이 끝나면 자격이 나온다. */
+  course: { level: number; ends: number } | null;
+  /** 감독 자리 없이 보낸 시즌 수(유소년·아마추어 코치). */
+  idle: number;
+  /** 감독을 맡아 본 나라. 처음 가는 나라는 서류에서 불리하다. */
+  countries: string[];
+}
+
+/** 구인 공고 하나와 그 진행. */
+export interface Vacancy {
+  club: number;
+  kind: 'club' | 'nation';
+  /** 구단이 먼저 연락해 왔다. 서류 심사 없이 면접을 본다. */
+  approach: boolean;
+  wants: WantId[];
+  /** 한 단계 낮은 자격으로 지원한다. 뽑히면 강습 등록이 조건이다. */
+  provisional: boolean;
+  state: 'open' | 'applied' | 'short' | 'rejected' | 'offer' | 'failed';
+  /** 서류 점수와 그 내역, 면접 점수. */
+  doc: number;
+  docNotes: string[];
+  talk: number;
+  /** 면접에서 한 약속: 목표 순위 보정과 첫 신뢰 보정. */
+  objective: number;
+  confidence: number;
+  /** 결과 설명. */
+  note: string;
+}
+
+export interface Hiring {
+  step: 'browse' | 'review' | 'interview' | 'decide';
+  list: Vacancy[];
+  /** 면접 중인 공고(list 번호)와 질문들, 지금 질문 번호. */
+  talk: { at: number; qs: string[]; i: number } | null;
+  /** 지금 구단에 남을 수 있는지와, 없다면 그 이유. */
+  stay: boolean;
+  stayNote: string;
+  /** 이번에 강습에서 생긴 일. */
+  notes: string[];
 }
 
 export interface Job {
@@ -164,6 +210,8 @@ export interface Job {
   /** 분할 지급으로 남은 이적료. due 시즌이 시작될 때 이적 예산에서 나간다. */
   debts: { amount: number; due: number; what: string }[];
   seasons: number;
+  /** 면접에서 약속한 목표 보정(첫 시즌 목표 순위에 더한다). 음수면 더 높은 순위를 약속했다. */
+  promise?: number;
 }
 
 export type NationYear = 'asia' | 'q2' | 'q3' | 'wc' | 'friendly';
@@ -213,6 +261,8 @@ export interface SeasonRecord {
   cup: string;
   note: string;
   outcome: 'title' | 'up' | 'down' | 'sacked' | 'plain';
+  /** 리그 번호(대표팀은 intl). 예전 기록에는 없다. */
+  lid?: string;
 }
 
 export interface Offer {
@@ -287,6 +337,8 @@ export interface TransferWindow {
   /** 이번 시장에서 있었던 일. */
   log: string[];
   signed: number;
+  /** 이번 시장에 새로 데려온 비EU 선수 수(세리에 A 규정). */
+  nonEu?: number;
   sold: number;
   scouted: number;
   depthDone: boolean;
@@ -499,7 +551,7 @@ export interface Choice {
 }
 
 export type Phase =
-  | 'offers' | 'style' | 'focus' | 'market' | 'match' | 'half1' | 'event' | 'outcome'
+  | 'offers' | 'career' | 'style' | 'focus' | 'market' | 'match' | 'half1' | 'event' | 'outcome'
   | 'winter' | 'plan' | 'end' | 'growth' | 'retired';
 
 export interface Scene {
@@ -541,6 +593,8 @@ export interface Game {
   scene: Scene;
   eventId: string | null;
   offers: Offer[];
+  /** 감독 구직: 구인 공고, 지원, 면접. 시즌과 시즌 사이에만 있다. */
+  hiring: Hiring | null;
   window: TransferWindow | null;
   /** 다음 월드컵 본선 진출을 확정했는지. */
   wcTicket: boolean;

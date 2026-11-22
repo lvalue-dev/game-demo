@@ -1,8 +1,12 @@
 // 화면. 게임 규칙은 game/에 있고, 여기서는 game.scene을 그리고 누른 선택지를 act()에 넘긴다.
 import { act, createGame, legacyScore, migrate } from '../game/career.ts';
 import {
-  ATTRS, ATTR_IDS, BACKGROUNDS, BACKGROUND_IDS, CLUB_LEAGUES, LEAGUES, POS_NAME, STYLES, won,
+  ATTRS, ATTR_IDS, BACKGROUNDS, BACKGROUND_IDS, LEAGUES, POS_NAME, STYLES, won,
 } from '../game/data.ts';
+import { COUNTRIES, COUNTRY_IDS, countryOf, leaguesOf, quotaOf } from '../game/countries.ts';
+import type { CountryId } from '../game/countries.ts';
+import { licenseName } from '../game/hiring.ts';
+import { ko } from '../game/josa.ts';
 import { effOvr, lineAt, potentialText, ratings, stage, valueOf } from '../game/squad.ts';
 import { formationBoard, formationMini, playerCard, playerRow } from './cards.ts';
 import type { BoardSpot } from './cards.ts';
@@ -15,7 +19,7 @@ import { SHAPES, SHAPE_IDS, usualShape } from '../game/tactics.ts';
 import { legacyTitle } from '../game/talk.ts';
 import { dropCount, sortTable, zone } from '../game/world.ts';
 import { isLive, mountLive, onLiveClick, pauseLive, renderLive, unmountLive } from './live.ts';
-import type { BackgroundId, Block, Club, ClubLeagueId, FormRow, Game, LeagueId, MatchLine, Phase, Player, ShapeId } from '../game/types.ts';
+import type { BackgroundId, Block, Club, FormRow, Game, LeagueId, MatchLine, Phase, Player, ShapeId } from '../game/types.ts';
 
 type Tab = 'play' | 'table' | 'squad' | 'record';
 
@@ -44,7 +48,7 @@ let tableLeague: LeagueId | null = null;
 let confirmReset = false;
 /** 선발 배치가 거절됐을 때 잠깐 보여 줄 이유. */
 let notice: string | null = null;
-let draft: { name: string; background: BackgroundId; start: ClubLeagueId } = { name: '', background: 'pro', start: 'kr5' };
+let draft: { name: string; background: BackgroundId } = { name: '', background: 'pro' };
 
 const esc = (text: string | number): string => String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
@@ -104,7 +108,7 @@ export function start(data: { game?: unknown }): void {
 
 function begin(): void {
   const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) | 0;
-  game = createGame(seed, draft.name, draft.background, draft.start);
+  game = createGame(seed, draft.name, draft.background);
   tab = 'play';
   tableLeague = null;
   store(SAVE_KEY, game);
@@ -113,7 +117,7 @@ function begin(): void {
 }
 
 function onClick(e: Event): void {
-  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-start],[data-do],[data-live],[data-live-do],[data-step]');
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-country],[data-do],[data-live],[data-live-do],[data-step]');
   if (!el) return;
   if (el.dataset.step && el.dataset.for) {
     const slider = root.querySelector<HTMLInputElement>(`input[type="range"][data-range="${CSS.escape(el.dataset.for)}"]`);
@@ -127,11 +131,6 @@ function onClick(e: Event): void {
   if ((el.dataset.live || el.dataset.liveDo) && onLiveClick(el)) return;
   if (el.dataset.bg) {
     draft.background = el.dataset.bg as BackgroundId;
-    render();
-    return;
-  }
-  if (el.dataset.start) {
-    draft.start = el.dataset.start as ClubLeagueId;
     render();
     return;
   }
@@ -165,6 +164,11 @@ function onClick(e: Event): void {
     window.scrollTo(0, 0);
     return;
   }
+  if (el.dataset.country) {
+    tableLeague = el.dataset.country === 'intl' ? 'intl' : `${el.dataset.country}1`;
+    render();
+    return;
+  }
   if (el.dataset.league) {
     tableLeague = el.dataset.league as LeagueId;
     render();
@@ -175,7 +179,7 @@ function onClick(e: Event): void {
     const hall = load<HallEntry[]>(HALL_KEY) ?? [];
     const best = [...game.trophies].sort((a, b) => b.weight - a.weight)[0];
     hall.push({
-      name: game.manager.name, start: LEAGUES[game.manager.start ?? 'kr5'].short, score: legacyScore(game), title: legacyTitle(legacyScore(game)),
+      name: game.manager.name, start: game.history[0] ? `${game.history[0].club}(${game.history[0].league})` : '', score: legacyScore(game), title: legacyTitle(legacyScore(game)),
       years: `${game.history[0]?.year ?? game.year}–${game.year}`, best: best ? `${best.year} ${best.name}` : '트로피 없음',
     });
     store(HALL_KEY, hall.sort((a, b) => b.score - a.score).slice(0, 10));
@@ -236,23 +240,13 @@ function render(): void {
   }
 }
 
-const START_NOTE: Record<ClubLeagueId, string> = {
-  kr5: '동호인 리그부터 한 계단씩. 무급, 작은 예산, 가장 긴 성장 이야기',
-  kr4: '세미프로. 연봉이 생기고 외국인은 4명까지. 하위권 구단에서 시작한다',
-  kr3: '세미프로 최상위. K리그2 승격을 노린다. 하위권 구단에서 시작한다',
-  kr2: '프로 2부. 승격 경쟁이 가장 치열하다. 하위권 구단에서 시작한다',
-  kr1: '국내 최고 무대. 대륙 대회와 대표팀 제의가 가깝다. 하위권 구단에서 시작한다',
-  eu2: '잉글랜드 2부. 46경기, 워크퍼밋과 홈그로운 규정을 지켜야 한다. 하위권 구단에서 시작한다',
-  eu1: '세계 최고 리그. 강등권 구단에서 살아남는 것부터. 워크퍼밋과 홈그로운 규정',
-};
-
 function renderStart(): string {
   const hall = load<HallEntry[]>(HALL_KEY) ?? [];
   return `
     <header class="board board--start">
       <p class="board__kicker">감독 커리어 시뮬레이션</p>
       <h1 class="brand">터치라인</h1>
-      <p class="board__lede">K5 동호인 팀에서 K리그와 프리미어리그를 거쳐 월드컵 결승 벤치까지. 한 시즌에 열 번쯤 결정하고, 서른 시즌이 지나면 은퇴한다.</p>
+      <p class="board__lede">자격증 하나로 시작해 동호인 리그에서 K리그, J리그, 유럽 5대 리그를 거쳐 월드컵 결승 벤치까지. 7개국 35개 리그, 실제 구단 600여 곳. 서른 시즌이 지나면 은퇴한다.</p>
     </header>
     <main class="page">
       <form class="create" autocomplete="off">
@@ -270,16 +264,10 @@ function renderStart(): string {
               </button>`).join('')}
           </div>
         </fieldset>
-        <fieldset class="field">
-          <legend class="field__label">어디서 시작할까요?</legend>
-          <div class="choices">
-            ${CLUB_LEAGUES.map((id) => `
-              <button type="button" class="choice${draft.start === id ? ' is-picked' : ''}" data-start="${id}" aria-pressed="${draft.start === id}">
-                <span class="choice__label">${esc(LEAGUES[id].name)}${id === 'kr5' ? ' · 기본' : ''}</span>
-                <span class="choice__detail">${esc(START_NOTE[id])}</span>
-              </button>`).join('')}
-          </div>
-        </fieldset>
+        <section class="field">
+          <p class="field__label">감독이 되는 길</p>
+          <p class="prose">처음에는 맡은 팀이 없다. 지도자 강습으로 자격증을 따고, 구인 공고에 지원서를 내고, 서류를 통과하면 면접을 본다. 리그마다 필요한 자격이 다르다: K5리그는 C급, K3는 A급, K리그와 유럽 1부는 P급(UEFA Pro)이다. 한국, 일본, 잉글랜드, 스페인, 독일, 이탈리아, 프랑스의 5부까지 어디든 지원할 수 있다.</p>
+        </section>
         <button type="submit" class="choice choice--primary choice--solo"><span class="choice__label">커리어 시작</span></button>
       </form>
       <section class="section">
@@ -293,14 +281,14 @@ function renderStart(): string {
           <li class="hall__row"><span class="hall__score">${h.score}</span><span class="hall__body"><strong>${esc(h.name)}</strong> · ${esc(h.title)}${h.start ? ` · ${esc(h.start)} 출발` : ''}<br><span class="muted">${esc(h.years)} · ${esc(h.best)}</span></span></li>`).join('')}
         </ol>
       </section>` : ''}
-      <p class="fine">K리그와 잉글랜드 리그의 구단은 2026년 실제 구성을 따랐다. 어느 구단이나 리그와도 공식 제휴한 것이 아니며, 문장은 실제 엠블럼이 아니라 팀 색으로 직접 그린 것이다. K5리그는 2026 시즌 서울 디비전의 실제 팀이다. 게임 속 성적, 사건, 기사, 댓글과 선수, 매체 이름은 모두 지어낸 것이다.</p>
+      <p class="fine">리그와 구단은 2026-27 시즌 실제 구성을 따랐다(한국 리그는 2026 시즌, 하부 리그는 한 권역만). 명단은 위키백과에서 모았고, 한국어 문서가 없는 구단은 원어 이름으로 적었다. 어느 구단이나 리그와도 공식 제휴한 것이 아니며, 문장은 실제 엠블럼이 아니라 팀 색으로 직접 그린 것이다. 구단의 전력과 게임 속 성적, 사건, 기사, 댓글과 선수, 매체 이름은 모두 지어낸 것이다.</p>
       <p class="fine">진행 상황은 이 기기의 브라우저에 저장된다.</p>
     </main>`;
 }
 
 function renderGame(g: Game): string {
   const club = g.job ? (g.clubs[g.job.club] as Club) : null;
-  const meta = club && !club.nation ? LEAGUES[club.league as ClubLeagueId] : null;
+  const meta = club && !club.nation ? LEAGUES[club.league]! : null;
   const where = club ? (meta ? (meta.short === meta.name || meta.name.startsWith(meta.short) ? meta.name : `${meta.name} · ${meta.short}`) : '국가대표팀') : '무소속';
   const step = g.phase === 'match' ? (g.season.half === 1 ? 3 : 6) : STEPS.findIndex((s) => s.phases.includes(g.phase));
   return `
@@ -361,7 +349,6 @@ function renderScene(g: Game): string {
             ${g.phase === 'match' && g.match?.step === 'shape' && SHAPE_IDS.includes(c.id as ShapeId) ? miniFor(c.id as ShapeId) : ''}
             <span class="choice__label">${esc(c.label)}</span>
             ${c.detail ? `<span class="choice__detail">${esc(c.detail)}</span>` : ''}
-            ${c.disabled ? '<span class="choice__detail">예산이 모자란다</span>' : ''}
           </button>`).join('')}
       </div>
     </article>`;
@@ -501,26 +488,32 @@ function previewRange(el: HTMLInputElement): void {
 
 function renderTables(g: Game): string {
   const club = g.job ? (g.clubs[g.job.club] as Club) : null;
-  const options: LeagueId[] = [...(g.tables.intl.length > 0 && club?.nation ? ['intl' as LeagueId] : []), ...[...CLUB_LEAGUES].reverse()];
-  const current = tableLeague && options.includes(tableLeague) ? tableLeague : club ? (club.league as LeagueId) : 'kr5';
-  const label = (id: LeagueId): string => (id === 'intl' ? '대표팀 조' : LEAGUES[id].short);
+  const hasIntl = g.tables.intl.length > 0 && !!club?.nation;
+  const fallback = club && !club.nation ? club.league : hasIntl ? 'intl' : 'kr5';
+  const current: LeagueId = tableLeague && (tableLeague === 'intl' ? hasIntl : !!LEAGUES[tableLeague]) ? tableLeague : fallback;
+  const country = current === 'intl' ? 'intl' : countryOf(current);
+  const countries = [...(hasIntl ? ['intl'] : []), ...COUNTRY_IDS];
+  const tiers = country === 'intl' ? [] : leaguesOf(country as CountryId);
   return `
     <section class="section">
       <p class="eyebrow">${g.year} 시즌${g.round === 0 ? ' · 개막 전' : g.round === 1 ? ' · 전반기 종료' : ' · 시즌 종료'}</p>
-      <h2 class="scene__title">${current === 'intl' ? '대표팀 조별 순위' : esc(LEAGUES[current as ClubLeagueId].name)}</h2>
-      <div class="chips" role="group" aria-label="리그 고르기">
-        ${options.map((id) => `<button type="button" class="chip${id === current ? ' is-on' : ''}" data-league="${id}" aria-pressed="${id === current}">${esc(label(id))}</button>`).join('')}
+      <h2 class="scene__title">${current === 'intl' ? '대표팀 조별 순위' : esc(LEAGUES[current]!.name)}</h2>
+      <div class="chips" role="group" aria-label="나라 고르기">
+        ${countries.map((id) => `<button type="button" class="chip${id === country ? ' is-on' : ''}" data-country="${id}" aria-pressed="${id === country}">${esc(id === 'intl' ? '대표팀' : COUNTRIES[id as CountryId].name)}</button>`).join('')}
       </div>
+      ${tiers.length ? `<div class="chips" role="group" aria-label="리그 고르기">
+        ${tiers.map((id) => `<button type="button" class="chip${id === current ? ' is-on' : ''}" data-league="${id}" aria-pressed="${id === current}">${esc(`${LEAGUES[id]!.tier}부 ${LEAGUES[id]!.short}`)}</button>`).join('')}
+      </div>` : ''}
       ${renderTable(g, current)}
-      ${current !== 'intl' ? `<p class="fine">${esc(zoneNote(current as ClubLeagueId))}</p>` : ''}
+      ${current !== 'intl' ? `<p class="fine">${esc(zoneNote(current))}</p>` : ''}
     </section>`;
 }
 
-function zoneNote(league: ClubLeagueId): string {
-  const meta = LEAGUES[league];
-  const top = meta.promote > 0 ? `위 ${meta.promote}팀은 ${LEAGUES[meta.up as ClubLeagueId].name}로 승격` : `위 ${meta.conti}팀은 다음 시즌 대륙 대회 진출`;
+function zoneNote(league: string): string {
+  const meta = LEAGUES[league]!;
+  const top = meta.up ? ko`위 ${meta.promote}팀은 ${LEAGUES[meta.up]!.name}로 승격` : `위 ${meta.conti}팀은 다음 시즌 대륙 대회 진출`;
   const drop = dropCount(league);
-  return `${meta.blurb}. ${top}${drop > 0 ? `, 아래 ${drop}팀은 강등` : ''}.`;
+  return `${meta.blurb}. ${top}${drop > 0 ? `, 아래 ${drop}팀은 강등` : ''}. 감독 자격: ${licenseName(meta.license, meta.country)}. ${quotaOf(league).note}.`;
 }
 
 /** 베스트 11: 선발 일곱에 후보 명단으로 남는 네 자리를 채운다. 실시간 경기와 같은 규칙이다. */
@@ -549,7 +542,7 @@ function renderSquad(g: Game): string {
   const extra = (p: Player): string[] => [
     ...(nation ? [] : [`계약|${contractText(g, p.contract)}`, `시장가|${won(valueOf(p, level, money))}`]),
     `성장|${potentialText(g, p)}`,
-    ...(inEngland(g) ? [`잉글랜드 규정|${p.nat} · ${englandText(g, p)}`] : p.nat !== '대한민국' ? [`국적|${p.nat}`] : []),
+    ...(inEngland(g) ? [`잉글랜드 규정|${p.nat} · ${englandText(g, p)}`] : p.nat !== localNat(g) ? [`국적|${p.nat}${isForeign(g, p) ? ' · 쿼터에 든다' : ''}`] : []),
     `이번 시즌|${p.goals}골 · 팀에서 ${p.years + 1}번째 시즌${p.homegrown ? ' · 유스 출신' : ''}`,
   ];
   const flag = (p: Player): string | undefined => [p.unhappy ? '불만' : '', p.contract && p.contract.years <= 1 && !p.loan ? '계약 만료 임박' : '', p.loan?.dir === 'in' ? `임대(${p.loan.club})` : '', isForeign(g, p) ? '외국인' : ''].filter(Boolean).join(' · ') || undefined;
@@ -612,6 +605,9 @@ function renderSquad(g: Game): string {
     </section>`;
 }
 
+/** 맡은 팀 나라의 국적. */
+const localNat = (g: Game): string => (g.job && !(g.clubs[g.job.club] as Club).nation ? COUNTRIES[countryOf((g.clubs[g.job.club] as Club).league)].name : '대한민국');
+
 function renderRecord(g: Game): string {
   return `
     <section class="section">
@@ -622,6 +618,8 @@ function renderRecord(g: Game): string {
         <div class="stats__row"><dt>트로피</dt><dd>${g.trophies.length}개</dd></div>
         <div class="stats__row"><dt>승격</dt><dd>${g.promotions}회</dd></div>
         <div class="stats__row"><dt>최고 명성</dt><dd>${Math.round(g.manager.peakRep)}</dd></div>
+        <div class="stats__row"><dt>지도자 자격</dt><dd>${esc(licenseName(g.manager.license))}${g.manager.course ? ` · ${esc(licenseName(g.manager.course.level))} 강습 중` : ''}</dd></div>
+        ${g.manager.idle ? `<div class="stats__row"><dt>감독 자리 없이</dt><dd>${g.manager.idle}시즌(코치)</dd></div>` : ''}
       </dl>
       ${g.trophies.length > 0 ? `<ul class="trophies">${g.trophies.map((t) => `<li><span class="trophies__year">${t.year}</span> ${esc(t.club)} · ${esc(t.name)}</li>`).join('')}</ul>` : ''}
     </section>

@@ -6,6 +6,8 @@
 // - 계약금(서명 보너스), 에이전트 수수료, 셀온 조항.
 import { ko } from './josa.ts';
 import { LEAGUES, won } from './data.ts';
+import { COUNTRIES, EU, ITALY_NON_EU_SIGNINGS, countryOf, quotaOf } from './countries.ts';
+import type { Quota } from './countries.ts';
 import { fillSlot, lineAt, myClub, stage, valueOf } from './squad.ts';
 import type { ClubLeagueId, Contract, Deal, Game, Player, PromiseId, Spot, Terms } from './types.ts';
 
@@ -218,14 +220,14 @@ export function contractText(g: Game, c: Contract | null): string {
 export function expireContracts(g: Game, nextLevel: number): string[] {
   if (myClub(g).nation) return [];
   const lines: string[] = [];
-  const { region } = stage(g);
+  const { where } = stage(g);
   for (const p of [...g.squad, ...g.reserves]) {
     if (!p.contract) continue;
     if (p.unhappy && promiseKept(g, p)) p.unhappy = false;
     p.contract.years -= 1;
     if (p.contract.years > 0) continue;
     if (g.squad.includes(p)) {
-      lines.push(ko`${p.name}의 계약이 끝났다. 이적료 없이 자유계약으로 떠났다. ${fillSlot(g, p, nextLevel, region)}`);
+      lines.push(ko`${p.name}의 계약이 끝났다. 이적료 없이 자유계약으로 떠났다. ${fillSlot(g, p, nextLevel, where)}`);
     } else {
       g.reserves = g.reserves.filter((q) => q.id !== p.id);
       lines.push(ko`후보 ${p.name}의 계약이 끝나 팀을 떠났다.`);
@@ -272,26 +274,29 @@ export function placeAt(g: Game, id: number, at: number): string | null {
 
 // ---------- 외국인 쿼터 ----------
 
-/**
- * 리그별 외국인 한도. reg는 등록, pitch는 선발(동시 출전). null은 제한 없음.
- * K리그1·2는 2026 시즌부터 보유 한도가 없고 동시 출전은 5명, 4명이다. K4는 2025 시즌 기준 보유·출전 4명이고,
- * K3도 같게 두었다(원문 미확인). K5는 게임용 규칙이다. 잉글랜드에는 외국인 쿼터가 없다.
- */
-const QUOTA: Record<ClubLeagueId, { reg: number | null; pitch: number | null }> = {
-  kr5: { reg: 3, pitch: 3 }, kr4: { reg: 4, pitch: 4 }, kr3: { reg: 4, pitch: 4 }, kr2: { reg: null, pitch: 4 }, kr1: { reg: null, pitch: 5 },
-  eu2: { reg: null, pitch: null }, eu1: { reg: null, pitch: null },
-};
-
-export function quota(g: Game): { reg: number | null; pitch: number | null } {
+/** 지금 리그의 외국인 규정(countries.ts). 국가대표는 없다. */
+export function quota(g: Game): Quota {
   const club = myClub(g);
-  return club.nation ? { reg: null, pitch: null } : QUOTA[club.league as ClubLeagueId];
+  return club.nation ? { basis: 'foreign', reg: null, pitch: null, exempt: new Set(), note: '' } : quotaOf(club.league);
 }
 
-/** 쿼터에 세는 외국인인지. 국내 리그에서만 센다. */
+/** 규정에서 세는 선수를 부르는 말: 외국인 또는 비EU. */
+export const quotaWord = (g: Game): string => (quota(g).basis === 'noneu' ? '비EU' : '외국인');
+
+/** 쿼터에 세는 선수인지: 그 나라 국적이 아니고, 면제 국적이 아니며, 비EU 규정이면 EU 밖 국적. */
 export function isForeign(g: Game, p: Player): boolean {
   const club = myClub(g);
-  return !club.nation && LEAGUES[club.league as ClubLeagueId].region === 'kr' && p.nat !== '대한민국';
+  if (club.nation) return false;
+  const q = quotaOf(club.league);
+  if (p.nat === COUNTRIES[countryOf(club.league)].name || q.exempt.has(p.nat)) return false;
+  return q.basis === 'noneu' ? !EU.has(p.nat) : true;
 }
+
+/** 해외에서 새로 데려오는 비EU 선수 한도(세리에 A, 여름 시장). 없으면 null. */
+export const nonEuSigningLimit = (g: Game): number | null => (!myClub(g).nation && myClub(g).league === 'ita1' ? ITALY_NON_EU_SIGNINGS : null);
+
+/** 비EU 국적인지(이탈리아 국적과 EU 국적이 아니면). */
+export const nonEu = (p: Player): boolean => p.nat !== '이탈리아' && !EU.has(p.nat);
 
 export const foreignCount = (g: Game, list: Player[]): number => list.filter((p) => isForeign(g, p)).length;
 
@@ -308,10 +313,10 @@ export function enforceQuota(g: Game): string[] {
     const sub = g.reserves.filter((r) => !isForeign(g, r) && !r.loan).sort((a, b) => (b.pos === line ? 5 : 0) + b.ovr - ((a.pos === line ? 5 : 0) + a.ovr))[0];
     if (sub) {
       placeAt(g, sub.id, at.i);
-      lines.push(ko`외국인 선발 한도(${limit}명) 때문에 ${at.p.name} 대신 ${sub.name}이 선발로 나선다.`);
+      lines.push(ko`${quotaWord(g)} 선발 한도(${limit}명) 때문에 ${at.p.name} 대신 ${sub.name}이 선발로 나선다.`);
     } else {
-      const { level, region } = stage(g);
-      lines.push(ko`외국인 선발 한도(${limit}명) 때문에 ${at.p.name}이 빠졌다. ${fillSlot(g, at.p, level - 2, region)}`);
+      const { level, where } = stage(g);
+      lines.push(ko`${quotaWord(g)} 선발 한도(${limit}명) 때문에 ${at.p.name}이 빠졌다. ${fillSlot(g, at.p, level - 2, where)}`);
       if (!g.reserves.includes(at.p)) g.reserves.push(at.p);
       settle(g);
     }
@@ -340,8 +345,8 @@ export function relegationCut(g: Game, league: ClubLeagueId): string | null {
 
 // ---------- 잉글랜드: 워크퍼밋과 홈그로운 ----------
 
-/** 잉글랜드 리그(프리미어리그, 챔피언십)를 맡고 있는지. */
-export const inEngland = (g: Game): boolean => !myClub(g).nation && (myClub(g).league === 'eu1' || myClub(g).league === 'eu2');
+/** 잉글랜드 리그를 맡고 있는지. */
+export const inEngland = (g: Game): boolean => !myClub(g).nation && countryOf(myClub(g).league) === 'eng';
 
 /** 워크퍼밋에 필요한 GBE 점수와 ESC 예외 슬롯. 실제 규정을 게임에 맞게 줄였다(RULES.md). */
 export const GBE_NEED = 15;

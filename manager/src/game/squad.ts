@@ -1,9 +1,10 @@
 // 선수단: 주전 일곱 명과 그 밖의 선수층. 선수는 나이에 따라 크고 지며, 너무 잘하면 큰 구단이 데려간다.
 import { ko } from './josa.ts';
 import { LEAGUES, LINEUP, TRAIT_IDS, foreignName, koreanName, won } from './data.ts';
+import { COUNTRIES, FOREIGN_POOL, countryOf, foreignShare, nativeName } from './countries.ts';
 import { chance, int, pick, rand, spread } from './rng.ts';
-import { NATIONS_EU, NATIONS_KR, makeDetail, posPenalty } from './player.ts';
-import type { Club, ClubLeagueId, Game, Player, Pos, Spot } from './types.ts';
+import { makeDetail, posPenalty } from './player.ts';
+import type { Club, Game, Player, Pos, Spot } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 
@@ -11,41 +12,63 @@ export function myClub(g: Game): Club {
   return g.clubs[g.job!.club] as Club;
 }
 
-/** 감독이 맡은 팀이 속한 무대의 수준과 돈 단위. 국가대표는 국내 1부의 돈 단위를 빌려 쓴다. */
-export function stage(g: Game): { level: number; money: number; region: 'kr' | 'eu' } {
+/**
+ * 감독이 맡은 팀이 속한 무대의 수준과 돈 단위, 리그 번호(where). 선수를 만들 때 국적 비율을 정한다.
+ * 국가대표는 국내 1부의 돈 단위를 빌려 쓴다.
+ */
+export function stage(g: Game): { level: number; money: number; where: string } {
   const club = myClub(g);
-  if (club.nation) return { level: (club.att + club.def) / 2, money: LEAGUES.kr1.money, region: 'kr' };
-  const meta = LEAGUES[club.league as ClubLeagueId];
-  return { level: meta.level, money: meta.money, region: meta.region };
+  if (club.nation) return { level: (club.att + club.def) / 2, money: LEAGUES.kr1!.money, where: 'kr1' };
+  const meta = LEAGUES[club.league]!;
+  return { level: meta.level, money: meta.money, where: club.league };
 }
 
-export function makePlayer(g: Game, pos: Pos, ovr: number, age: number, region: 'kr' | 'eu', korean = false, spot?: Spot): Player {
-  const p = makeRaw(g, pos, ovr, age, region, korean, spot);
+/** 국적에 맞는 이름. */
+export function nameFor(g: Game, nat: string): string {
+  if (nat === '대한민국') return koreanName(rand(g), rand(g), rand(g));
+  return nativeName(nat, rand(g), rand(g)) ?? foreignName(rand(g), rand(g));
+}
+
+/** where 리그에서 뛰는 선수 한 명. local이면 그 나라 국적이다(유스 출신, 대표팀). */
+export function makePlayer(g: Game, pos: Pos, ovr: number, age: number, where: string, local = false, spot?: Spot): Player {
+  const p = makeRaw(g, pos, ovr, age, where, local, spot);
   // 잉글랜드 선수는 대개 홈그로운이고, 외국 선수도 어릴 때 건너와 잉글랜드 유스를 거친 경우가 있다.
-  if (region === 'eu') p.hg = p.nat === '잉글랜드' ? chance(g, 0.9) : chance(g, 0.12);
+  if (countryOf(where) === 'eng') p.hg = p.nat === '잉글랜드' ? chance(g, 0.9) : chance(g, 0.12);
   return p;
 }
 
-function makeRaw(g: Game, pos: Pos, ovr: number, age: number, region: 'kr' | 'eu', korean: boolean, spot?: Spot): Player {
-  const foreign = !korean && (region === 'eu' ? chance(g, 0.95) : chance(g, 0.12));
-  const name = foreign ? foreignName(rand(g), rand(g)) : koreanName(rand(g), rand(g), rand(g));
+/** where 리그의 외국인 선수 국적 하나. */
+export function foreignNat(g: Game, where: string): string {
+  const country = COUNTRIES[countryOf(where)];
+  return pick(g, FOREIGN_POOL[country.confed].filter((n) => n !== country.name));
+}
+
+/** where 리그의 선수 국적 하나(그 리그의 외국인 비율대로). */
+export function randomNat(g: Game, where: string): string {
+  return chance(g, foreignShare(where)) ? foreignNat(g, where) : COUNTRIES[countryOf(where)].name;
+}
+
+function makeRaw(g: Game, pos: Pos, ovr: number, age: number, where: string, local: boolean, spot?: Spot): Player {
+  const foreign = !local && chance(g, foreignShare(where));
+  const nat = foreign ? foreignNat(g, where) : COUNTRIES[countryOf(where)].name;
+  const name = nameFor(g, nat);
   const room = age <= 19 ? int(g, 6, 20) : age <= 21 ? int(g, 3, 14) : age <= 24 ? int(g, 0, 7) : 0;
   const value = Math.round(ovr);
   return {
     id: g.nextId++, name, pos, age, ovr: value, pot: Math.min(99, value + room),
     trait: chance(g, 0.35) ? pick(g, TRAIT_IDS) : null, years: 0, goals: 0, temp: 0, homegrown: false,
     ...makeDetail(g, pos, spot), no: 0, contract: null, unhappy: false, loan: null,
-    nat: foreign ? pick(g, region === 'eu' ? NATIONS_EU : NATIONS_KR) : '대한민국',
+    nat,
     hg: false, esc: false,
   };
 }
 
 /** 구단의 전력에 맞는 주전 일곱 명을 만든다. */
-export function generateSquad(g: Game, club: Club, region: 'kr' | 'eu'): Player[] {
+export function generateSquad(g: Game, club: Club, where: string): Player[] {
   const mid = (club.att + club.def) / 2;
   return LINEUP.map((pos) => {
     const base = pos === 'FW' ? club.att + 1 : pos === 'MF' ? mid : club.def + 1;
-    return makePlayer(g, pos, base + spread(g, -4, 4), int(g, 19, 33), region, club.nation);
+    return makePlayer(g, pos, base + spread(g, -4, 4), int(g, 19, 33), where, club.nation);
   });
 }
 
@@ -147,7 +170,7 @@ export function develop(g: Game): Change[] {
  * 빈자리는 평범한 선수가 채운다. 생긴 이적료와 설명을 돌려준다.
  */
 export function departures(g: Game, nextLevel: number): { income: number; lines: string[] } {
-  const { money, region } = stage(g);
+  const { money, where } = stage(g);
   const club = myClub(g);
   let income = 0;
   const lines: string[] = [];
@@ -163,7 +186,7 @@ export function departures(g: Game, nextLevel: number): { income: number; lines:
       gone = ko`${p.age}세 ${p.name}이 대표팀 은퇴를 선언했다.`;
     }
     if (!gone) continue;
-    lines.push(`${gone} ${fillSlot(g, p, nextLevel, region)}`);
+    lines.push(`${gone} ${fillSlot(g, p, nextLevel, where)}`);
   }
   // 후보 중 노장은 은퇴한다.
   for (const p of [...g.reserves]) {
@@ -179,7 +202,7 @@ export function departures(g: Game, nextLevel: number): { income: number; lines:
  * 선발 한 자리가 비었다. 같은 포지션 후보 중 가장 좋은 선수가 올라가고, 없으면 새 선수가 온다.
  * 대표팀은 늘 새 선수를 부른다. 설명 한 줄을 돌려준다.
  */
-export function fillSlot(g: Game, out: Player, level: number, region: 'kr' | 'eu'): string {
+export function fillSlot(g: Game, out: Player, level: number, where: string): string {
   const club = myClub(g);
   const target = level + spread(g, -4, 1);
   const line = lineOf(g, out);
@@ -190,7 +213,7 @@ export function fillSlot(g: Game, out: Player, level: number, region: 'kr' | 'eu
     g.squad = g.squad.map((q) => (q.id === out.id ? bench : q));
     return ko`후보 ${bench.name}(${bench.spot}, OVR ${bench.ovr})이 선발로 올라섰다.`;
   }
-  const fill = makePlayer(g, line, target, int(g, 20, 27), region, club.nation, line === out.pos ? out.spot : undefined);
+  const fill = makePlayer(g, line, target, int(g, 20, 27), where, club.nation, line === out.pos ? out.spot : undefined);
   if (!club.nation) {
     fill.contract = { wage: 0, years: int(g, 2, 3), promise: 'starter', clause: null, sellOn: 0, since: g.year };
   }

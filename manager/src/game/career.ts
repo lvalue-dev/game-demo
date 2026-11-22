@@ -7,9 +7,12 @@ import {
   RETIRE_AGE, START_AGE, START_YEAR, STYLES, STYLE_IDS, TRAITS, won,
 } from './data.ts';
 import { eventById, pickEvent } from './events.ts';
+import { COUNTRIES, CONTI_NAME, CONTI_WEIGHT, countryOf, leaguesOf } from './countries.ts';
+import { actHiring, enroll, finishCourses, hiringScene, licenseName, openHiring, requiredLicense, startingLicense, courseStatus } from './hiring.ts';
+import type { Vacancy } from './types.ts';
 import { chance, int, pick, shuffle, spread } from './rng.ts';
 import {
-  departures, develop, generateSquad, makePlayer, myClub, ratings, shareGoals, stage,
+  departures, develop, generateSquad, makePlayer, myClub, ratings, shareGoals,
 } from './squad.ts';
 import { ensureDetail, guessNat } from './player.ts';
 import { assignNumber, checkPromises, depthOf, enforceQuota, existingContract, expireContracts, relegationCut, settle, totalWages, wageBudgetFor } from './contract.ts';
@@ -21,19 +24,20 @@ import { autoSide } from './power.ts';
 import type { Side } from './power.ts';
 import { usualShape } from './tactics.ts';
 import {
-  applyMoves, applyResult, createClubs, dropCount, evolveClubs, playRound, playTie, positionOf, sortTable, startGroup, startLeagues, zone,
+  addLeagues, applyMoves, applyResult, createClubs, dropCount, evolveClubs, playRound, playTie, positionOf, sortTable, startGroup, startLeagues, zone,
 } from './world.ts';
 import type {
   AttrId, BackgroundId, Block, Choice, Club, ClubLeagueId, FocusId, Game, Knockout, LeagueId, MatchLine, MatchState, NationYear,
-  Offer, PlanId, Player, Pos, Row, SeasonState, ShapeId, StyleId, Tone,
+  PlanId, Player, Pos, Row, SeasonState, ShapeId, StyleId, Tone,
 } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 const round1 = (v: number): number => Math.round(v * 10) / 10;
 
-// 대륙 대회에서 만나는 상대. 이름만 빌려 쓰고 전력은 라운드에 따라 정한다.
-const ASIA_CLUBS = ['비셀 고베', '가와사키 프론탈레', '산프레체 히로시마', '요코하마 F. 마리노스', '알힐랄', '알나스르', '알아흘리', '알사드', '조호르 다룰 탁짐', '부리람 유나이티드', '상하이 하이강', '멜버른 시티'];
-const EURO_CLUBS = ['레알 마드리드', 'FC 바르셀로나', '아틀레티코 마드리드', '바이에른 뮌헨', '도르트문트', '레버쿠젠', '파리 생제르맹', '인테르', 'AC 밀란', '유벤투스', '나폴리', '벤피카', '포르투', '아약스'];
+// 대륙 대회에서 만나는 상대 가운데 게임 세계에 없는 리그의 구단. 이름만 빌려 쓰고 전력은 라운드에 따라 정한다.
+// 게임에 있는 리그(한국·일본 1부, 유럽 5대 리그 1부)의 구단은 실제 전력으로 나온다.
+const ASIA_CLUBS = ['알힐랄', '알나스르', '알아흘리', '알사드', '조호르 다룰 탁짐', '부리람 유나이티드', '상하이 하이강', '멜버른 시티'];
+const EURO_CLUBS = ['벤피카', '포르투', '스포르팅', '아약스', 'PSV', '페예노르트', '셀틱', '갈라타사라이', '클루브 브뤼허'];
 
 function blankSeason(): SeasonState {
   return {
@@ -42,24 +46,36 @@ function blankSeason(): SeasonState {
   };
 }
 
-/** 출발 무대를 고르면 명성은 그 무대에 맞춰 시작한다. 높은 무대일수록 기대도, 예산도 크다. */
-export function createGame(seed: number, name: string, background: BackgroundId, start: ClubLeagueId = 'kr5'): Game {
+export const SAVE_VERSION = 8;
+
+/**
+ * 새 커리어. 감독은 출신에 따라 자격증을 가지고(없을 수도 있다) 구직부터 시작한다.
+ * start는 시험과 시뮬레이션용 지름길이다: 그 리그에 맞는 자격과 명성을 주고 그 리그 구단이 먼저 연락하게 한다.
+ */
+export function createGame(seed: number, name: string, background: BackgroundId, start?: ClubLeagueId): Game {
   const attrs: Record<AttrId, number> = { tactics: 6, lead: 6, youth: 6, deal: 6, eye: 6 };
   for (const [key, value] of Object.entries(BACKGROUNDS[background].bonus)) attrs[key as AttrId] += value as number;
+  const lic = startingLicense(background, START_YEAR);
+  const rep = start ? LEAGUES[start]!.rep + 2 : 2;
   const g: Game = {
-    rng: seed | 0, version: 7, year: START_YEAR, nextId: 1,
-    manager: { name: name.trim() || '김감독', age: START_AGE, background, attrs, rep: LEAGUES[start].rep + 2, peakRep: LEAGUES[start].rep + 2, start },
-    clubs: [],
-    leagues: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
-    tables: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
-    fixtures: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
+    rng: seed | 0, version: SAVE_VERSION, year: START_YEAR, nextId: 1,
+    manager: {
+      name: name.trim() || '김감독', age: START_AGE, background, attrs, rep, peakRep: rep,
+      license: start ? Math.max(lic.license, LEAGUES[start]!.license) : lic.license, licensed: lic.licensed, course: null, idle: 0, countries: [],
+    },
+    clubs: [], leagues: { intl: [] }, tables: { intl: [] }, fixtures: { intl: [] },
     round: 0, job: null, squad: [], reserves: [], loaned: [], depth: 0, morale: 60, cohesion: 25, season: blankSeason(), match: null, lastStyle: null,
-    phase: 'offers', scene: { eyebrow: '', title: '', blocks: [], choices: [] }, eventId: null, offers: [], window: null,
+    phase: 'career', scene: { eyebrow: '', title: '', blocks: [], choices: [] }, eventId: null, offers: [], hiring: null, window: null,
     wcTicket: false, sacked: false, points: 0, history: [], trophies: [], promotions: 0,
   };
+  for (const id of CLUB_LEAGUES) {
+    g.leagues[id] = [];
+    g.tables[id] = [];
+    g.fixtures[id] = [];
+  }
   createClubs(g);
   startLeagues(g);
-  enterOffers(g);
+  enterCareer(g, start);
   return g;
 }
 
@@ -100,21 +116,29 @@ function autoKnockout(g: Game, ko: Knockout, opp: Rival): void {
 
 function cupOpponent(g: Game, round: number): Rival {
   const me = myClub(g);
-  const region = stage(g).region;
-  const pool = CLUB_LEAGUES.filter((l) => LEAGUES[l].region === region).flatMap((l) => g.leagues[l]).filter((id) => id !== me.id)
+  const pool = leaguesOf(countryOf(me.league)).flatMap((l) => g.leagues[l] ?? []).filter((id) => id !== me.id)
     .map((id) => g.clubs[id] as Club).sort((a, b) => b.att + b.def - (a.att + a.def));
   // 라운드가 올라갈수록 강한 팀만 남는다.
   const keep = [1, 0.7, 0.5, 0.3, 0.15][round] ?? 0.15;
   const club = pool[int(g, 0, Math.max(0, Math.floor(pool.length * keep) - 1))] as Club;
-  return { id: club.id, name: `${club.name} (${LEAGUES[club.league as ClubLeagueId].short})`, side: { att: club.att, def: club.def }, style: club.style, shape: club.shape };
+  return { id: club.id, name: `${club.name} (${LEAGUES[club.league]!.short})`, side: { att: club.att, def: club.def }, style: club.style, shape: club.shape };
 }
 
+/** 대륙 대회 상대: 같은 대륙에서 게임에 있는 다른 나라 1부 구단(실제 전력) 또는 게임 밖 리그의 구단(라운드에 따른 전력). */
 function contiOpponent(g: Game, round: number): Rival {
-  const euro = stage(g).region === 'eu';
-  const level = (euro ? 82 : 68) + round * (euro ? 2.5 : 3) + spread(g, -3, 3);
-  const names = (euro ? EURO_CLUBS : ASIA_CLUBS).filter((n) => n !== myClub(g).name);
+  const me = myClub(g);
+  const confed = COUNTRIES[countryOf(me.league)].confed;
+  const euro = confed === 'uefa';
+  const tops = Object.keys(LEAGUES).filter((id) => LEAGUES[id]!.tier === 1 && COUNTRIES[LEAGUES[id]!.country].confed === confed && id !== me.league);
+  const real = tops.flatMap((l) => g.leagues[l] ?? []).map((id) => g.clubs[id] as Club).sort((a, b) => b.att + b.def - (a.att + a.def));
+  if (real.length > 0 && chance(g, euro ? 0.75 : 0.5)) {
+    const keep = [0.5, 0.3, 0.2, 0.1][round] ?? 0.1;
+    const club = real[int(g, 0, Math.max(0, Math.floor(real.length * keep) - 1))] as Club;
+    return { id: club.id, name: `${club.name} (${COUNTRIES[LEAGUES[club.league]!.country].name})`, side: { att: club.att, def: club.def }, style: club.style, shape: club.shape };
+  }
+  const level = (euro ? 80 : 68) + round * (euro ? 2.5 : 3) + spread(g, -3, 3);
   const style = pick(g, STYLE_IDS);
-  return { id: -1, name: pick(g, names), side: { att: level, def: level }, style, shape: usualShape(style, int(g, 0, 5)) };
+  return { id: -1, name: pick(g, euro ? EURO_CLUBS : ASIA_CLUBS), side: { att: level, def: level }, style, shape: usualShape(style, int(g, 0, 5)) };
 }
 
 function nationOpponent(g: Game, round: number): Rival {
@@ -168,14 +192,14 @@ function beginSeason(g: Game): void {
     setupNation(g);
     job.objective = 0;
   } else {
-    const meta = LEAGUES[club.league as ClubLeagueId];
+    const meta = LEAGUES[club.league]!;
     const r = ratings(g.squad, depthOf(g));
     club.att = r.att;
     club.def = r.def;
     const ids = g.leagues[club.league];
     const power = (id: number): number => (g.clubs[id] as Club).att + (g.clubs[id] as Club).def;
     const rank = 1 + ids.filter((id) => id !== club.id && power(id) > power(club.id)).length;
-    job.objective = clamp(rank - (club.wealth >= 3 ? 1 : 0), 1, ids.length - Math.max(1, dropCount(club.league as ClubLeagueId)));
+    job.objective = clamp(rank - (club.wealth >= 3 ? 1 : 0) + (job.seasons === 0 ? job.promise ?? 0 : 0), 1, ids.length - Math.max(1, dropCount(club.league as ClubLeagueId)));
     // 전력이 가장 비슷한 팀이 올 시즌의 라이벌이다. 그 팀과의 두 경기는 직접 지휘한다.
     g.season.rival = ids.filter((id) => id !== club.id).sort((a, b) => Math.abs(power(a) - power(club.id)) - Math.abs(power(b) - power(club.id)))[0] as number;
     job.budget = round1(job.budget + meta.money * (1 + club.wealth * 0.12));
@@ -192,8 +216,9 @@ function beginSeason(g: Game): void {
     // 연봉 예산. 이미 맺은 계약을 감당할 만큼은 늘 준다.
     settle(g);
     job.wageBudget = round1(Math.max(wageBudgetFor(g), totalWages(g) * 1.15));
-    g.season.cup = newKnockout(meta.region === 'kr' ? '코리아컵' : 'FA컵', ['32강', '16강', '8강', '4강', '결승']);
-    if (club.conti) g.season.conti = newKnockout(meta.region === 'kr' ? '아시아 챔피언스리그' : '유럽 챔피언스리그', ['16강', '8강', '4강', '결승']);
+    const country = COUNTRIES[meta.country];
+    g.season.cup = newKnockout(country.cup, ['32강', '16강', '8강', '4강', '결승']);
+    if (club.conti) g.season.conti = newKnockout(CONTI_NAME[country.confed], ['16강', '8강', '4강', '결승']);
   }
   enterStyle(g);
 }
@@ -266,7 +291,7 @@ function enterMarket(g: Game, window: 'summer' | 'winter'): void {
 
 /** 이전 버전의 저장을 지금 버전에 맞춘다. 맞출 수 없으면 false. */
 export function migrate(g: Game): boolean {
-  if (g.version < 3 || g.version > 7) return false;
+  if (g.version < 3 || g.version > SAVE_VERSION) return false;
   let reopen = false;
   for (const p of g.squad) ensureDetail(p);
   if (g.version === 3) {
@@ -300,7 +325,7 @@ export function migrate(g: Game): boolean {
     // 국적, 임대, 분할 지급이 생겼다.
     g.version = 6;
     g.loaned = [];
-    const region = g.job && !myClub(g).nation ? LEAGUES[myClub(g).league as ClubLeagueId].region : 'kr';
+    const region = g.job && !myClub(g).nation && myClub(g).league.startsWith('eu') ? 'eu' : 'kr';
     for (const p of [...g.squad, ...g.reserves]) Object.assign(p, { nat: p.nat ?? guessNat(p, region), loan: p.loan ?? null });
     if (g.job) g.job.debts = g.job.debts ?? [];
     reopen = true;
@@ -311,9 +336,47 @@ export function migrate(g: Game): boolean {
     for (const p of [...g.squad, ...g.reserves, ...g.loaned]) Object.assign(p, { hg: p.hg ?? p.nat === '잉글랜드', esc: p.esc ?? false });
     reopen = true;
   }
+  if (g.version === 7) {
+    migrateWorld(g);
+    reopen = true;
+  }
   // 이적 시장 한가운데서 저장했다면, 모든 변환을 마친 뒤 새 시장으로 다시 연다.
   if (reopen && (g.phase === 'market' || g.phase === 'winter')) enterMarket(g, g.phase === 'market' ? 'summer' : 'winter');
   return true;
+}
+
+/**
+ * 버전 7 → 8: 세계 리그와 감독 자격.
+ * 잉글랜드 1·2부(eu1, eu2)는 eng1, eng2가 되고, 새 나라와 리그의 구단이 생긴다. 지금 맡은 리그에 필요한 자격은 가진 것으로 본다.
+ * 시즌 도중이면 새 리그들은 다음 절반부터 경기를 치른다.
+ */
+function migrateWorld(g: Game): void {
+  g.version = 8;
+  const rename: Record<string, string> = { eu1: 'eng1', eu2: 'eng2' };
+  for (const [from, to] of Object.entries(rename)) {
+    for (const key of ['leagues', 'tables', 'fixtures'] as const) {
+      const rec = g[key] as Record<string, unknown>;
+      if (rec[from] !== undefined) {
+        rec[to] = rec[from];
+        delete rec[from];
+      }
+    }
+  }
+  for (const c of g.clubs) if (rename[c.league]) c.league = rename[c.league] as string;
+  for (const h of g.history) h.league = h.league.replace('잉글랜드 1부', '프리미어리그').replace('잉글랜드 2부', '챔피언십');
+  if (g.season.pending && rename[g.season.pending.league]) g.season.pending.league = rename[g.season.pending.league] as string;
+  if (g.match?.league && rename[g.match.league]) g.match.league = rename[g.match.league] as string;
+  // 새 리그의 구단을 만들고 일정을 짠다.
+  const missing = CLUB_LEAGUES.filter((id) => !g.leagues[id]);
+  addLeagues(g, missing);
+  const job = g.job ? (g.clubs[g.job.club] as Club) : null;
+  const need = job ? requiredLicense(job) : 0;
+  const lic = startingLicense(g.manager.background, START_YEAR);
+  const level = Math.max(lic.license, need);
+  const licensed = [0, 0, 0, 0, 0].map((_, i) => (i > 0 && i <= level ? Math.min(g.year - 1, START_YEAR - 1) : 0));
+  Object.assign(g.manager, { license: level, licensed, course: null, idle: 0, countries: job && !job.nation ? [countryOf(job.league)] : [] });
+  g.hiring = null;
+  if (g.phase === 'offers') enterCareer(g);
 }
 
 function recordOf(lines: MatchLine[]): { w: number; d: number; l: number; text: string } {
@@ -561,8 +624,8 @@ function finishClubSeason(g: Game, midSack: boolean): void {
 
   if (!midSack) {
     if (title) addTrophy(g, `${meta.name} 우승`, meta.weight);
-    if (s.cup?.won) addTrophy(g, `${s.cup.name} 우승`, meta.region === 'kr' ? 8 : 15);
-    if (s.conti?.won) addTrophy(g, `${s.conti.name} 우승`, meta.region === 'kr' ? 25 : 60);
+    if (s.cup?.won) addTrophy(g, `${s.cup.name} 우승`, COUNTRIES[meta.country].cupWeight);
+    if (s.conti?.won) addTrophy(g, `${s.conti.name} 우승`, CONTI_WEIGHT[COUNTRIES[meta.country].confed]);
     if (promoted) g.promotions++;
     const cupRounds = (s.cup?.next ?? 0) + (s.conti?.next ?? 0) * 2;
     const delta = clamp(rel * 7, -30, 30) + (title ? 25 : 0) + (promoted ? 20 : 0) - (relegated ? 35 : 0) + (s.cup?.won ? 15 : 0) + (s.conti?.won ? 25 : 0) + Math.max(0, cupRounds - 2) * 2;
@@ -627,7 +690,7 @@ function finishClubSeason(g: Game, midSack: boolean): void {
   }
   g.history.push({
     year: g.year, age: g.manager.age, club: club.name, league: meta.short, pos, size,
-    record: `${row.w}승 ${row.d}무 ${row.l}패`, cup: cupText, note: g.sacked ? '경질' : title ? '우승' : promoted ? '승격' : relegated ? '강등' : '', outcome,
+    record: `${row.w}승 ${row.d}무 ${row.l}패`, cup: cupText, note: g.sacked ? '경질' : title ? '우승' : promoted ? '승격' : relegated ? '강등' : '', outcome, lid: league,
   });
   g.points = 1 + (!g.sacked && (title || promoted || rel >= 3) ? 1 : 0);
   g.phase = 'end';
@@ -696,7 +759,7 @@ function finishNationYear(g: Game): void {
   }
   g.history.push({
     year: g.year, age: g.manager.age, club: `${club.name} 대표팀`, league: label.name, pos, size: g.leagues.intl.length, record: rec.text,
-    cup: knockoutNote(s.finals), note: g.sacked ? '경질' : won0 ? '우승' : '', outcome: won0 ? 'title' : g.sacked ? 'sacked' : 'plain',
+    cup: knockoutNote(s.finals), note: g.sacked ? '경질' : won0 ? '우승' : '', outcome: won0 ? 'title' : g.sacked ? 'sacked' : 'plain', lid: 'intl',
   });
   g.points = 1 + (won0 || (kind === 'wc' && reached >= 2) ? 1 : 0);
   g.phase = 'end';
@@ -724,108 +787,125 @@ function rollover(g: Game): void {
   if (g.job) g.job.seasons++;
 }
 
-// ---------- 제안과 은퇴 ----------
+// ---------- 구직과 은퇴 ----------
 
-const wealthText = (w: number): string => (w >= 3 ? '재정 넉넉함' : w <= -3 ? '재정 빠듯함' : '재정 보통');
-
-function buildOffers(g: Game): Offer[] {
-  const offers: Offer[] = [];
-  const rep = g.manager.rep;
-  const job = g.job;
-  const first = g.history.length === 0;
-  const taken = new Set<number>();
-  if (job && !g.sacked) {
-    const club = g.clubs[job.club] as Club;
-    taken.add(club.id);
-    offers.push({
-      club: club.id, kind: job.kind, stay: true,
-      pitch: club.nation ? '대표팀과 다음 대회를 준비한다' : `${LEAGUES[club.league as ClubLeagueId].name}에서 ${job.seasons + 1}번째 시즌을 맞는다`,
-    });
-  } else if (job) {
-    taken.add(job.club);
-  }
-  const eligible = CLUB_LEAGUES.filter((l) => LEAGUES[l].rep <= rep + 2);
-  const last = g.history[g.history.length - 1];
-  const hot = last && (last.outcome === 'title' || last.outcome === 'up');
-  let count = first ? 3 : g.sacked || !job ? 2 : int(g, 0, 1) + (hot ? 1 : 0) + (chance(g, 0.4) ? 1 : 0);
-  if (eligible.length === 0) eligible.push('kr5');
-  for (let tries = 0; count > 0 && tries < 30; tries++) {
-    // 평판이 닿는 가장 높은 리그에서 주로 연락이 온다. 경질된 감독에게는 한 단계 아래에서 온다.
-    const drop = g.sacked ? int(g, 1, 2) : chance(g, 0.6) ? 0 : chance(g, 0.7) ? 1 : 2;
-    // 첫 제의는 고른 출발 무대에서 온다.
-    const league = first ? (g.manager.start ?? 'kr5') : (eligible[Math.max(0, eligible.length - 1 - drop)] as ClubLeagueId);
-    const pool = g.leagues[league].map((id) => g.clubs[id] as Club).filter((c) => !taken.has(c.id));
-    if (pool.length === 0) continue;
-    // 감독 자리가 나는 곳은 대개 지난 시즌에 부진했던 팀이다.
-    pool.sort((a, b) => b.lastPos - a.lastPos);
-    // K5 밖에서 시작하는 신인 감독에게는 지난 시즌 하위권 구단만 연락한다.
-    const reach = first ? ((g.manager.start ?? 'kr5') === 'kr5' ? pool.length - 1 : Math.floor(pool.length / 2) - 1) : 5;
-    const club = pool[int(g, 0, Math.min(pool.length - 1, Math.max(0, reach)))] as Club;
-    taken.add(club.id);
-    offers.push({ club: club.id, kind: 'club', stay: false, pitch: `${LEAGUES[league].name}(${LEAGUES[league].short}) · 지난 시즌 ${club.lastPos}위 · ${wealthText(club.wealth)}` });
-    count--;
-  }
-  if (rep >= NATION_REP && job?.kind !== 'nation' && chance(g, g.year % 4 === 3 ? 0.8 : 0.35)) {
-    const nation = g.clubs.find((c) => c.nation) as Club;
-    offers.push({ club: nation.id, kind: 'nation', stay: false, pitch: `${nation.name} 축구 국가대표팀 감독. 다음 일정은 ${NATION_LABEL[nationKind(g)].name}` });
-  }
-  return offers;
-}
-
-function enterOffers(g: Game): void {
+/**
+ * 시즌과 시즌 사이: 강습을 마친 자격을 받고, 지금 구단에 남을 수 있는지 따진 뒤 구인 공고를 연다.
+ * 승격으로 요구 자격이 올라갔는데 자격이 모자라면, 나라 규정에 따라 강습을 받으며 한 시즌 더 지휘하거나 물러난다.
+ */
+function enterCareer(g: Game, start?: string): void {
   if (g.manager.age >= RETIRE_AGE) {
     retire(g, '정년');
     return;
   }
-  g.phase = 'offers';
-  g.offers = buildOffers(g);
-  const first = g.history.length === 0;
-  const blocks: Block[] = [];
-  if (first) {
-    const start = g.manager.start ?? 'kr5';
-    blocks.push({
-      kind: 'text',
-      text: start === 'kr5'
-        ? `${g.manager.name}, ${g.manager.age}세. ${BACKGROUNDS[g.manager.background].name}. 지도자 자격증을 따고 처음 받은 연락은 K5리그 동호인 팀 세 곳이다. 월급은 없고, 회식비는 회비에서 나온다.`
-        : ko`${g.manager.name}, ${g.manager.age}세. ${BACKGROUNDS[g.manager.background].name}. 첫 감독 제의가 ${LEAGUES[start].name}에서 왔다. ${LEAGUES[start].blurb}. 이사회는 처음부터 결과를 원한다.`,
-    });
-  } else if (g.sacked) {
-    blocks.push({ kind: 'text', text: '짐을 싸서 나왔다. 그래도 전화는 온다.' });
-  } else {
-    blocks.push({ kind: 'text', text: g.offers.length > 1 ? '시즌이 끝나자 전화가 왔다. 남을 수도, 떠날 수도 있다.' : '올해는 다른 구단에서 연락이 없었다.' });
+  g.phase = 'career';
+  const notes = finishCourses(g);
+  const first = g.history.length === 0 && g.manager.idle === 0 && !g.job;
+  const { stay, note: stayNote } = reviewJob(g, notes);
+  openHiring(g, stay, stayNote, notes);  if (start) {
+    // 시험과 시뮬레이션용 지름길: 고른 리그의 하위권 구단 세 곳이 바로 감독직을 제안한다.
+    const pool = (g.leagues[start] ?? []).map((id) => g.clubs[id] as Club).sort((x, y) => y.lastPos - x.lastPos);
+    const half = start === 'kr5' ? pool : pool.slice(0, Math.max(3, Math.floor(pool.length / 2)));
+    g.hiring!.list = shuffle(g, [...half]).slice(0, 3).map((club) => ({
+      club: club.id, kind: 'club' as const, approach: true, wants: ['results' as const], provisional: false, state: 'offer' as const,
+      doc: 0, docNotes: [], talk: 0, objective: 0, confidence: 0, note: '먼저 연락해 와 감독직을 제안했다.',
+    }));
+    g.hiring!.step = 'decide';
   }
-  blocks.push({ kind: 'stats', rows: [{ label: '명성', value: `${Math.round(g.manager.rep)}` }, { label: '나이', value: `${g.manager.age}세` }] });
-  const choices = g.offers.map((o, i): Choice => {
-    const club = g.clubs[o.club] as Club;
-    return { id: `offer${i}`, club: club.id, label: o.stay ? `${club.name}에 남는다` : `${club.name}${o.kind === 'nation' ? ' 대표팀' : ''}`, detail: o.pitch, tone: o.stay ? 'primary' : undefined };
-  });
-  if (!first && g.manager.age >= 45) choices.push({ id: 'retire', label: '지휘봉을 내려놓는다', detail: '커리어를 마치고 기록을 남긴다', tone: 'danger' });
-  g.scene = { eyebrow: `${g.year} · 새 시즌을 앞두고`, title: first ? '첫 팀을 고르세요' : '어디에서 지휘할까요?', blocks, choices };
+  hiringScene(g, first, introText(g, first, stay));
 }
 
-function takeOffer(g: Game, offer: Offer): void {
-  if (!offer.stay) {
-    const club = g.clubs[offer.club] as Club;
-    const region = club.nation ? 'kr' : LEAGUES[club.league as ClubLeagueId].region;
-    g.job = { kind: offer.kind, club: club.id, confidence: 50 + g.manager.attrs.deal / 2, objective: 0, budget: 0, wageBudget: 0, debts: [], seasons: 0 };
-    g.loaned = [];
-    g.squad = generateSquad(g, club, region);
-    g.depth = (club.att + club.def) / 2 - 2;
-    g.reserves = [];
-    if (!club.nation) {
-      // 후보 명단: 포지션마다 한 명씩, 스쿼드 뎁스 수준의 선수들.
-      for (const pos of ['GK', 'DF', 'MF', 'FW'] as Pos[]) g.reserves.push(makePlayer(g, pos, g.depth + spread(g, -2, 2), int(g, 18, 31), region));
-      // 원래 있던 선수들은 대개 로테이션 계약이다. 가장 잘하는 두 명만 주전을 약속받았다.
-      const top = [...g.squad].sort((a, b) => b.ovr - a.ovr).slice(0, 2);
-      for (const p of g.squad) p.contract = existingContract(g, p, top.includes(p), int(g, 1, 4));
-      for (const p of g.reserves) p.contract = existingContract(g, p, false, int(g, 1, 3));
+/**
+ * 지금 구단에 남을 수 있는지 따진다. 승격 등으로 요구 자격이 올라갔으면, 나라 규정이 허락하는 경우 강습에 등록하고 한 시즌 더 지휘한다.
+ * 남을 수 없으면 감독직을 내려놓는다. 강습 결과는 notes에 더한다.
+ */
+export function reviewJob(g: Game, notes: string[]): { stay: boolean; note: string } {
+  let stay = false;
+  let stayNote = '';
+  const job = g.job;
+  if (job && !g.sacked) {
+    const club = g.clubs[job.club] as Club;
+    const req = requiredLicense(club);
+    const m = g.manager;
+    const country = club.nation ? 'kr' : countryOf(club.league);
+    if (m.license >= req || m.course?.level === req) {
+      stay = true;
+    } else if (!club.nation && COUNTRIES[country].grace && req - m.license === 1 && courseStatus(g).ok && courseStatus(g).level === req) {
+      notes.push(enroll(g));
+      stay = m.license >= req || m.course?.level === req;
+      stayNote = stay ? ko`${LEAGUES[club.league]!.name}는 ${licenseName(req, country)}이 필요하다. ${COUNTRIES[country].name} 규정상 강습을 받는 동안 한 시즌은 지휘할 수 있다.` : '';
     }
-    for (const p of [...g.squad, ...g.reserves]) assignNumber(g, p);
-    g.cohesion = 25;
-    g.morale = 60;
-    g.lastStyle = null;
+    if (!stay) {
+      stayNote = ko`${club.nation ? '대표팀' : LEAGUES[club.league]!.name}은 ${licenseName(req, country)} 이상이 필요하다. 자격이 모자라 ${club.name}을 떠난다. 실적은 이력에 남는다.`;
+    }
   }
+  if (!stay && job) {
+    g.job = null;
+    g.squad = [];
+    g.reserves = [];
+    g.loaned = [];
+  }
+  return { stay, note: stayNote };
+}
+
+function introText(g: Game, first: boolean, stay: boolean): string {
+  const m = g.manager;
+  if (first) {
+    return `${m.name}, ${m.age}세. ${BACKGROUNDS[m.background].name}. ${m.license > 0 ? `${licenseName(m.license)} 지도자 자격증이 있다.` : '아직 지도자 자격증이 없다. 감독을 하려면 강습부터 들어야 한다.'} 리그마다 감독에게 요구하는 자격이 다르다. K5리그는 C급, K리그는 P급, 유럽 1부는 UEFA Pro가 필요하다.`;
+  }
+  if (g.sacked) return '짐을 싸서 나왔다. 다시 지원서를 쓴다.';
+  if (!g.job && !stay) return '감독 자리가 없다. 공고를 보고 지원서를 낸다.';
+  return '시즌이 끝났다. 남을 수도 있고, 다른 구단에 지원할 수도 있다.';
+}
+
+/** 감독 자리 없이 한 시즌을 보낸다: 세계의 리그는 그대로 돌아간다. */
+function idleYear(g: Game): void {
+  for (const league of CLUB_LEAGUES) {
+    for (let r = 0; r < g.fixtures[league]!.length; r++) playRound(g, league, r, -1, () => ({ att: 0, def: 0 }));
+  }
+  g.job = null;
   g.sacked = false;
+  g.squad = [];
+  g.reserves = [];
+  g.loaned = [];
+  g.manager.idle++;
+  g.manager.rep = Math.max(0, g.manager.rep - 1.5);
+  evolveClubs(g, -1);
+  applyMoves(g);
+  startLeagues(g);
+  g.year++;
+  g.manager.age++;
+  enterCareer(g);
+}
+
+/** 감독직을 맡는다. 면접에서 한 약속이 목표와 첫 신뢰에 붙는다. 조건부 채용이면 강습에 등록한다. */
+function startJob(g: Game, v: Vacancy): void {
+  const club = g.clubs[v.club] as Club;
+  const where = club.nation ? 'kr1' : club.league;
+  if (v.provisional && !g.manager.course) enroll(g);
+  if (!club.nation) {
+    const c = countryOf(club.league);
+    if (!g.manager.countries.includes(c)) g.manager.countries.push(c);
+  }
+  g.job = { kind: v.kind, club: club.id, confidence: clamp(50 + g.manager.attrs.deal / 2 + v.confidence, 20, 90), objective: 0, budget: 0, wageBudget: 0, debts: [], seasons: 0, promise: v.objective };
+  g.loaned = [];
+  g.squad = generateSquad(g, club, where);
+  g.depth = (club.att + club.def) / 2 - 2;
+  g.reserves = [];
+  if (!club.nation) {
+    // 후보 명단: 포지션마다 한 명씩, 스쿼드 뎁스 수준의 선수들.
+    for (const pos of ['GK', 'DF', 'MF', 'FW'] as Pos[]) g.reserves.push(makePlayer(g, pos, g.depth + spread(g, -2, 2), int(g, 18, 31), where));
+    // 원래 있던 선수들은 대개 로테이션 계약이다. 가장 잘하는 두 명만 주전을 약속받았다.
+    const top = [...g.squad].sort((a, b) => b.ovr - a.ovr).slice(0, 2);
+    for (const p of g.squad) p.contract = existingContract(g, p, top.includes(p), int(g, 1, 4));
+    for (const p of g.reserves) p.contract = existingContract(g, p, false, int(g, 1, 3));
+  }
+  for (const p of [...g.squad, ...g.reserves]) assignNumber(g, p);
+  g.cohesion = 25;
+  g.morale = 60;
+  g.lastStyle = null;
+  g.sacked = false;
+  g.hiring = null;
   beginSeason(g);
 }
 
@@ -870,13 +950,21 @@ export function act(g: Game, id: string): void {
   if (!okRange && (!choice || choice.disabled)) return;
   const nation = g.job ? myClub(g).nation : false;
   switch (g.phase) {
-    case 'offers': {
-      if (id === 'retire') {
-        retire(g, '은퇴');
+    case 'offers':
+    case 'career': {
+      const res = actHiring(g, id);
+      if (!res) {
+        hiringScene(g, g.history.length === 0 && g.manager.idle === 0 && !g.job, '');
         return;
       }
-      const offer = g.offers[Number(id.replace('offer', ''))];
-      if (offer) takeOffer(g, offer);
+      if (res.kind === 'retire') retire(g, '은퇴');
+      else if (res.kind === 'idle') idleYear(g);
+      else if (res.kind === 'take') startJob(g, res.vacancy);
+      else {
+        g.hiring = null;
+        g.sacked = false;
+        beginSeason(g);
+      }
       return;
     }
     case 'style':
@@ -938,7 +1026,7 @@ export function act(g: Game, id: string): void {
         return;
       }
       rollover(g);
-      enterOffers(g);
+      enterCareer(g);
       return;
     case 'retired':
       return;

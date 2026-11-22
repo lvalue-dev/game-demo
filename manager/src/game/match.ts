@@ -2,14 +2,14 @@
 // 경기 전(대형, 전술) → 30분(전술) → 하프타임(대화, 전술) → 60분(교체) → 75분(태세) → 종료
 // 규칙의 근거는 TACTICS.md에 있다.
 import { ko } from './josa.ts';
-import { STYLES, STYLE_IDS, foreignName, koreanName } from './data.ts';
+import { STYLES, STYLE_IDS } from './data.ts';
 import { HALF, PER_MIN, TICKS, createLive, lineup, reshape, stepLive } from './live.ts';
 import type { Entrant, LiveEnv, LiveEvent } from './live.ts';
 import { LINE_SPOT, makeDetail } from './player.ts';
 import { foreignCount, isForeign, quota } from './contract.ts';
 import { baseSide, drilled, skill } from './power.ts';
 import { chance, int, pick, poisson, rand, spread } from './rng.ts';
-import { effOvr, lineAt, myClub, stage } from './squad.ts';
+import { effOvr, lineAt, myClub, nameFor, randomNat, stage } from './squad.ts';
 import { BASE, ROLES, SHAPES, SHAPE_IDS, advantage, bestCounter, dialEdge, fits, matchup, roleEdge, shapeEdge, tempoCost, usualShape, why } from './tactics.ts';
 import type { Block, Choice, Club, Dials, Game, Pos, LeagueId, LiveHow, LiveState, LogLine, MatchState, Player, RoleId, ShapeId, StyleId, Tone, WeatherId } from './types.ts';
 
@@ -613,9 +613,8 @@ const LIVE_CONCEDED: Record<LiveHow, string[]> = {
 /** 실시간 경기를 시작한다. 주전 일곱 명에 후보 넷을 보태 열한 명을 세우고, 상대 열한 명을 만든다. */
 function startLive(g: Game, m: MatchState): void {
   const club = myClub(g);
-  const { region } = stage(g);
+  const { where } = stage(g);
   const depth = g.depth + g.season.depthMod;
-  const name = (foreign: boolean): string => (foreign ? foreignName(rand(g), rand(g)) : koreanName(rand(g), rand(g), rand(g)));
   // 선발은 감독이 정한 자리(줄)에서 뛴다. 자기 포지션이 아니면 그 줄의 대표 자리에 서고 OVR이 깎인다.
   const keys: Entrant[] = g.squad.map((p, i) => {
     const line = lineAt(i);
@@ -634,15 +633,15 @@ function startLive(g: Game, m: MatchState): void {
       return { name: r.name, pos: r.pos, ovr: r.ovr + r.temp, key: -1, spot: r.spot, foot: r.foot, dev: r.dev, no: r.no };
     }
     const d = makeDetail(g, pos, spot);
-    return { name: name(!club.nation && (region === 'eu' ? chance(g, 0.95) : chance(g, 0.12))), pos, ovr: Math.round(depth + spread(g, -2, 2)), key: -1, ...d };
+    return { name: nameFor(g, club.nation ? '대한민국' : randomNat(g, where)), pos, ovr: Math.round(depth + spread(g, -2, 2)), key: -1, ...d };
   });
-  // 상대 선수 이름: 유럽 구단과 외국 대표팀은 외국 이름, 국내 구단은 대부분 한국 이름.
+  // 상대 선수 이름: 대표팀은 그 나라 이름, 구단은 그 구단 리그의 국적 비율대로. 이름만 빌린 대륙 대회 상대는 우리 리그 기준.
   const opp = g.clubs[m.oppId] as Club | undefined;
-  const abroad = opp ? (opp.nation ? opp.name !== '대한민국' : opp.league === 'eu1' || opp.league === 'eu2') : false;
+  const oppNat = (): string => (opp?.nation ? opp.name : randomNat(g, opp && !opp.nation ? opp.league : where));
   const theirs = lineup(m.opp.shape, [], (pos, spot) => {
     const base = pos === 'FW' ? m.oppAtt + 1 : pos === 'MF' ? (m.oppAtt + m.oppDef) / 2 : m.oppDef + 1;
     const d = makeDetail(g, pos, spot);
-    return { name: name(abroad || chance(g, 0.12)), pos, ovr: Math.round(base + spread(g, -4, 4)), key: -1, ...d };
+    return { name: nameFor(g, oppNat()), pos, ovr: Math.round(base + spread(g, -4, 4)), key: -1, ...d };
   });
   m.live = createLive(mine, theirs, [m.me.shape, m.opp.shape]);
 }

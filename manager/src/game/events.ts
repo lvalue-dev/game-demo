@@ -117,7 +117,7 @@ export const EVENTS: GameEvent[] = [
         {
           id: 'sell', label: `${won(fee)}에 판다`, detail: '돈은 생기지만 전력이 빠진다',
           run: (h) => {
-            const fill = makePlayer(h, star.pos, stage(h).level - 2, int(h, 21, 27), stage(h).region);
+            const fill = makePlayer(h, star.pos, stage(h).level - 2, int(h, 21, 27), stage(h).where);
             h.squad = h.squad.map((p) => (p.id === star.id ? fill : p));
             return { text: ko`${star.name}은 짐을 쌌다. 빈자리는 OVR ${fill.ovr}의 ${fill.name}이 맡는다. 팬들은 아쉬워하지만 통장은 두둑해졌다.`, tone: 'plain', effects: fx(h, { budget: fee, morale: -4 }) };
           },
@@ -225,12 +225,12 @@ export const EVENTS: GameEvent[] = [
     title: () => '스카우터의 귀띔',
     text: (g) => `오랜 지인인 스카우터가 연락했다. ${LEAGUES[league(g)].down ? '아래 리그' : '대학 리그'}에 아무도 모르는 선수가 있다고 한다. "지금 아니면 못 데려와요."`,
     choices: (g) => {
-      const { level, region } = stage(g);
+      const { level, where } = stage(g);
       return [
         {
           id: 'sign', label: '믿고 계약한다', detail: `예산 ${won(money(g) * 0.12)}`,
           run: (h) => {
-            const gemPlayer = makePlayer(h, weakest(h.squad, 'FW').ovr < weakest(h.squad, 'DF').ovr ? 'FW' : 'DF', level + 1, int(h, 19, 21), region);
+            const gemPlayer = makePlayer(h, weakest(h.squad, 'FW').ovr < weakest(h.squad, 'DF').ovr ? 'FW' : 'DF', level + 1, int(h, 19, 21), where);
             gemPlayer.pot = Math.min(99, gemPlayer.ovr + int(h, 8, 14) + Math.round(h.manager.attrs.eye / 3));
             const out = addPlayer(h, gemPlayer);
             return { text: ko`${gemPlayer.name}이 합류했다. ${gemPlayer.age}세, OVR ${gemPlayer.ovr}, ${potentialText(h, gemPlayer)}. ${out.name} 대신 주전으로 뛴다. 첫 훈련을 본 코치들이 서로 얼굴을 쳐다봤다.`, tone: 'good', effects: fx(h, { budget: -Math.min(h.job!.budget, money(h) * 0.12) }) };

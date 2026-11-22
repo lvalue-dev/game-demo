@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { act, createGame, legacyScore } from '../src/game/career.ts';
-import { CLUB_LEAGUES, CLUB_SEEDS, LINEUP } from '../src/game/data.ts';
+import { CLUB_LEAGUES, CLUB_SEEDS, LEAGUES, LINEUP } from '../src/game/data.ts';
 import { rand } from '../src/game/rng.ts';
 import { roundRobin, sortTable } from '../src/game/world.ts';
 import type { Game } from '../src/game/types.ts';
@@ -9,7 +9,24 @@ import type { Game } from '../src/game/types.ts';
 /** 막히지 않은 첫 선택지. 이적 시장에서는 바로 마감한다(후보 보기와 돌아가기를 오가지 않게). */
 function firstChoice(g: Game): string {
   if (g.phase === 'market' || g.phase === 'winter') return g.window?.view ? 'back' : 'done';
+  if (g.phase === 'career') return careerChoice(g);
   return g.scene.choices.find((c) => !c.disabled)!.id;
+}
+
+/** 구직 화면에서 고르는 순서: 제안 수락 → 지원서 제출 → 지원 가능한 첫 공고 → 다음 → 첫 대답 → 남기 → 쉬기. */
+function careerChoice(g: Game): string {
+  const open = g.scene.choices.filter((c) => !c.disabled);
+  const find = (f: (id: string) => boolean): string | undefined => open.find((c) => f(c.id))?.id;
+  const h = g.hiring!;
+  const vac = h.step === 'browse' && !h.list.some((v) => v.state === 'applied') ? find((id) => /^v\d+$/.test(id)) : undefined;
+  return find((id) => id.startsWith('take')) ?? find((id) => id === 'submit') ?? vac ?? find((id) => id === 'next')
+    ?? find((id) => id.startsWith('a:')) ?? find((id) => id === 'stay') ?? find((id) => id === 'idle') ?? open[0]!.id;
+}
+
+/** 무작위로 고를 때 "코치로 지낸다"는 다른 길이 없을 때만 고른다(아니면 대부분의 해를 쉬며 보낸다). */
+function withoutIdle<T extends { id: string }>(open: T[]): T[] {
+  const rest = open.filter((c) => c.id !== 'idle' && c.id !== 'course');
+  return rest.length > 0 ? open.filter((c) => c.id !== 'idle') : open;
 }
 
 /** 정년까지 아무 선택지나 고르며 커리어를 끝까지 돌린다. 한 걸음마다 check를 부른다. */
@@ -19,7 +36,7 @@ function playOut(g: Game, seed: number, check?: (g: Game) => void): string[] {
   for (let guard = 0; g.phase !== 'retired'; guard++) {
     // 이적시장의 판매·임대 화면은 선택지가 많아 무작위로 고르면 오래 머문다.
     assert.ok(guard < 15000, '커리어가 끝나지 않는다');
-    const open = g.scene.choices.filter((c) => !c.disabled && c.id !== 'retire');
+    const open = withoutIdle(g.scene.choices.filter((c) => !c.disabled && c.id !== 'retire'));
     assert.ok(open.length > 0, `${g.phase} 장면에 고를 수 있는 선택지가 없다`);
     const id = open[Math.floor(rand(dice) * open.length)]!.id;
     picks.push(id);
@@ -54,14 +71,20 @@ test('팀 수가 홀수면 라운드마다 한 팀이 쉬고, 그래도 모두�
   assert.ok(ids.every((id) => played.get(id) === 32), 'K리그2처럼 17팀이면 팀당 32경기다');
 });
 
-test('커리어는 첫 팀을 고르는 장면에서 시작한다', () => {
+test('커리어는 구직에서 시작한다: 리그마다 요구 자격이 있고, 모자라면 지원할 수 없다', () => {
   const g = createGame(1, '테스트', 'analyst');
-  assert.equal(g.phase, 'offers');
-  assert.equal(g.scene.choices.length, 3);
+  assert.equal(g.phase, 'career');
   assert.equal(g.manager.attrs.tactics, 10);
-  const sizes = Object.fromEntries(CLUB_LEAGUES.map((l) => [l, g.leagues[l].length]));
-  assert.deepEqual(sizes, { kr5: 8, kr4: 13, kr3: 14, kr2: 17, kr1: 12, eu2: 24, eu1: 20 }, '2026년 실제 리그 구성');
-  assert.ok(g.scene.choices.every((c) => g.clubs[c.club!]!.league === 'kr5'), '첫 제안은 동호인 리그에서 온다');
+  assert.equal(g.manager.license, 1, '전력 분석관 출신은 C급을 가지고 시작한다');
+  for (const league of CLUB_LEAGUES) assert.equal(g.leagues[league]!.length, CLUB_SEEDS[league]!.length);
+  assert.equal(CLUB_LEAGUES.length, 35, '7개국 5부까지');
+  const vac = g.hiring!.list;
+  assert.ok(vac.length >= 10, '여러 나라의 구인 공고가 있다');
+  const k5 = g.scene.choices.find((c) => c.id.startsWith('v') && g.clubs[c.club!]!.league === 'kr5');
+  assert.ok(k5 && !k5.disabled, 'C급이면 K5에 지원할 수 있다');
+  const closed = g.scene.blocks.flatMap((b) => (b.kind === 'stats' ? b.rows : [])).filter((r) => /필요/.test(r.value));
+  assert.ok(closed.length > 0, '자격이 모자란 공고는 따로 모아 이유를 보여 준다');
+  assert.ok(g.scene.choices.filter((c) => c.id.startsWith('v')).every((c) => !c.disabled), '지원할 수 있는 공고만 선택지로 나온다');
 });
 
 test('같은 시드와 같은 선택이면 같은 커리어가 나온다', () => {
@@ -88,7 +111,7 @@ test('끝까지 돌려도 상태가 망가지지 않는다', () => {
         assert.equal(h.tables[league].length, CLUB_SEEDS[league].length);
       }
     });
-    assert.equal(g.history.length, 30, '35세에 시작해 65세에 정년을 맞는다');
+    assert.equal(g.history.length + g.manager.idle, 30, '35세에 시작해 65세에 정년을 맞는다(감독 자리 없이 보낸 해 포함)');
     assert.equal(g.manager.age, 65);
   }
 });
@@ -97,7 +120,7 @@ test('저장했다가 불러와도 똑같이 이어진다', () => {
   const a = createGame(99, '저장', 'scout');
   const dice = { rng: 3 };
   const next = (g: Game): string => {
-    const open = g.scene.choices.filter((c) => !c.disabled && c.id !== 'retire');
+    const open = withoutIdle(g.scene.choices.filter((c) => !c.disabled && c.id !== 'retire'));
     return open[Math.floor(rand(dice) * open.length)]!.id;
   };
   for (let i = 0; i < 60; i++) act(a, next(a));
@@ -124,16 +147,16 @@ test('전력이 강한 팀이 대체로 위에 선다', () => {
   let topHalf = 0;
   const runs = 40;
   for (let seed = 0; seed < runs; seed++) {
-    const g = createGame(seed + 1000, '관찰', 'pro');
-    act(g, 'offer0');
+    const g = createGame(seed + 1000, '관찰', 'pro', 'eng1');
+    act(g, 'take0');
     // 한 시즌을 끝까지 넘긴다.
     const dice = { rng: seed };
     while (g.phase !== 'end') {
-      const open = g.scene.choices.filter((c) => !c.disabled);
+      const open = withoutIdle(g.scene.choices.filter((c) => !c.disabled));
       act(g, open[Math.floor(rand(dice) * open.length)]!.id);
     }
-    const table = sortTable(g.tables.eu1);
-    const strongest = [...g.leagues.eu1].sort((x, y) => g.clubs[y]!.att + g.clubs[y]!.def - (g.clubs[x]!.att + g.clubs[x]!.def))[0];
+    const table = sortTable(g.tables.eng1!);
+    const strongest = [...g.leagues.eng1!].sort((x, y) => g.clubs[y]!.att + g.clubs[y]!.def - (g.clubs[x]!.att + g.clubs[x]!.def))[0];
     if (table.findIndex((r) => r.club === strongest) < 10) topHalf++;
   }
   assert.ok(topHalf >= runs * 0.8, `가장 강한 팀이 상위 절반에 든 횟수: ${topHalf}/${runs}`);
@@ -151,12 +174,12 @@ test('조사는 이름의 받침에 맞춰 붙는다', async () => {
 
 test('직접 지휘한 라이벌전도 순위표에 반영되어 모든 팀의 경기 수가 맞는다', () => {
   for (let seed = 0; seed < 6; seed++) {
-    const g = createGame(seed * 13 + 77, '지휘', 'analyst');
+    const g = createGame(seed * 13 + 77, '지휘', 'analyst', 'kr5');
     const dice = { rng: seed + 1 };
     let matches = 0;
     while (g.phase !== 'end') {
       if (g.phase === 'match' && g.match!.step === 'shape') matches++;
-      const open = g.scene.choices.filter((c) => !c.disabled && c.id !== 'auto');
+      const open = withoutIdle(g.scene.choices.filter((c) => !c.disabled && c.id !== 'auto'));
       act(g, open[Math.floor(rand(dice) * open.length)]!.id);
     }
     assert.ok(matches >= 2, '라이벌전은 전반기와 후반기에 한 번씩 있다');
@@ -168,7 +191,7 @@ test('직접 지휘한 라이벌전도 순위표에 반영되어 모든 팀의 �
 });
 
 test('수석 코치에게 맡기면 선택 없이 경기가 끝난다', () => {
-  const g = createGame(4242, '위임', 'pro');
+  const g = createGame(4242, '위임', 'pro', 'kr5');
   while (g.phase !== 'match') act(g, firstChoice(g));
   act(g, 'auto');
   assert.equal(g.match!.step, 'done');
@@ -193,7 +216,7 @@ test('전술 상성: 맞춤 전술은 실제로 유리하고, 유불리는 서�
 /** 첫 직접 지휘 경기를 실시간 모드로 시작한다. */
 async function liveGame(seed: number) {
   const { liveTick, liveCommand } = await import('../src/game/match.ts');
-  const g = createGame(seed, '실시간', 'analyst');
+  const g = createGame(seed, '실시간', 'analyst', 'kr5');
   while (g.phase !== 'match') act(g, firstChoice(g));
   act(g, '433');
   act(g, g.season.style);
@@ -284,7 +307,7 @@ test('실시간 경기: 건너뛰면 지금 지시대로 끝까지 진행된다'
 
 /** 첫 여름 이적시장 목록 화면까지 간다. 예산은 넉넉하게 준다. */
 function toMarket(seed: number, rich = true): Game {
-  const g = createGame(seed, '시장', 'scout');
+  const g = createGame(seed, '시장', 'scout', 'kr5');
   // 연봉이 있는 리그에서 시험한다: K3 구단을 고른다.
   while (g.phase !== 'market') act(g, g.scene.choices.find((c) => !c.disabled)!.id);
   if (rich) {
@@ -529,7 +552,7 @@ test('할 일 목록에 계약 만료 임박 선수가 나온다', async () => {
 
 test('선수는 세부 포지션, 주발, 능력치 여섯 개를 가진다', async () => {
   const { statsOf } = await import('../src/game/player.ts');
-  const g = createGame(55, '카드', 'pro');
+  const g = createGame(55, '카드', 'pro', 'kr5');
   act(g, g.scene.choices[0]!.id);
   for (const p of g.squad) {
     assert.ok(p.spot && ['R', 'L', 'B'].includes(p.foot));
@@ -549,7 +572,7 @@ test('이전 버전(3)의 저장도 불러와 이어 할 수 있다', async () =
   delete (old as unknown as Record<string, unknown>).window;
   (old as unknown as Record<string, unknown>).market = [];
   assert.ok(migrate(old));
-  assert.equal(old.version, 7);
+  assert.equal(old.version, 8);
   assert.ok(old.squad.every((p) => typeof p.nat === 'string'), '국적이 생긴다');
   assert.ok(old.squad.every((p) => p.no > 0), '등번호가 생긴다');
   assert.ok(old.squad.every((p) => p.spot && p.dev.length === 6));
@@ -563,18 +586,20 @@ test('K5리그는 2026 시즌 서울 디비전 실제 8팀이다', () => {
   assert.deepEqual(names, ['강남 NISSI', '강동 잇플', '관악 AS', '관악 벽산', '성동 투게더', '양천 TNT', '용산 건융', '중랑 구립'].sort());
 });
 
-test('출발 무대를 고르면 첫 제의가 그 리그에서 온다', () => {
-  for (const start of ['kr3', 'kr1', 'eu1'] as const) {
+test('시험용 지름길: 출발 리그를 주면 그 리그 구단들이 바로 감독직을 제안한다', () => {
+  for (const start of ['kr3', 'jpn1', 'eng1', 'ita5'] as const) {
     const g = createGame(77, '출발', 'pro', start);
-    assert.equal(g.phase, 'offers');
-    const clubs = g.offers.map((o) => g.clubs[o.club]!);
-    assert.ok(clubs.length >= 3 && clubs.every((c) => c.league === start), `${start}에서 제의가 온다`);
+    assert.equal(g.phase, 'career');
+    const clubs = g.hiring!.list.map((v) => g.clubs[v.club]!);
+    assert.ok(clubs.length === 3 && clubs.every((c) => c.league === start), `${start}에서 제의가 온다`);
+    act(g, 'take0');
+    assert.equal(g.phase, 'style');
   }
 });
 
 /** 프리미어리그 구단의 첫 여름 이적시장. */
 function toEngland(seed: number): Game {
-  const g = createGame(seed, '잉글랜드', 'scout', 'eu1');
+  const g = createGame(seed, '잉글랜드', 'scout', 'eng1');
   while (g.phase !== 'market') act(g, g.scene.choices.find((c) => !c.disabled)!.id);
   g.job!.budget = 1e7;
   g.job!.wageBudget = 1e7;
@@ -634,6 +659,169 @@ test('이전 버전(6)의 저장도 불러오면 홈그로운과 ESC 표시가 �
     delete (p as unknown as Record<string, unknown>).esc;
   }
   assert.ok(migrate(old));
-  assert.equal(old.version, 7);
+  assert.equal(old.version, 8);
   assert.ok(old.squad.every((p) => typeof p.hg === 'boolean' && p.esc === false));
+});
+
+// ---------- 세계 리그와 감독 채용 ----------
+
+test('7개국 5부까지 실제 구단 명단이 들어 있고, 구단 이름은 겹치지 않는다', () => {
+  const names = CLUB_LEAGUES.flatMap((l) => CLUB_SEEDS[l]!.map((c) => c.name));
+  assert.equal(new Set(names).size, names.length);
+  for (const id of ['eng1', 'esp1', 'ger1', 'ita1', 'fra1', 'jpn1', 'kr1']) assert.ok(CLUB_SEEDS[id]!.length >= 12, `${id} 구단`);
+  assert.ok(CLUB_SEEDS.esp1!.some((c) => c.name === '레알 마드리드'));
+  assert.ok(CLUB_SEEDS.ger1!.some((c) => c.name === '바이에른 뮌헨'));
+  assert.ok(CLUB_SEEDS.jpn1!.some((c) => c.name === '가시마 앤틀러스'));
+  // 리그 사다리: 나라 안에서 위아래로 이어지고, 나라끼리는 이어지지 않는다.
+  for (const id of CLUB_LEAGUES) {
+    const m = LEAGUES[id]!;
+    if (m.up) assert.equal(LEAGUES[m.up]!.country, m.country);
+    if (m.down) assert.equal(LEAGUES[m.down]!.country, m.country);
+  }
+});
+
+test('자격증: C급은 바로 따고, B급은 C급 뒤 2년(프로 출신은 바로), A급은 한 시즌 강습이다', async () => {
+  const { courseStatus, enroll, finishCourses } = await import('../src/game/hiring.ts');
+  const g = createGame(3, '자격', 'sales');
+  assert.equal(g.manager.license, 0);
+  assert.ok(courseStatus(g).ok);
+  enroll(g);
+  assert.equal(g.manager.license, 1, 'C급은 비시즌에 끝난다');
+  assert.equal(courseStatus(g).ok, false, '일반 출신은 B급까지 2년을 기다린다');
+  assert.match(courseStatus(g).why, /2028년/);
+  const p = createGame(3, '선수', 'pro');
+  assert.ok(courseStatus(p).ok && courseStatus(p).level === 2, '프로 출신은 B급 우선 과정');
+  enroll(p);
+  assert.equal(p.manager.license, 2);
+  p.year += 1;
+  assert.ok(courseStatus(p).ok && courseStatus(p).level === 3);
+  enroll(p);
+  assert.equal(p.manager.license, 2, 'A급은 한 시즌 동안 듣는다');
+  assert.equal(p.manager.course!.level, 3);
+  p.year += 1;
+  finishCourses(p);
+  assert.equal(p.manager.license, 3);
+  assert.equal(p.manager.course, null);
+  assert.match(courseStatus(p).why, /3년/, 'P급은 A급 뒤 3년');
+});
+
+test('채용: 지원서 → 서류 → 면접(질문 3~4개) → 제안 또는 탈락', () => {
+  let offers = 0;
+  let fails = 0;
+  for (let seed = 0; seed < 30; seed++) {
+    const g = createGame(seed + 500, '지원', 'teacher');
+    const i = g.hiring!.list.findIndex((v) => g.clubs[v.club]!.league === 'kr5');
+    assert.ok(i >= 0, 'K5 공고가 있다');
+    act(g, `v${i}`);
+    assert.equal(g.hiring!.list[i]!.state, 'applied');
+    act(g, 'submit');
+    assert.equal(g.hiring!.step, 'review');
+    const v = g.hiring!.list[i]!;
+    assert.ok(v.docNotes.length > 0, '서류 점수의 내역이 있다');
+    if (v.state === 'rejected') continue;
+    act(g, 'next');
+    let asked = 0;
+    while ((g.hiring?.step as string | undefined) === 'interview') {
+      asked++;
+      act(g, g.scene.choices[0]!.id);
+    }
+    assert.ok(asked >= 3 && asked <= 4);
+    if ((g.hiring!.list[i]!.state as string) === 'offer') {
+      offers++;
+      act(g, `take${i}`);
+      assert.equal(g.phase, 'style');
+      assert.equal(g.job!.club, v.club);
+    } else fails++;
+  }
+  assert.ok(offers > 5 && fails > 0, `제안 ${offers}, 탈락 ${fails}`);
+});
+
+test('자격이 모자라면 지원할 수 없다. 독일은 강습 등록을 조건으로 한 단계 아래도 받아 주고, 한국은 받지 않는다', async () => {
+  const { eligibility } = await import('../src/game/hiring.ts');
+  const g = createGame(9, '조건', 'pro');
+  g.manager.license = 2;
+  g.manager.licensed = [0, 2020, 2020, 0, 0];
+  const club = (league: string) => g.clubs[g.leagues[league]![0]!]!;
+  assert.equal(eligibility(g, club('kr5')).ok, true);
+  assert.equal(eligibility(g, club('kr3')).ok, false, 'K3는 A급(게임 규칙)');
+  const de = eligibility(g, club('ger4'));
+  assert.ok(de.ok && de.provisional, '레기오날리가는 A급, B급이면 강습 등록 조건');
+  assert.equal(eligibility(g, club('ger3')).ok, false, '두 단계 아래는 안 된다');
+  assert.equal(eligibility(g, club('esp4')).ok, false, '스페인 4부는 UEFA Pro');
+  g.manager.license = 4;
+  g.manager.rep = 20;
+  assert.match(eligibility(g, club('eng1')).why, /워크퍼밋/, '잉글랜드는 외국인 감독 워크퍼밋');
+});
+
+test('승격으로 요구 자격이 오르면: 일본은 강습을 들으며 한 시즌 지휘하고, 한국은 물러난다', async () => {
+  const { reviewJob } = await import('../src/game/career.ts');
+  const jp = createGame(11, '일본', 'pro', 'jpn3');
+  act(jp, 'take0');
+  jp.manager.license = 3;
+  jp.manager.licensed = [0, 2015, 2016, 2020, 0];
+  jp.manager.rep = 40;
+  jp.clubs[jp.job!.club]!.league = 'jpn2';
+  const a = reviewJob(jp, []);
+  assert.ok(a.stay, a.note);
+  assert.equal(jp.manager.course?.level, 4, 'P급 강습에 등록된다');
+  const kr = createGame(11, '한국', 'pro', 'kr3');
+  act(kr, 'take0');
+  kr.manager.license = 3;
+  kr.manager.licensed = [0, 2015, 2016, 2020, 0];
+  kr.manager.rep = 40;
+  kr.clubs[kr.job!.club]!.league = 'kr2';
+  const b = reviewJob(kr, []);
+  assert.equal(b.stay, false);
+  assert.equal(kr.job, null);
+});
+
+test('외국인 규정은 나라마다 다르다: 스페인은 비EU, 일본은 제휴국 면제, 독일은 한도 없음', async () => {
+  const { isForeign, quota } = await import('../src/game/contract.ts');
+  const run = (start: string) => {
+    const g = createGame(21, '쿼터', 'pro', start);
+    act(g, 'take0');
+    return g;
+  };
+  const es = run('esp1');
+  const p = es.squad[0]!;
+  assert.equal(quota(es).reg, 3);
+  for (const [nat, counted] of [['브라질', true], ['프랑스', false], ['세네갈', false], ['스페인', false], ['잉글랜드', true]] as const) {
+    p.nat = nat;
+    assert.equal(isForeign(es, p), counted, `${nat}`);
+  }
+  const jp = run('jpn1');
+  assert.equal(quota(jp).pitch, 5);
+  p.nat = '태국';
+  assert.equal(isForeign(jp, p), false, '태국은 J리그 제휴국');
+  p.nat = '브라질';
+  assert.equal(isForeign(jp, p), true);
+  const de = run('ger1');
+  assert.equal(quota(de).reg, null);
+  assert.equal(quota(de).pitch, null);
+});
+
+test('이전 버전(7)의 저장: 잉글랜드 리그 이름이 바뀌고 새 나라 리그가 생기며, 맡은 리그의 자격은 가진 것으로 본다', async () => {
+  const { migrate } = await import('../src/game/career.ts');
+  const g = toEngland(4040);
+  const old = JSON.parse(JSON.stringify(g)) as Game;
+  old.version = 7;
+  const keep = ['kr1', 'kr2', 'kr3', 'kr4', 'kr5', 'eng1', 'eng2', 'intl'];
+  for (const rec of [old.leagues, old.tables, old.fixtures] as Record<string, unknown>[]) {
+    for (const k of Object.keys(rec)) if (!keep.includes(k)) delete rec[k];
+    rec.eu1 = rec.eng1;
+    rec.eu2 = rec.eng2;
+    delete rec.eng1;
+    delete rec.eng2;
+  }
+  for (const c of old.clubs) if (c.league === 'eng1') c.league = 'eu1'; else if (c.league === 'eng2') c.league = 'eu2';
+  for (const k of ['license', 'licensed', 'course', 'idle', 'countries']) delete (old.manager as unknown as Record<string, unknown>)[k];
+  delete (old as unknown as Record<string, unknown>).hiring;
+  assert.ok(migrate(old));
+  assert.equal(old.version, 8);
+  assert.equal(old.clubs[old.job!.club]!.league, 'eng1');
+  for (const id of CLUB_LEAGUES) assert.ok(old.leagues[id]!.length > 0, `${id}가 생긴다`);
+  assert.equal(old.manager.license, 4, '프리미어리그 감독은 Pro를 가진 것으로 본다');
+  assert.ok(old.window && old.window.list.length > 0);
+  act(old, 'done');
+  assert.ok(old.phase === 'half1' || old.phase === 'match');
 });

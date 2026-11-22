@@ -1,8 +1,9 @@
 // 감독 커리어를 봇으로 여러 번 돌려 균형을 본다.
-//   node scripts/sim-manager.ts [횟수] [smart|random] [text|live] [출발 리그: kr5|kr4|...|eu1]
+//   node scripts/sim-manager.ts [횟수] [smart|random] [text|live] [출발 리그(지름길): kr5|jpn3|eng1 …, 없으면 구직부터]
 // 셋째 값이 live면 직접 지휘하는 경기를 실시간 모드로 치른다(느리다).
 import { act, createGame, legacyScore } from '../manager/src/game/career.ts';
-import { BACKGROUND_IDS } from '../manager/src/game/data.ts';
+import { BACKGROUND_IDS, LEAGUES } from '../manager/src/game/data.ts';
+import { answerScores, eligibility } from '../manager/src/game/hiring.ts';
 import { rand } from '../manager/src/game/rng.ts';
 import { liveAdvice, liveCommand, liveTick } from '../manager/src/game/match.ts';
 import { weakest } from '../manager/src/game/squad.ts';
@@ -13,7 +14,7 @@ const hintOf = (g: Game, st: StyleId): string | undefined => liveAdvice(g).hints
 const runs = Number(process.argv[2] ?? 200);
 const mode = process.argv[3] ?? 'smart';
 const view = process.argv[4] ?? 'text';
-const startLeague = (process.argv[5] ?? 'kr5') as ClubLeagueId;
+const startLeague = process.argv[5] as ClubLeagueId | undefined;
 /** 이적 시장에서 이미 들여다본 협상. 같은 협상을 되풀이하지 않게 한다. */
 const visited = new Set<string>();
 /** 연봉 예산에 막힌 시장. 이런 시장에서는 후보를 더 적극적으로 정리한다. */
@@ -35,6 +36,36 @@ function playLive(g: Game): void {
   }
 }
 
+/** 구단의 수준(대표팀은 90). */
+const levelOf = (g: Game, club: number): number => (g.clubs[club]!.nation ? 90 : LEAGUES[g.clubs[club]!.league]!.level);
+
+/**
+ * 구직: 강습을 들을 수 있으면 먼저 듣는다. 지금보다 높은 무대의 공고 가운데 명성이 닿을 만한 곳에 세 곳까지 지원하고,
+ * 면접에서는 구단이 바라는 것에 맞는 대답을 고른다. 제안이 오면 더 높은 무대를 고른다.
+ */
+function careerPick(g: Game, ids: string[]): string {
+  const h = g.hiring!;
+  const here = g.job ? levelOf(g, g.job.club) : 0;
+  if (h.step === 'browse') {
+    if (ids.includes('course')) return 'course';
+    const applied = h.list.filter((v) => v.state === 'applied').length;
+    const cands = h.list.map((v, i) => ({ v, i })).filter(({ v }) => v.state === 'open' && eligibility(g, g.clubs[v.club]!).ok)
+      .filter(({ v }) => levelOf(g, v.club) > here + (h.stay ? 3 : -99) && (v.approach || (g.clubs[v.club]!.nation ? 68 : LEAGUES[g.clubs[v.club]!.league]!.rep) <= g.manager.rep + 8))
+      .sort((a, b) => Number(b.v.approach) - Number(a.v.approach) || levelOf(g, b.v.club) - levelOf(g, a.v.club));
+    if (applied < 3 && cands.length > 0 && ids.includes(`v${cands[0]!.i}`)) return `v${cands[0]!.i}`;
+    if (ids.includes('submit')) return 'submit';
+    return ids.includes('stay') ? 'stay' : 'idle';
+  }
+  if (h.step === 'review') return 'next';
+  if (h.step === 'interview') {
+    const sc = answerScores(g);
+    return Object.keys(sc).sort((a, b) => sc[b]! - sc[a]!)[0]!;
+  }
+  const offers = h.list.map((v, i) => ({ v, i })).filter(({ v }) => v.state === 'offer').sort((a, b) => levelOf(g, b.v.club) - levelOf(g, a.v.club));
+  if (offers.length && (!h.stay || levelOf(g, offers[0]!.v.club) > here + 3)) return `take${offers[0]!.i}`;
+  return ids.includes('stay') ? 'stay' : 'idle';
+}
+
 /** 봇의 선택. smart는 그럴듯한 사람처럼 고르고, random은 아무거나 고른다. */
 function choose(g: Game, dice: { rng: number }): string {
   const open = g.scene.choices.filter((c) => !c.disabled);
@@ -45,14 +76,7 @@ function choose(g: Game, dice: { rng: number }): string {
     return stay[Math.floor(rand(dice) * stay.length)]!.id;
   }
   switch (g.phase) {
-    case 'offers': {
-      // 남을 수 있으면 대체로 남되, 더 높은 리그에서 부르면 간다.
-      const offers = g.offers.map((o, i) => ({ o, i, level: g.clubs[o.club]!.nation ? 90 : (g.clubs[o.club]!.att + g.clubs[o.club]!.def) / 2 }));
-      const stay = offers.find((x) => x.o.stay);
-      const best = [...offers].sort((a, b) => b.level - a.level)[0]!;
-      if (stay && best.level < stay.level + 6) return `offer${stay.i}`;
-      return `offer${best.i}`;
-    }
+    case 'career': return careerPick(g, open.map((c) => c.id));
     case 'style': return g.lastStyle ?? 'wide';
     case 'match': {
       // 상대 전술이 읽히면 '유리'라고 적힌 전술로 바꾸고, 아니면 그대로 간다.
@@ -149,8 +173,12 @@ const moves: Record<string, number> = {};
 let signedTotal = 0;
 /** 봇의 서명을 막은 사유. */
 const blocked: Record<string, number> = {};
-const stats = { seasons: 0, sacked: 0, titles: 0, promotions: 0, score: [] as number[], peak: [] as number[], top: {} as Record<string, number>, nation: 0, wc: 0, firstTop: [] as number[] };
-const order = ['K5', 'K4', 'K3', 'K리그2', 'K리그1', '잉글랜드 2부', '잉글랜드 1부'];
+const stats = { idle: 0, seasons: 0, sacked: 0, titles: 0, promotions: 0, score: [] as number[], peak: [] as number[], top: {} as Record<string, number>, nation: 0, wc: 0, firstTop: [] as number[] };
+/** 도달한 가장 높은 무대: 리그 수준이 가장 높은 리그. */
+const topOf = (lids: string[]): string => {
+  const best = lids.filter((l) => LEAGUES[l]).sort((a, b) => LEAGUES[b]!.level - LEAGUES[a]!.level)[0];
+  return best ? LEAGUES[best]!.short : '없음';
+};
 for (let i = 0; i < runs; i++) {
   const dice = { rng: 9000 + i };
   visited.clear();
@@ -174,26 +202,26 @@ for (let i = 0; i < runs; i++) {
   }
   g.history.forEach((h, k) => { if (!h.club.endsWith('대표팀')) gaps[Math.min(2, Math.floor(k / 10))]!.push(h.pos); });
   stats.seasons += g.history.length;
+  stats.idle += g.manager.idle;
   stats.sacked += g.history.filter((h) => h.outcome === 'sacked').length;
   stats.titles += g.history.filter((h) => h.outcome === 'title').length;
   stats.promotions += g.promotions;
   stats.score.push(legacyScore(g));
   stats.peak.push(g.manager.peakRep);
-  const reached = Math.max(...g.history.map((h) => order.indexOf(h.league)));
-  const label = g.history.some((h) => h.club.endsWith('대표팀')) ? '국가대표' : order[reached] ?? '?';
+  const label = g.history.some((h) => h.club.endsWith('대표팀')) ? '국가대표' : topOf(g.history.map((h) => h.lid ?? ''));
   stats.top[label] = (stats.top[label] ?? 0) + 1;
   if (g.history.some((h) => h.club.endsWith('대표팀'))) stats.nation++;
   if (g.trophies.some((t) => t.name === '월드컵 우승')) stats.wc++;
-  const idx = g.history.findIndex((h) => h.league === 'K리그1');
+  const idx = g.history.findIndex((h) => h.lid !== undefined && LEAGUES[h.lid]?.tier === 1);
   if (idx >= 0) stats.firstTop.push(idx + 1);
 }
 const med = (a: number[]): number => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)] ?? 0;
-console.log(`${mode} 봇 ${runs}회 (${view === 'live' ? '실시간' : '빠른 진행'}, ${startLeague} 출발)`);
-console.log(`커리어당 시즌 ${(stats.seasons / runs).toFixed(1)}, 경질 ${(stats.sacked / runs).toFixed(2)}회, 리그 우승 ${(stats.titles / runs).toFixed(2)}회, 승격 ${(stats.promotions / runs).toFixed(2)}회`);
+console.log(`${mode} 봇 ${runs}회 (${view === 'live' ? '실시간' : '빠른 진행'}, ${startLeague ? `${startLeague} 출발` : '구직부터'})`);
+console.log(`커리어당 감독 시즌 ${(stats.seasons / runs).toFixed(1)}, 무직(코치) ${(stats.idle / runs).toFixed(1)}, 경질 ${(stats.sacked / runs).toFixed(2)}회, 리그 우승 ${(stats.titles / runs).toFixed(2)}회, 승격 ${(stats.promotions / runs).toFixed(2)}회`);
 console.log(`커리어 점수 중앙값 ${med(stats.score)}, 최고 ${Math.max(...stats.score)}, 최저 ${Math.min(...stats.score)} / 최고 평판 중앙값 ${med(stats.peak).toFixed(0)}`);
 console.log('리그 평균 순위(초반/중반/후반 10시즌):', gaps.map((a) => (a.reduce((x, y) => x + y, 0) / Math.max(1, a.length)).toFixed(1)).join(' / '));
 console.log('도달한 가장 높은 무대:', Object.entries(stats.top).map(([k, v]) => `${k} ${v}`).join(', '));
 console.log(`직접 지휘한 라이벌전: ${big.w}승 ${big.d}무 ${big.l}패 (승률 ${((big.w / Math.max(1, big.w + big.d + big.l)) * 100).toFixed(0)}%)`);
 console.log(`구단 영입 ${(signedTotal / runs).toFixed(1)}명/커리어, 서명이 막힌 사유: ${Object.entries(blocked).map(([k, v]) => `${k} ${(v / runs).toFixed(1)}`).join(', ') || '없음'}`);
 console.log('선수 이동(커리어당):', Object.entries(moves).map(([k, v]) => `${k} ${(v / runs).toFixed(1)}`).join(', '));
-console.log(`국가대표 감독 ${stats.nation}회, 월드컵 우승 ${stats.wc}회, 1부 첫 도달까지 시즌 중앙값 ${med(stats.firstTop)} (${stats.firstTop.length}명)`);
+console.log(`국가대표 감독 ${stats.nation}회, 월드컵 우승 ${stats.wc}회, 어느 나라든 1부 첫 도달까지 감독 시즌 중앙값 ${med(stats.firstTop)} (${stats.firstTop.length}명)`);

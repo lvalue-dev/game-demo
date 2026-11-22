@@ -1,7 +1,12 @@
 // 감독이 지금 챙겨야 할 일. 진행 화면과 스쿼드 탭 위에 보여 준다.
 import { won } from './data.ts';
+import { ko } from './josa.ts';
 import { ESC_SLOTS, NON_HG_LIMIT, RESERVE_LIMIT, englandStatus, foreignCount, inEngland, promiseKept, quota, totalWages } from './contract.ts';
 import { posPenalty } from './player.ts';
+import { LEAGUES } from './data.ts';
+import { COUNTRIES } from './countries.ts';
+import { courseStatus, licenseName } from './hiring.ts';
+import { positionOf } from './world.ts';
 import { lineAt, myClub } from './squad.ts';
 import type { Game, Player, Tone } from './types.ts';
 
@@ -55,6 +60,22 @@ export function agenda(g: Game): Todo[] {
     }
     const debts = job.debts.filter((d) => d.due === g.year + 1);
     if (debts.length) todo.push({ text: `다음 시즌에 낼 분할 이적료 ${won(debts.reduce((s, d) => s + d.amount, 0))}.`, tone: 'plain', where: '예산' });
+  }
+
+  // 지도자 자격: 승격하면 더 높은 자격이 필요한지, 지금 들을 수 있는 강습이 있는지.
+  if (!club.nation) {
+    const meta = LEAGUES[club.league]!;
+    const up = meta.up ? LEAGUES[meta.up]! : null;
+    const m = g.manager;
+    if (up && up.license > m.license && m.course?.level !== up.license) {
+      const pos = g.round > 0 ? positionOf(g, club.league, club.id) : 0;
+      const close = pos > 0 && pos <= meta.promote + 2;
+      const country = COUNTRIES[meta.country];
+      const way = up.license - m.license === 1 && country.grace ? `${country.name} 규정상 강습을 들으며 한 시즌은 지휘할 수 있다` : '자격이 없으면 승격해도 감독직을 내려놓아야 한다';
+      todo.push({ text: ko`${up.name}는 ${licenseName(up.license, meta.country)}이 필요하다(지금 ${licenseName(m.license)}). ${way}.`, tone: close ? 'bad' : 'plain', where: '시즌 뒤 구직 화면 · 강습' });
+    }
+    const st = courseStatus(g);
+    if (st.ok) todo.push({ text: `${licenseName(st.level)} 강습을 신청할 수 있다. 시즌이 끝나면 구직 화면에서 신청한다.`, tone: 'plain', where: '시즌 뒤 강습' });
   }
 
   const off = g.squad.map((p, i) => ({ p, line: lineAt(i) })).filter((x) => posPenalty(x.p.spot, x.line) > 0);

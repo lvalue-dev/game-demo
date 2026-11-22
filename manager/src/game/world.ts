@@ -2,7 +2,7 @@
 import { CLUB_LEAGUES, CLUB_SEEDS, LEAGUES, NATIONS, STYLE_IDS } from './data.ts';
 import { chance, int, pick, poisson, shuffle, spread } from './rng.ts';
 import { usualShape } from './tactics.ts';
-import type { Club, ClubLeagueId, Game, LeagueId, MatchLine, Row, StyleId } from './types.ts';
+import type { Club, Game, LeagueId, MatchLine, Row, StyleId } from './types.ts';
 
 export type { Side } from './power.ts';
 import type { Side } from './power.ts';
@@ -78,8 +78,14 @@ function hash(text: string): number {
 }
 
 export function createClubs(g: Game): void {
-  for (const league of CLUB_LEAGUES) {
-    const meta = LEAGUES[league];
+  addLeagues(g, CLUB_LEAGUES);
+  addNations(g);
+}
+
+/** 리그들의 구단을 만든다. 저장 파일을 새 버전으로 옮길 때도 빠진 리그만 골라 쓴다. 순위표와 일정도 함께 만든다. */
+export function addLeagues(g: Game, leagues: string[]): void {
+  for (const league of leagues) {
+    const meta = LEAGUES[league]!;
     const seeds = CLUB_SEEDS[league];
     const ranked = [...seeds].sort((a, b) => b.edge - a.edge);
     g.leagues[league] = seeds.map((seed) => {
@@ -98,7 +104,12 @@ export function createClubs(g: Game): void {
       g.clubs.push(club);
       return club.id;
     });
+    g.tables[league] = g.leagues[league]!.map(emptyRow);
+    g.fixtures[league] = roundRobin(shuffle(g, [...g.leagues[league]!]), true);
   }
+}
+
+function addNations(g: Game): void {
   g.leagues.intl = [];
   for (const nation of NATIONS) {
     const h = hash(nation.name);
@@ -190,12 +201,12 @@ export function evolveClubs(g: Game, skip: number): void {
 
 export interface Move {
   club: number;
-  from: ClubLeagueId;
-  to: ClubLeagueId;
+  from: string;
+  to: string;
 }
 
 /** 한 리그에서 강등되는 팀 수. 아랫리그에서 올라오는 수와 같다. */
-export function dropCount(league: ClubLeagueId): number {
+export function dropCount(league: string): number {
   const down = LEAGUES[league].down;
   return down ? LEAGUES[down].promote : 0;
 }

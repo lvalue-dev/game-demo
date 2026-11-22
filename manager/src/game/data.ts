@@ -1,41 +1,10 @@
-// 리그, 구단 이름, 전술, 능력치 같은 고정 자료. 구단과 대회, 매체 이름은 모두 지어낸 것이다.
-import type { AttrId, BackgroundId, ClubLeagueId, FocusId, PlanId, Pos, StyleId, TraitId } from './types.ts';
+// 구단 명단, 전술, 능력치 같은 고정 자료. 리그 구조와 나라별 규정은 countries.ts에 있다.
+// 구단은 모두 실제 구단이다(이름과 색만 쓰고 문장은 그리지 않는다). 선수와 감독, 매체는 지어낸 것이다.
+import { CLUB_LEAGUES, RESEARCHED } from './countries.ts';
+import type { AttrId, BackgroundId, FocusId, PlanId, Pos, StyleId, TraitId } from './types.ts';
 
-export interface LeagueMeta {
-  name: string;
-  short: string;
-  region: 'kr' | 'eu';
-  /** 평균 전력. 선수 실력과 같은 눈금이다. */
-  level: number;
-  /** 이 리그 구단이 감독에게 기대하는 평판. */
-  rep: number;
-  /** 한 시즌 기본 예산(백만 원). */
-  money: number;
-  up: ClubLeagueId | null;
-  down: ClubLeagueId | null;
-  /** 한 시즌에 윗리그로 올라가는 팀 수. 그만큼 윗리그에서 내려온다. */
-  promote: number;
-  /** 다음 시즌 대륙 클럽 대회에 나가는 팀 수. */
-  conti: number;
-  /** 우승 트로피의 무게. 커리어 점수에 쓴다. */
-  weight: number;
-  blurb: string;
-}
-
-export const CLUB_LEAGUES: ClubLeagueId[] = ['kr5', 'kr4', 'kr3', 'kr2', 'kr1', 'eu2', 'eu1'];
-
-// 리그의 이름과 참가 구단은 2026년(잉글랜드는 2026-27 시즌) 실제 구성을 따른다.
-// 일정 방식은 단순화했다: 모든 팀이 홈과 원정으로 한 번씩 만나고, 승격과 강등은 정해진 수만큼 바로 이뤄진다.
-// K5리그는 권역별 동호인 리그다. 서울 권역을 골랐지만 전체 명단은 확인하지 못해 일부만 실제 팀이다.
-export const LEAGUES: Record<ClubLeagueId, LeagueMeta> = {
-  kr5: { name: 'K5리그 서울', short: 'K5', region: 'kr', level: 32, rep: 0, money: 3, up: 'kr4', down: null, promote: 2, conti: 0, weight: 1, blurb: '주말 아침 운동장을 빌려 뛰는 동호인 리그' },
-  kr4: { name: 'K4리그', short: 'K4', region: 'kr', level: 42, rep: 10, money: 30, up: 'kr3', down: 'kr5', promote: 2, conti: 0, weight: 2, blurb: '직장과 축구를 병행하는 선수가 많은 세미프로 리그' },
-  kr3: { name: 'K3리그', short: 'K3', region: 'kr', level: 51, rep: 22, money: 150, up: 'kr2', down: 'kr4', promote: 2, conti: 0, weight: 4, blurb: '세미프로 최상위. 버스로 전국을 돈다' },
-  kr2: { name: 'K리그2', short: 'K리그2', region: 'kr', level: 60, rep: 36, money: 800, up: 'kr1', down: 'kr3', promote: 2, conti: 0, weight: 7, blurb: '프로 2부. 승격 경쟁이 가장 치열한 무대' },
-  kr1: { name: 'K리그1', short: 'K리그1', region: 'kr', level: 69, rep: 50, money: 4000, up: null, down: 'kr2', promote: 0, conti: 2, weight: 15, blurb: '국내 최고 무대' },
-  eu2: { name: 'EFL 챔피언십', short: '잉글랜드 2부', region: 'eu', level: 74, rep: 62, money: 15000, up: 'eu1', down: null, promote: 3, conti: 0, weight: 12, blurb: '46경기를 치르는 잉글랜드 2부. 유럽 무대의 입구' },
-  eu1: { name: '프리미어리그', short: '잉글랜드 1부', region: 'eu', level: 85, rep: 76, money: 60000, up: null, down: 'eu2', promote: 0, conti: 4, weight: 40, blurb: '세계에서 가장 치열한 리그' },
-};
+export type { LeagueMeta } from './countries.ts';
+export { CLUB_LEAGUES, LEAGUES } from './countries.ts';
 
 export interface ClubSeed {
   name: string;
@@ -50,7 +19,7 @@ export interface ClubSeed {
 const c = (name: string, edge: number, a?: string, b?: string, pattern?: number): ClubSeed =>
   ({ name, edge, colors: a && b ? [a, b] : null, pattern });
 
-export const CLUB_SEEDS: Record<ClubLeagueId, ClubSeed[]> = {
+const HAND: Record<string, ClubSeed[]> = {
   // 서울 권역. 양천 TNT FC, 벽산 플레이어스, 닛시FC는 실제 팀이고, 나머지는 명단을 확인하지 못해 지어낸 팀이다.
   kr5: [
     // 2026 시즌 K5리그 서울 디비전 8팀(나무위키 편집본 기준). 전력 차이는 최근 우승 기록(양천 TNT 2021·2022·2024·2025, 관악 벽산 2019·2023)과
@@ -82,7 +51,7 @@ export const CLUB_SEEDS: Record<ClubLeagueId, ClubSeed[]> = {
     c('인천 유나이티드', 0, '#0d4a9a', '#1a1a1a', 2), c('김천 상무', 0, '#d21f2b', '#1b3668'), c('제주SK', -1, '#f26a1b', '#d21f2b'),
     c('FC안양', -2, '#5f2a9c', '#ffffff'), c('광주FC', -3, '#f6c800', '#b5121b'), c('부천FC 1995', -4, '#b31b1b', '#1a1a1a'),
   ],
-  eu2: [
+  eng2: [
     c('웨스트햄', 5, '#7a263a', '#3bb3e6'), c('울버햄프턴', 4, '#f9b413', '#231f20'), c('번리', 4, '#6c1d45', '#99d6ea'),
     c('사우샘프턴', 3, '#d71920', '#ffffff', 2), c('미들즈브러', 3, '#e11b22', '#ffffff'), c('셰필드 유나이티드', 2, '#ee2737', '#ffffff', 2),
     c('버밍엄 시티', 2, '#183b90', '#ffffff'), c('밀월', 2, '#001d5e', '#ffffff'), c('노리치 시티', 1, '#fff200', '#00a650'),
@@ -92,7 +61,7 @@ export const CLUB_SEEDS: Record<ClubLeagueId, ClubSeed[]> = {
     c('프레스턴', -2, '#ffffff', '#000055'), c('포츠머스', -2, '#001489', '#ffffff'), c('찰턴', -2, '#d4021d', '#ffffff'),
     c('카디프 시티', -3, '#0070b5', '#ffffff'), c('볼턴', -4, '#ffffff', '#263c7e'), c('링컨 시티', -4, '#d6001c', '#ffffff', 2),
   ],
-  eu1: [
+  eng1: [
     c('맨체스터 시티', 6, '#6cabdd', '#1c2c5b'), c('아스널', 6, '#ef0107', '#ffffff'), c('리버풀', 6, '#c8102e', '#00b2a9'),
     c('첼시', 4, '#034694', '#ffffff'), c('뉴캐슬', 3, '#241f20', '#ffffff', 2), c('토트넘', 3, '#ffffff', '#132257'),
     c('맨체스터 유나이티드', 3, '#da291c', '#fbe122'), c('애스턴 빌라', 3, '#670e36', '#95bfe5'), c('브라이턴', 1, '#0057b8', '#ffffff', 2),
@@ -102,6 +71,11 @@ export const CLUB_SEEDS: Record<ClubLeagueId, ClubSeed[]> = {
     c('입스위치 타운', -4, '#3a64a3', '#ffffff'), c('헐 시티', -5, '#f5a12d', '#1a1a1a', 2),
   ],
 };
+
+/** 리그별 구단. 한국 리그와 잉글랜드 1·2부는 손으로 적은 명단(색 포함), 나머지는 위키백과에서 모은 명단이다. */
+export const CLUB_SEEDS: Record<string, ClubSeed[]> = Object.fromEntries(
+  CLUB_LEAGUES.map((id) => [id, HAND[id] ?? (RESEARCHED[id] ?? []).map(([name, edge]) => c(name, edge))]),
+);
 
 /** 국가대표팀. 첫 줄이 감독이 맡을 수 있는 팀이다. 전력 수치는 게임용으로 정한 것이다. */
 export const NATIONS: { name: string; level: number; asia: boolean }[] = [
