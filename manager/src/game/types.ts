@@ -49,6 +49,10 @@ export interface Player {
   unhappy: boolean;
   /** 국적. 외국인 쿼터에 쓴다. */
   nat: string;
+  /** 잉글랜드 홈그로운: 21세 전에 잉글랜드 구단에서 3시즌 이상 훈련했다. */
+  hg: boolean;
+  /** 워크퍼밋 점수(GBE)가 모자라 ESC 예외 슬롯으로 등록했다. */
+  esc: boolean;
   /** 임대 중이면 그 조건. in은 우리가 빌려 온 선수, out은 빌려준 선수. */
   loan: Loan | null;
 }
@@ -142,6 +146,8 @@ export interface Manager {
   /** 평판 0~100. 어느 구단이 불러 주는지를 정한다. */
   rep: number;
   peakRep: number;
+  /** 커리어를 시작한 무대. */
+  start?: ClubLeagueId;
 }
 
 export interface Job {

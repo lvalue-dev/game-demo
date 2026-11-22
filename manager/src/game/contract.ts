@@ -337,3 +337,55 @@ export function relegationCut(g: Game, league: ClubLeagueId): string | null {
   }
   return cut > 0 ? `강등 시 연봉 삭감 조항이 발동해 선수단 연봉이 모두 ${won(round1(cut))} 줄었다.` : null;
 }
+
+// ---------- 잉글랜드: 워크퍼밋과 홈그로운 ----------
+
+/** 잉글랜드 리그(프리미어리그, 챔피언십)를 맡고 있는지. */
+export const inEngland = (g: Game): boolean => !myClub(g).nation && (myClub(g).league === 'eu1' || myClub(g).league === 'eu2');
+
+/** 워크퍼밋에 필요한 GBE 점수와 ESC 예외 슬롯. 실제 규정을 게임에 맞게 줄였다(RULES.md). */
+export const GBE_NEED = 15;
+export const ESC_SLOTS = 4;
+export const ESC_MAX_AGE = 23;
+/** 홈그로운이 아닌 21세 이상 선수의 등록 한도. 25명 중 17명을 우리 등록 인원 16명에 맞춰 줄였다. */
+export const NON_HG_LIMIT = 11;
+
+/** 잉글랜드 국적이 아니면 워크퍼밋이 필요하다. */
+export const needsPermit = (g: Game, p: Player): boolean => inEngland(g) && p.nat !== '잉글랜드';
+
+/**
+ * GBE 점수. 실제로는 A매치 출전, 소속 리그 수준, 출전 시간, 이적료 등으로 매기지만,
+ * 게임에서는 OVR로 갈음한다. OVR 72면 15점이다.
+ */
+export const gbePoints = (p: Player): number => clamp(Math.round((p.ovr - 62) * 1.5), 0, 40);
+
+/** 홈그로운 규정에 세는 선수: 21세 이상이면서 홈그로운이 아닌 선수. */
+export const countsNonHg = (p: Player): boolean => p.age >= 21 && !p.hg;
+
+export function englandStatus(g: Game): { nonHg: number; esc: number } {
+  const list = [...g.squad, ...g.reserves];
+  return { nonHg: list.filter(countsNonHg).length, esc: list.filter((p) => p.esc).length };
+}
+
+/**
+ * 잉글랜드에서 이 선수를 새로 등록할 수 있는지. 안 되면 이유를, 되면 null과 ESC 슬롯을 쓰는지를 돌려준다.
+ */
+export function englandCheck(g: Game, p: Player): { why: string | null; esc: boolean } {
+  if (!inEngland(g)) return { why: null, esc: false };
+  const st = englandStatus(g);
+  let esc = false;
+  if (needsPermit(g, p) && gbePoints(p) < GBE_NEED) {
+    if (p.age > ESC_MAX_AGE) return { why: `워크퍼밋을 받을 수 없다(GBE ${gbePoints(p)}점 / ${GBE_NEED}점, ESC 예외는 ${ESC_MAX_AGE}세 이하만)`, esc: false };
+    if (st.esc >= ESC_SLOTS) return { why: `ESC 예외 슬롯 ${ESC_SLOTS}개를 다 썼다(GBE ${gbePoints(p)}점)`, esc: false };
+    esc = true;
+  }
+  if (countsNonHg(p) && st.nonHg >= NON_HG_LIMIT) return { why: `홈그로운이 아닌 21세 이상 선수 등록 한도(${NON_HG_LIMIT}명)가 찼다`, esc };
+  return { why: null, esc };
+}
+
+/** 선수 한 명의 잉글랜드 규정 상태를 한 줄로. */
+export function englandText(g: Game, p: Player): string {
+  if (!inEngland(g)) return '';
+  const permit = !needsPermit(g, p) ? '워크퍼밋 불필요' : p.esc ? 'ESC 슬롯 등록' : `GBE ${gbePoints(p)}점${gbePoints(p) >= GBE_NEED ? '(통과)' : '(미달)'}`;
+  return `${permit} · ${p.hg ? '홈그로운' : p.age < 21 ? '21세 이하' : '비홈그로운'}`;
+}

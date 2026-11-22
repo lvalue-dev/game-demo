@@ -93,7 +93,7 @@ const troublemaker = (g: Game): Player => g.squad.find((p) => p.trait === 'rebel
 const keeper = (g: Game): Player => g.squad.find((p) => p.pos === 'GK') as Player;
 const isClub = (g: Game): boolean => !myClub(g).nation;
 const league = (g: Game): ClubLeagueId => myClub(g).league as ClubLeagueId;
-// 가상의 동호인 팀(K5)에서만 동네 축구다운 사건이 일어난다.
+// 동호인 팀(K5)에서만 동네 축구다운 사건이 일어난다. 실제 팀이므로 구단의 잘못을 지어내는 사건은 두지 않는다.
 const amateur = (g: Game): boolean => isClub(g) && league(g) === 'kr5';
 const boss = (g: Game): string => (myClub(g).nation ? '협회장' : amateur(g) ? '회장님' : '구단주');
 const money = (g: Game): number => stage(g).money;
@@ -329,8 +329,8 @@ export const EVENTS: GameEvent[] = [
   {
     id: 'wages', weight: 3,
     when: (g) => isClub(g) && league(g) === 'kr5' && myClub(g).wealth <= 0,
-    title: () => '비어 가는 통장',
-    text: () => '총무가 조용히 다가왔다. 운동장 대관료를 석 달째 못 냈다고 한다. 다음 달부터 구장을 못 쓸 수도 있다.',
+    title: () => '오른 대관료',
+    text: () => '구청이 운동장 대관료를 올렸다. 총무 계산으로는 올 시즌 운영비가 모자라 다음 달 대관 신청이 어렵다.',
     choices: (g) => [
       {
         id: 'pocket', label: '이적 예산을 헐어 메운다', detail: `예산 ${won(Math.min(g.job!.budget, money(g) * 0.3))}`,
@@ -339,7 +339,7 @@ export const EVENTS: GameEvent[] = [
       {
         id: 'sponsor', label: '후원사를 직접 찾아 나선다', detail: '협상력 판정',
         run: (h) => roll(h, 'deal')
-          ? { text: '동네 상가를 사흘 동안 돌았다. 유니폼 소매에 치킨집 로고가 붙었고, 밀린 돈이 해결됐다.', tone: 'good', effects: fx(h, { budget: money(h) * 0.2, morale: 6, confidence: 5 }) }
+          ? { text: '동네 상가를 사흘 동안 돌았다. 유니폼 소매에 치킨집 로고가 붙었고, 모자란 운영비가 채워졌다.', tone: 'good', effects: fx(h, { budget: money(h) * 0.2, morale: 6, confidence: 5 }) }
           : { text: '명함만 한 뭉치 받아 왔다. 훈련에 빠진 사흘이 아깝다.', tone: 'bad', effects: fx(h, { cohesion: -5, morale: -4 }) },
       },
       {

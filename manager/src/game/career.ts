@@ -42,12 +42,13 @@ function blankSeason(): SeasonState {
   };
 }
 
-export function createGame(seed: number, name: string, background: BackgroundId): Game {
+/** 출발 무대를 고르면 명성은 그 무대에 맞춰 시작한다. 높은 무대일수록 기대도, 예산도 크다. */
+export function createGame(seed: number, name: string, background: BackgroundId, start: ClubLeagueId = 'kr5'): Game {
   const attrs: Record<AttrId, number> = { tactics: 6, lead: 6, youth: 6, deal: 6, eye: 6 };
   for (const [key, value] of Object.entries(BACKGROUNDS[background].bonus)) attrs[key as AttrId] += value as number;
   const g: Game = {
-    rng: seed | 0, version: 6, year: START_YEAR, nextId: 1,
-    manager: { name: name.trim() || '김감독', age: START_AGE, background, attrs, rep: 2, peakRep: 2 },
+    rng: seed | 0, version: 7, year: START_YEAR, nextId: 1,
+    manager: { name: name.trim() || '김감독', age: START_AGE, background, attrs, rep: LEAGUES[start].rep + 2, peakRep: LEAGUES[start].rep + 2, start },
     clubs: [],
     leagues: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
     tables: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
@@ -265,7 +266,7 @@ function enterMarket(g: Game, window: 'summer' | 'winter'): void {
 
 /** 이전 버전의 저장을 지금 버전에 맞춘다. 맞출 수 없으면 false. */
 export function migrate(g: Game): boolean {
-  if (g.version < 3 || g.version > 6) return false;
+  if (g.version < 3 || g.version > 7) return false;
   let reopen = false;
   for (const p of g.squad) ensureDetail(p);
   if (g.version === 3) {
@@ -302,6 +303,12 @@ export function migrate(g: Game): boolean {
     const region = g.job && !myClub(g).nation ? LEAGUES[myClub(g).league as ClubLeagueId].region : 'kr';
     for (const p of [...g.squad, ...g.reserves]) Object.assign(p, { nat: p.nat ?? guessNat(p, region), loan: p.loan ?? null });
     if (g.job) g.job.debts = g.job.debts ?? [];
+    reopen = true;
+  }
+  if (g.version === 6) {
+    // 잉글랜드 워크퍼밋과 홈그로운이 생겼다. 잉글랜드 국적 선수를 홈그로운으로 본다.
+    g.version = 7;
+    for (const p of [...g.squad, ...g.reserves, ...g.loaned]) Object.assign(p, { hg: p.hg ?? p.nat === '잉글랜드', esc: p.esc ?? false });
     reopen = true;
   }
   // 이적 시장 한가운데서 저장했다면, 모든 변환을 마친 뒤 새 시장으로 다시 연다.
@@ -745,12 +752,15 @@ function buildOffers(g: Game): Offer[] {
   for (let tries = 0; count > 0 && tries < 30; tries++) {
     // 평판이 닿는 가장 높은 리그에서 주로 연락이 온다. 경질된 감독에게는 한 단계 아래에서 온다.
     const drop = g.sacked ? int(g, 1, 2) : chance(g, 0.6) ? 0 : chance(g, 0.7) ? 1 : 2;
-    const league = eligible[Math.max(0, eligible.length - 1 - drop)] as ClubLeagueId;
+    // 첫 제의는 고른 출발 무대에서 온다.
+    const league = first ? (g.manager.start ?? 'kr5') : (eligible[Math.max(0, eligible.length - 1 - drop)] as ClubLeagueId);
     const pool = g.leagues[league].map((id) => g.clubs[id] as Club).filter((c) => !taken.has(c.id));
     if (pool.length === 0) continue;
     // 감독 자리가 나는 곳은 대개 지난 시즌에 부진했던 팀이다.
     pool.sort((a, b) => b.lastPos - a.lastPos);
-    const club = pool[int(g, 0, Math.min(pool.length - 1, first ? pool.length - 1 : 5))] as Club;
+    // K5 밖에서 시작하는 신인 감독에게는 지난 시즌 하위권 구단만 연락한다.
+    const reach = first ? ((g.manager.start ?? 'kr5') === 'kr5' ? pool.length - 1 : Math.floor(pool.length / 2) - 1) : 5;
+    const club = pool[int(g, 0, Math.min(pool.length - 1, Math.max(0, reach)))] as Club;
     taken.add(club.id);
     offers.push({ club: club.id, kind: 'club', stay: false, pitch: `${LEAGUES[league].name}(${LEAGUES[league].short}) · 지난 시즌 ${club.lastPos}위 · ${wealthText(club.wealth)}` });
     count--;
@@ -772,7 +782,13 @@ function enterOffers(g: Game): void {
   const first = g.history.length === 0;
   const blocks: Block[] = [];
   if (first) {
-    blocks.push({ kind: 'text', text: `${g.manager.name}, ${g.manager.age}세. ${BACKGROUNDS[g.manager.background].name}. 지도자 자격증을 따고 처음 받은 연락은 K5리그 동호인 팀 세 곳이다. 월급은 없고, 회식비는 회비에서 나온다.` });
+    const start = g.manager.start ?? 'kr5';
+    blocks.push({
+      kind: 'text',
+      text: start === 'kr5'
+        ? `${g.manager.name}, ${g.manager.age}세. ${BACKGROUNDS[g.manager.background].name}. 지도자 자격증을 따고 처음 받은 연락은 K5리그 동호인 팀 세 곳이다. 월급은 없고, 회식비는 회비에서 나온다.`
+        : ko`${g.manager.name}, ${g.manager.age}세. ${BACKGROUNDS[g.manager.background].name}. 첫 감독 제의가 ${LEAGUES[start].name}에서 왔다. ${LEAGUES[start].blurb}. 이사회는 처음부터 결과를 원한다.`,
+    });
   } else if (g.sacked) {
     blocks.push({ kind: 'text', text: '짐을 싸서 나왔다. 그래도 전화는 온다.' });
   } else {

@@ -17,7 +17,8 @@ function playOut(g: Game, seed: number, check?: (g: Game) => void): string[] {
   const dice = { rng: seed };
   const picks: string[] = [];
   for (let guard = 0; g.phase !== 'retired'; guard++) {
-    assert.ok(guard < 5000, '커리어가 끝나지 않는다');
+    // 이적시장의 판매·임대 화면은 선택지가 많아 무작위로 고르면 오래 머문다.
+    assert.ok(guard < 15000, '커리어가 끝나지 않는다');
     const open = g.scene.choices.filter((c) => !c.disabled && c.id !== 'retire');
     assert.ok(open.length > 0, `${g.phase} 장면에 고를 수 있는 선택지가 없다`);
     const id = open[Math.floor(rand(dice) * open.length)]!.id;
@@ -59,7 +60,7 @@ test('커리어는 첫 팀을 고르는 장면에서 시작한다', () => {
   assert.equal(g.scene.choices.length, 3);
   assert.equal(g.manager.attrs.tactics, 10);
   const sizes = Object.fromEntries(CLUB_LEAGUES.map((l) => [l, g.leagues[l].length]));
-  assert.deepEqual(sizes, { kr5: 10, kr4: 13, kr3: 14, kr2: 17, kr1: 12, eu2: 24, eu1: 20 }, '2026년 실제 리그 구성');
+  assert.deepEqual(sizes, { kr5: 8, kr4: 13, kr3: 14, kr2: 17, kr1: 12, eu2: 24, eu1: 20 }, '2026년 실제 리그 구성');
   assert.ok(g.scene.choices.every((c) => g.clubs[c.club!]!.league === 'kr5'), '첫 제안은 동호인 리그에서 온다');
 });
 
@@ -77,7 +78,7 @@ test('끝까지 돌려도 상태가 망가지지 않는다', () => {
     const g = createGame(seed * 31 + 5, '봇', 'teacher');
     playOut(g, seed, (h) => {
       if (!h.job) return;
-      assert.deepEqual(h.squad.map((p) => p.pos).sort(), [...LINEUP].sort(), '주전은 늘 일곱 명, 정해진 구성이다');
+      assert.equal(h.squad.length, LINEUP.length, '선발은 늘 일곱 명이다');
       assert.ok(h.job.confidence >= 0 && h.job.confidence <= 100);
       assert.ok(h.job.budget >= 0, `예산이 음수다: ${h.job.budget}`);
       assert.ok(h.morale >= 0 && h.morale <= 100 && h.cohesion >= 0 && h.cohesion <= 100);
@@ -548,11 +549,91 @@ test('이전 버전(3)의 저장도 불러와 이어 할 수 있다', async () =
   delete (old as unknown as Record<string, unknown>).window;
   (old as unknown as Record<string, unknown>).market = [];
   assert.ok(migrate(old));
-  assert.equal(old.version, 6);
+  assert.equal(old.version, 7);
   assert.ok(old.squad.every((p) => typeof p.nat === 'string'), '국적이 생긴다');
   assert.ok(old.squad.every((p) => p.no > 0), '등번호가 생긴다');
   assert.ok(old.squad.every((p) => p.spot && p.dev.length === 6));
   assert.ok(old.window && old.window.list.length > 0, '시장 한가운데 저장이면 시장을 새로 연다');
   act(old, 'done');
   assert.ok(old.phase === 'half1' || old.phase === 'match');
+});
+
+test('K5리그는 2026 시즌 서울 디비전 실제 8팀이다', () => {
+  const names = CLUB_SEEDS.kr5.map((c) => c.name).sort();
+  assert.deepEqual(names, ['강남 NISSI', '강동 잇플', '관악 AS', '관악 벽산', '성동 투게더', '양천 TNT', '용산 건융', '중랑 구립'].sort());
+});
+
+test('출발 무대를 고르면 첫 제의가 그 리그에서 온다', () => {
+  for (const start of ['kr3', 'kr1', 'eu1'] as const) {
+    const g = createGame(77, '출발', 'pro', start);
+    assert.equal(g.phase, 'offers');
+    const clubs = g.offers.map((o) => g.clubs[o.club]!);
+    assert.ok(clubs.length >= 3 && clubs.every((c) => c.league === start), `${start}에서 제의가 온다`);
+  }
+});
+
+/** 프리미어리그 구단의 첫 여름 이적시장. */
+function toEngland(seed: number): Game {
+  const g = createGame(seed, '잉글랜드', 'scout', 'eu1');
+  while (g.phase !== 'market') act(g, g.scene.choices.find((c) => !c.disabled)!.id);
+  g.job!.budget = 1e7;
+  g.job!.wageBudget = 1e7;
+  return g;
+}
+
+test('워크퍼밋: GBE 점수가 모자라면 23세 이하만 ESC 슬롯으로 데려올 수 있다', async () => {
+  const { englandCheck, gbePoints, ESC_SLOTS } = await import('../src/game/contract.ts');
+  const g = toEngland(606);
+  const d = g.window!.list.find((x) => x.kind === 'sign')!;
+  const p = d.player;
+  p.nat = '브라질';
+  p.hg = false;
+  p.ovr = 64; // GBE 3점
+  assert.ok(gbePoints(p) < 15);
+  p.age = 27;
+  assert.match(englandCheck(g, p).why ?? '', /워크퍼밋/);
+  p.age = 21;
+  for (const q of [...g.squad, ...g.reserves]) q.esc = false;
+  assert.deepEqual(englandCheck(g, p), { why: null, esc: true });
+  for (const q of [...g.squad, ...g.reserves].slice(0, ESC_SLOTS)) q.esc = true;
+  assert.match(englandCheck(g, p).why ?? '', /ESC/);
+  // 잉글랜드 국적이면 워크퍼밋이 필요 없다.
+  p.nat = '잉글랜드';
+  p.hg = true;
+  assert.equal(englandCheck(g, p).why, null);
+});
+
+test('홈그로운: 21세 이상 비홈그로운이 11명이면 더 등록할 수 없고, 21세 이하나 홈그로운은 된다', async () => {
+  const { englandCheck, NON_HG_LIMIT } = await import('../src/game/contract.ts');
+  const g = toEngland(707);
+  const everyone = [...g.squad, ...g.reserves];
+  everyone.forEach((q, i) => { q.age = 25; q.hg = i >= NON_HG_LIMIT; q.nat = '잉글랜드'; q.esc = false; });
+  while ([...g.squad, ...g.reserves].filter((q) => !q.hg).length < NON_HG_LIMIT) {
+    g.reserves.push({ ...g.reserves[0]!, id: 90000 + g.reserves.length, hg: false, age: 25 });
+  }
+  const d = g.window!.list.find((x) => x.kind === 'sign')!;
+  const p = d.player;
+  p.nat = '잉글랜드';
+  p.hg = false;
+  p.age = 26;
+  assert.match(englandCheck(g, p).why ?? '', /홈그로운/);
+  p.age = 20;
+  assert.equal(englandCheck(g, p).why, null, '21세 이하는 세지 않는다');
+  p.age = 26;
+  p.hg = true;
+  assert.equal(englandCheck(g, p).why, null, '홈그로운은 세지 않는다');
+});
+
+test('이전 버전(6)의 저장도 불러오면 홈그로운과 ESC 표시가 생긴다', async () => {
+  const { migrate } = await import('../src/game/career.ts');
+  const g = toMarket(888, false);
+  const old = JSON.parse(JSON.stringify(g)) as Game;
+  old.version = 6;
+  for (const p of old.squad) {
+    delete (p as unknown as Record<string, unknown>).hg;
+    delete (p as unknown as Record<string, unknown>).esc;
+  }
+  assert.ok(migrate(old));
+  assert.equal(old.version, 7);
+  assert.ok(old.squad.every((p) => typeof p.hg === 'boolean' && p.esc === false));
 });

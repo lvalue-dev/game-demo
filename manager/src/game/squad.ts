@@ -20,6 +20,13 @@ export function stage(g: Game): { level: number; money: number; region: 'kr' | '
 }
 
 export function makePlayer(g: Game, pos: Pos, ovr: number, age: number, region: 'kr' | 'eu', korean = false, spot?: Spot): Player {
+  const p = makeRaw(g, pos, ovr, age, region, korean, spot);
+  // 잉글랜드 선수는 대개 홈그로운이고, 외국 선수도 어릴 때 건너와 잉글랜드 유스를 거친 경우가 있다.
+  if (region === 'eu') p.hg = p.nat === '잉글랜드' ? chance(g, 0.9) : chance(g, 0.12);
+  return p;
+}
+
+function makeRaw(g: Game, pos: Pos, ovr: number, age: number, region: 'kr' | 'eu', korean: boolean, spot?: Spot): Player {
   const foreign = !korean && (region === 'eu' ? chance(g, 0.95) : chance(g, 0.12));
   const name = foreign ? foreignName(rand(g), rand(g)) : koreanName(rand(g), rand(g), rand(g));
   const room = age <= 19 ? int(g, 6, 20) : age <= 21 ? int(g, 3, 14) : age <= 24 ? int(g, 0, 7) : 0;
@@ -29,6 +36,7 @@ export function makePlayer(g: Game, pos: Pos, ovr: number, age: number, region: 
     trait: chance(g, 0.35) ? pick(g, TRAIT_IDS) : null, years: 0, goals: 0, temp: 0, homegrown: false,
     ...makeDetail(g, pos, spot), no: 0, contract: null, unhappy: false, loan: null,
     nat: foreign ? pick(g, region === 'eu' ? NATIONS_EU : NATIONS_KR) : '대한민국',
+    hg: false, esc: false,
   };
 }
 

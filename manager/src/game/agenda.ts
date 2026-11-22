@@ -1,6 +1,6 @@
 // 감독이 지금 챙겨야 할 일. 진행 화면과 스쿼드 탭 위에 보여 준다.
 import { won } from './data.ts';
-import { RESERVE_LIMIT, foreignCount, promiseKept, quota, totalWages } from './contract.ts';
+import { ESC_SLOTS, NON_HG_LIMIT, RESERVE_LIMIT, englandStatus, foreignCount, inEngland, promiseKept, quota, totalWages } from './contract.ts';
 import { posPenalty } from './player.ts';
 import { lineAt, myClub } from './squad.ts';
 import type { Game, Player, Tone } from './types.ts';
@@ -47,6 +47,12 @@ export function agenda(g: Game): Todo[] {
     if (q.reg !== null && reg > q.reg) todo.push({ text: `외국인 등록 ${reg}명으로 한도 ${q.reg}명을 넘었다. 새 외국인 선수를 등록할 수 없다.`, tone: 'bad', where: '이적시장' });
     if (q.pitch !== null && start > q.pitch) todo.push({ text: `외국인 선발 ${start}명으로 한도 ${q.pitch}명을 넘었다. 시즌이 시작되면 자동으로 빠진다.`, tone: 'bad', where: '스쿼드 선발 배치' });
 
+    if (inEngland(g)) {
+      const st = englandStatus(g);
+      if (st.nonHg > NON_HG_LIMIT) todo.push({ text: `홈그로운이 아닌 21세 이상 선수가 ${st.nonHg}명으로 한도 ${NON_HG_LIMIT}명을 넘었다. 이런 선수를 새로 등록할 수 없다.`, tone: 'bad', where: '이적시장 판매 · 임대' });
+      else if (st.nonHg >= NON_HG_LIMIT) todo.push({ text: `비홈그로운 등록 한도가 찼다(${st.nonHg}/${NON_HG_LIMIT}). 새로 데려올 수 있는 건 홈그로운이나 21세 이하 선수뿐이다.`, tone: 'plain', where: '이적시장' });
+      if (st.esc > 0) todo.push({ text: `ESC 예외 슬롯 ${st.esc}/${ESC_SLOTS} 사용 중. 워크퍼밋 점수가 모자란 23세 이하 선수만 이 슬롯으로 데려올 수 있다.`, tone: 'plain', where: '이적시장' });
+    }
     const debts = job.debts.filter((d) => d.due === g.year + 1);
     if (debts.length) todo.push({ text: `다음 시즌에 낼 분할 이적료 ${won(debts.reduce((s, d) => s + d.amount, 0))}.`, tone: 'plain', where: '예산' });
   }

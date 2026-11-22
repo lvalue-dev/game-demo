@@ -1,18 +1,19 @@
 // 감독 커리어를 봇으로 여러 번 돌려 균형을 본다.
-//   node scripts/sim-manager.ts [횟수] [smart|random] [text|live]
+//   node scripts/sim-manager.ts [횟수] [smart|random] [text|live] [출발 리그: kr5|kr4|...|eu1]
 // 셋째 값이 live면 직접 지휘하는 경기를 실시간 모드로 치른다(느리다).
 import { act, createGame, legacyScore } from '../manager/src/game/career.ts';
 import { BACKGROUND_IDS } from '../manager/src/game/data.ts';
 import { rand } from '../manager/src/game/rng.ts';
 import { liveAdvice, liveCommand, liveTick } from '../manager/src/game/match.ts';
 import { weakest } from '../manager/src/game/squad.ts';
-import type { Game, StyleId } from '../manager/src/game/types.ts';
+import type { ClubLeagueId, Game, StyleId } from '../manager/src/game/types.ts';
 
 const hintOf = (g: Game, st: StyleId): string | undefined => liveAdvice(g).hints[st];
 
 const runs = Number(process.argv[2] ?? 200);
 const mode = process.argv[3] ?? 'smart';
 const view = process.argv[4] ?? 'text';
+const startLeague = (process.argv[5] ?? 'kr5') as ClubLeagueId;
 /** 이적 시장에서 이미 들여다본 협상. 같은 협상을 되풀이하지 않게 한다. */
 const visited = new Set<string>();
 /** 연봉 예산에 막힌 시장. 이런 시장에서는 후보를 더 적극적으로 정리한다. */
@@ -154,7 +155,7 @@ for (let i = 0; i < runs; i++) {
   const dice = { rng: 9000 + i };
   visited.clear();
   wageTight.clear();
-  const g = createGame(1000 + i * 7919, `봇${i}`, BACKGROUND_IDS[i % BACKGROUND_IDS.length]!);
+  const g = createGame(1000 + i * 7919, `봇${i}`, BACKGROUND_IDS[i % BACKGROUND_IDS.length]!, startLeague);
   let guard = 0;
   while (g.phase !== 'retired') {
     if (g.phase === 'match' && g.match!.step === 'done' && g.match!.kind === 'league') {
@@ -187,7 +188,7 @@ for (let i = 0; i < runs; i++) {
   if (idx >= 0) stats.firstTop.push(idx + 1);
 }
 const med = (a: number[]): number => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)] ?? 0;
-console.log(`${mode} 봇 ${runs}회 (${view === 'live' ? '실시간' : '빠른 진행'})`);
+console.log(`${mode} 봇 ${runs}회 (${view === 'live' ? '실시간' : '빠른 진행'}, ${startLeague} 출발)`);
 console.log(`커리어당 시즌 ${(stats.seasons / runs).toFixed(1)}, 경질 ${(stats.sacked / runs).toFixed(2)}회, 리그 우승 ${(stats.titles / runs).toFixed(2)}회, 승격 ${(stats.promotions / runs).toFixed(2)}회`);
 console.log(`커리어 점수 중앙값 ${med(stats.score)}, 최고 ${Math.max(...stats.score)}, 최저 ${Math.min(...stats.score)} / 최고 평판 중앙값 ${med(stats.peak).toFixed(0)}`);
 console.log('리그 평균 순위(초반/중반/후반 10시즌):', gaps.map((a) => (a.reduce((x, y) => x + y, 0) / Math.max(1, a.length)).toFixed(1)).join(' / '));

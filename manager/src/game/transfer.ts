@@ -8,7 +8,7 @@ import { ko } from './josa.ts';
 import { CLUB_LEAGUES, won } from './data.ts';
 import {
   PROMISES, PROMISE_IDS, RESERVE_LIMIT, agentFee, amateur, askOf, assignNumber, checkPromises, clauseAmount, contractText,
-  defaultTerms, enforceQuota, feeOdds, foreignCount, isForeign, makeContract, marketValue, oddsText, quota, settle,
+  defaultTerms, enforceQuota, englandCheck, englandStatus, englandText, ESC_SLOTS, feeOdds, foreignCount, gbePoints, inEngland, isForeign, makeContract, marketValue, NON_HG_LIMIT, oddsText, quota, settle,
   signingBonus, termsOdds, totalWages, wageFor,
 } from './contract.ts';
 import { profileText } from './player.ts';
@@ -131,6 +131,7 @@ function scoutList(g: Game, kind: 'summer' | 'winter', round: number): Deal[] {
     const kid = makePlayer(g, oldest.pos, level - int(g, 3, 8), int(g, 17, 18), region, region === 'kr');
     kid.pot = Math.min(99, kid.ovr + int(g, 8, 16) + Math.round(g.manager.attrs.youth / 2));
     kid.homegrown = true;
+    kid.hg = region === 'eu';
     list.push(newDeal(g, 'youth', 'youth', kid, 0, '유스', '유소년 팀'));
   }
   return list;
@@ -241,6 +242,8 @@ function blocker(g: Game, d: Deal): string | null {
   if (d.kind === 'renew') return null;
   // 주전으로 오면 밀려난 선수가, 후보로 오면 본인이 후보 명단에 들어간다.
   if (g.reserves.length >= RESERVE_LIMIT) return `등록 인원이 꽉 찼다(후보 ${RESERVE_LIMIT}명). 먼저 판매, 임대, 계약 해지로 자리를 비워라`;
+  const eng = englandCheck(g, d.player);
+  if (eng.why) return eng.why;
   const q = quota(g);
   if (isForeign(g, d.player)) {
     if (q.reg !== null && foreignCount(g, all(g)) >= q.reg) return `외국인 등록 한도(${q.reg}명)가 찼다`;
@@ -259,7 +262,7 @@ function dealLabel(d: Deal): string {
   return `${p.spot} ${p.name} · ${p.age}세 · OVR ${p.ovr}`;
 }
 
-const natText = (g: Game, p: Player): string => (isForeign(g, p) ? ` · 외국인(${p.nat})` : p.nat !== '대한민국' ? ` · ${p.nat}` : '');
+const natText = (g: Game, p: Player): string => (isForeign(g, p) ? ` · 외국인(${p.nat})` : inEngland(g) ? ` · ${p.nat} · ${englandText(g, p)}` : p.nat !== '대한민국' ? ` · ${p.nat}` : '');
 
 function feeScene(g: Game, d: Deal, eyebrow: string): void {
   const p = d.player;
@@ -517,6 +520,7 @@ function listScene(g: Game, eyebrow: string): void {
         { label: '이적 예산', value: won(job.budget), tone: job.budget < 0 ? 'bad' : 'plain' },
         ...(amateur(g) ? [{ label: '연봉', value: '무급(아마추어 리그)' }] : [{ label: '연봉 총액 / 예산', value: `${won(totalWages(g))} / ${won(job.wageBudget)}`, tone: totalWages(g) > job.wageBudget ? ('bad' as const) : ('plain' as const) }]),
         { label: '등록 선수', value: `선발 ${g.squad.length} · 후보 ${g.reserves.length}/${RESERVE_LIMIT}${g.loaned.length ? ` · 임대 보냄 ${g.loaned.length}` : ''}` },
+        ...(inEngland(g) ? [{ label: '잉글랜드 규정', value: `비홈그로운(21세 이상) ${englandStatus(g).nonHg}/${NON_HG_LIMIT} · ESC 슬롯 ${englandStatus(g).esc}/${ESC_SLOTS}`, tone: englandStatus(g).nonHg > NON_HG_LIMIT ? ('bad' as const) : ('plain' as const) }] : []),
         ...(q.pitch !== null || q.reg !== null ? [{ label: '외국인', value: `등록 ${foreignCount(g, all(g))}${q.reg !== null ? `/${q.reg}` : '(무제한)'} · 선발 ${foreignCount(g, g.squad)}/${q.pitch ?? '-'}` }] : []),
         ...(job.debts.length ? [{ label: '남은 분할 이적료', value: won(round1(job.debts.reduce((s, x) => s + x.amount, 0))) }] : []),
         { label: '이번 시장', value: `영입 ${w.signed} · 판매 ${w.sold}` },
@@ -668,6 +672,10 @@ function sign(g: Game, d: Deal): void {
     line = ko`${p.name}(${p.spot})과 계약했다. ${terms}${paid ? `. ${paid}` : ''}.`;
   }
   p.unhappy = false;
+  if (englandCheck(g, p).esc) {
+    p.esc = true;
+    line += ` 워크퍼밋 점수(GBE ${gbePoints(p)}점)가 모자라 ESC 예외 슬롯으로 등록했다.`;
+  }
   assignNumber(g, p);
   if (startsOnSign(d)) {
     const out = weakest(g.squad, p.pos);

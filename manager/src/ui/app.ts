@@ -6,7 +6,7 @@ import {
 import { effOvr, lineAt, potentialText, ratings, stage, valueOf } from '../game/squad.ts';
 import { formationBoard, formationMini, playerCard, playerRow } from './cards.ts';
 import type { BoardSpot } from './cards.ts';
-import { PROMISES, contractText, depthOf, foreignCount, isForeign, placeAt, promiseKept, quota, swapLineup, totalWages } from '../game/contract.ts';
+import { ESC_SLOTS, NON_HG_LIMIT, PROMISES, contractText, depthOf, englandStatus, englandText, foreignCount, inEngland, isForeign, placeAt, promiseKept, quota, swapLineup, totalWages } from '../game/contract.ts';
 import { SLOTS, lineup } from '../game/live.ts';
 import { agenda } from '../game/agenda.ts';
 import { posPenalty } from '../game/player.ts';
@@ -21,6 +21,8 @@ type Tab = 'play' | 'table' | 'squad' | 'record';
 
 interface HallEntry {
   name: string;
+  /** 출발 무대 이름. 이전 기록에는 없다. */
+  start?: string;
   score: number;
   title: string;
   years: string;
@@ -42,7 +44,7 @@ let tableLeague: LeagueId | null = null;
 let confirmReset = false;
 /** 선발 배치가 거절됐을 때 잠깐 보여 줄 이유. */
 let notice: string | null = null;
-let draft: { name: string; background: BackgroundId } = { name: '', background: 'pro' };
+let draft: { name: string; background: BackgroundId; start: ClubLeagueId } = { name: '', background: 'pro', start: 'kr5' };
 
 const esc = (text: string | number): string => String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
@@ -102,7 +104,7 @@ export function start(data: { game?: unknown }): void {
 
 function begin(): void {
   const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) | 0;
-  game = createGame(seed, draft.name, draft.background);
+  game = createGame(seed, draft.name, draft.background, draft.start);
   tab = 'play';
   tableLeague = null;
   store(SAVE_KEY, game);
@@ -111,7 +113,7 @@ function begin(): void {
 }
 
 function onClick(e: Event): void {
-  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-do],[data-live],[data-live-do],[data-step]');
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-start],[data-do],[data-live],[data-live-do],[data-step]');
   if (!el) return;
   if (el.dataset.step && el.dataset.for) {
     const slider = root.querySelector<HTMLInputElement>(`input[type="range"][data-range="${CSS.escape(el.dataset.for)}"]`);
@@ -125,6 +127,11 @@ function onClick(e: Event): void {
   if ((el.dataset.live || el.dataset.liveDo) && onLiveClick(el)) return;
   if (el.dataset.bg) {
     draft.background = el.dataset.bg as BackgroundId;
+    render();
+    return;
+  }
+  if (el.dataset.start) {
+    draft.start = el.dataset.start as ClubLeagueId;
     render();
     return;
   }
@@ -168,7 +175,7 @@ function onClick(e: Event): void {
     const hall = load<HallEntry[]>(HALL_KEY) ?? [];
     const best = [...game.trophies].sort((a, b) => b.weight - a.weight)[0];
     hall.push({
-      name: game.manager.name, score: legacyScore(game), title: legacyTitle(legacyScore(game)),
+      name: game.manager.name, start: LEAGUES[game.manager.start ?? 'kr5'].short, score: legacyScore(game), title: legacyTitle(legacyScore(game)),
       years: `${game.history[0]?.year ?? game.year}–${game.year}`, best: best ? `${best.year} ${best.name}` : '트로피 없음',
     });
     store(HALL_KEY, hall.sort((a, b) => b.score - a.score).slice(0, 10));
@@ -229,6 +236,16 @@ function render(): void {
   }
 }
 
+const START_NOTE: Record<ClubLeagueId, string> = {
+  kr5: '동호인 리그부터 한 계단씩. 무급, 작은 예산, 가장 긴 성장 이야기',
+  kr4: '세미프로. 연봉이 생기고 외국인은 4명까지. 하위권 구단에서 시작한다',
+  kr3: '세미프로 최상위. K리그2 승격을 노린다. 하위권 구단에서 시작한다',
+  kr2: '프로 2부. 승격 경쟁이 가장 치열하다. 하위권 구단에서 시작한다',
+  kr1: '국내 최고 무대. 대륙 대회와 대표팀 제의가 가깝다. 하위권 구단에서 시작한다',
+  eu2: '잉글랜드 2부. 46경기, 워크퍼밋과 홈그로운 규정을 지켜야 한다. 하위권 구단에서 시작한다',
+  eu1: '세계 최고 리그. 강등권 구단에서 살아남는 것부터. 워크퍼밋과 홈그로운 규정',
+};
+
 function renderStart(): string {
   const hall = load<HallEntry[]>(HALL_KEY) ?? [];
   return `
@@ -253,6 +270,16 @@ function renderStart(): string {
               </button>`).join('')}
           </div>
         </fieldset>
+        <fieldset class="field">
+          <legend class="field__label">어디서 시작할까요?</legend>
+          <div class="choices">
+            ${CLUB_LEAGUES.map((id) => `
+              <button type="button" class="choice${draft.start === id ? ' is-picked' : ''}" data-start="${id}" aria-pressed="${draft.start === id}">
+                <span class="choice__label">${esc(LEAGUES[id].name)}${id === 'kr5' ? ' · 기본' : ''}</span>
+                <span class="choice__detail">${esc(START_NOTE[id])}</span>
+              </button>`).join('')}
+          </div>
+        </fieldset>
         <button type="submit" class="choice choice--primary choice--solo"><span class="choice__label">커리어 시작</span></button>
       </form>
       <section class="section">
@@ -263,10 +290,10 @@ function renderStart(): string {
       <section class="section">
         <h2 class="section__title">명예의 전당</h2>
         <ol class="hall">${hall.map((h) => `
-          <li class="hall__row"><span class="hall__score">${h.score}</span><span class="hall__body"><strong>${esc(h.name)}</strong> · ${esc(h.title)}<br><span class="muted">${esc(h.years)} · ${esc(h.best)}</span></span></li>`).join('')}
+          <li class="hall__row"><span class="hall__score">${h.score}</span><span class="hall__body"><strong>${esc(h.name)}</strong> · ${esc(h.title)}${h.start ? ` · ${esc(h.start)} 출발` : ''}<br><span class="muted">${esc(h.years)} · ${esc(h.best)}</span></span></li>`).join('')}
         </ol>
       </section>` : ''}
-      <p class="fine">K리그와 잉글랜드 리그의 구단은 2026년 실제 구성을 따랐다. 어느 구단이나 리그와도 공식 제휴한 것이 아니며, 문장은 실제 엠블럼이 아니라 팀 색으로 직접 그린 것이다. 게임 속 성적, 사건, 기사, 댓글은 모두 지어낸 것이고, K5리그 팀과 선수, 매체 이름도 가상이다.</p>
+      <p class="fine">K리그와 잉글랜드 리그의 구단은 2026년 실제 구성을 따랐다. 어느 구단이나 리그와도 공식 제휴한 것이 아니며, 문장은 실제 엠블럼이 아니라 팀 색으로 직접 그린 것이다. K5리그는 2026 시즌 서울 디비전의 실제 팀이다. 게임 속 성적, 사건, 기사, 댓글과 선수, 매체 이름은 모두 지어낸 것이다.</p>
       <p class="fine">진행 상황은 이 기기의 브라우저에 저장된다.</p>
     </main>`;
 }
@@ -522,6 +549,7 @@ function renderSquad(g: Game): string {
   const extra = (p: Player): string[] => [
     ...(nation ? [] : [`계약|${contractText(g, p.contract)}`, `시장가|${won(valueOf(p, level, money))}`]),
     `성장|${potentialText(g, p)}`,
+    ...(inEngland(g) ? [`잉글랜드 규정|${p.nat} · ${englandText(g, p)}`] : p.nat !== '대한민국' ? [`국적|${p.nat}`] : []),
     `이번 시즌|${p.goals}골 · 팀에서 ${p.years + 1}번째 시즌${p.homegrown ? ' · 유스 출신' : ''}`,
   ];
   const flag = (p: Player): string | undefined => [p.unhappy ? '불만' : '', p.contract && p.contract.years <= 1 && !p.loan ? '계약 만료 임박' : '', p.loan?.dir === 'in' ? `임대(${p.loan.club})` : '', isForeign(g, p) ? '외국인' : ''].filter(Boolean).join(' · ') || undefined;
@@ -569,7 +597,7 @@ function renderSquad(g: Game): string {
         </li>`;
       }).join('')}</ul>
       ${nation ? '' : `
-      <h3 class="section__sub">후보 ${g.reserves.length}명${q.reg !== null || q.pitch !== null ? ` · 외국인 등록 ${foreignCount(g, [...g.squad, ...g.reserves])}${q.reg !== null ? `/${q.reg}` : ''} · 선발 ${foreignCount(g, g.squad)}/${q.pitch ?? '-'}` : ''}</h3>
+      <h3 class="section__sub">후보 ${g.reserves.length}명${q.reg !== null || q.pitch !== null ? ` · 외국인 등록 ${foreignCount(g, [...g.squad, ...g.reserves])}${q.reg !== null ? `/${q.reg}` : ''} · 선발 ${foreignCount(g, g.squad)}/${q.pitch ?? '-'}` : ''}${inEngland(g) ? ` · 비홈그로운 ${englandStatus(g).nonHg}/${NON_HG_LIMIT} · ESC ${englandStatus(g).esc}/${ESC_SLOTS}` : ''}</h3>
       ${g.reserves.length === 0 ? '<p class="muted">후보 명단이 비어 있다. 이적시장에서 백업이나 로테이션으로 영입하면 여기에 들어온다.</p>' : `<ul class="plist">${g.reserves.map((p) => playerRow(p, {
         note: `${POS_NAME[p.pos]}${p.contract ? ` · ${PROMISES[p.contract.promise].name}` : ''}${promiseKept(g, p) ? '' : ' · 약속 위반 중'}`,
         extra: extra(p), kit: club.colors, flag: flag(p),
