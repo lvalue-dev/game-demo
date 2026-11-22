@@ -3,17 +3,19 @@ import { act, createGame, legacyScore, migrate } from '../game/career.ts';
 import {
   ATTRS, ATTR_IDS, BACKGROUNDS, BACKGROUND_IDS, CLUB_LEAGUES, LEAGUES, POS_NAME, STYLES, won,
 } from '../game/data.ts';
-import { potentialText, ratings, stage, valueOf } from '../game/squad.ts';
+import { effOvr, lineAt, potentialText, ratings, stage, valueOf } from '../game/squad.ts';
 import { formationBoard, formationMini, playerCard, playerRow } from './cards.ts';
 import type { BoardSpot } from './cards.ts';
-import { PROMISES, contractText, depthOf, promiseKept, swapLineup, totalWages } from '../game/contract.ts';
+import { PROMISES, contractText, depthOf, foreignCount, isForeign, placeAt, promiseKept, quota, swapLineup, totalWages } from '../game/contract.ts';
 import { SLOTS, lineup } from '../game/live.ts';
+import { agenda } from '../game/agenda.ts';
+import { posPenalty } from '../game/player.ts';
 import type { Entrant } from '../game/live.ts';
 import { SHAPES, SHAPE_IDS, usualShape } from '../game/tactics.ts';
 import { legacyTitle } from '../game/talk.ts';
 import { dropCount, sortTable, zone } from '../game/world.ts';
 import { isLive, mountLive, onLiveClick, pauseLive, renderLive, unmountLive } from './live.ts';
-import type { BackgroundId, Block, Club, ClubLeagueId, Game, LeagueId, MatchLine, Phase, Player, Pos, ShapeId } from '../game/types.ts';
+import type { BackgroundId, Block, Club, ClubLeagueId, FormRow, Game, LeagueId, MatchLine, Phase, Player, ShapeId } from '../game/types.ts';
 
 type Tab = 'play' | 'table' | 'squad' | 'record';
 
@@ -38,6 +40,8 @@ let game: Game | null = null;
 let tab: Tab = 'play';
 let tableLeague: LeagueId | null = null;
 let confirmReset = false;
+/** 선발 배치가 거절됐을 때 잠깐 보여 줄 이유. */
+let notice: string | null = null;
 let draft: { name: string; background: BackgroundId } = { name: '', background: 'pro' };
 
 const esc = (text: string | number): string => String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
@@ -76,6 +80,18 @@ export function start(data: { game?: unknown }): void {
   root.addEventListener('input', (e) => {
     const input = e.target as HTMLInputElement;
     if (input.id === 'manager-name') draft.name = input.value;
+    if (input.type === 'range' && input.dataset.range) previewRange(input);
+  });
+  root.addEventListener('change', (e) => {
+    const input = e.target as HTMLInputElement;
+    if (input.dataset.range) commitRange(input);
+    const select = e.target as HTMLSelectElement;
+    if (select.dataset.place && game) {
+      const [pid, at] = select.value.split(':');
+      notice = placeAt(game, Number(pid), Number(at));
+      store(SAVE_KEY, game);
+      render();
+    }
   });
   root.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -95,8 +111,17 @@ function begin(): void {
 }
 
 function onClick(e: Event): void {
-  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-do],[data-live],[data-live-do]');
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-do],[data-live],[data-live-do],[data-step]');
   if (!el) return;
+  if (el.dataset.step && el.dataset.for) {
+    const slider = root.querySelector<HTMLInputElement>(`input[type="range"][data-range="${CSS.escape(el.dataset.for)}"]`);
+    if (slider) {
+      const step = Number(slider.step) * Number(el.dataset.step);
+      slider.value = String(Math.min(Number(slider.max), Math.max(Number(slider.min), Number(slider.value) + step)));
+      commitRange(slider);
+    }
+    return;
+  }
   if ((el.dataset.live || el.dataset.liveDo) && onLiveClick(el)) return;
   if (el.dataset.bg) {
     draft.background = el.dataset.bg as BackgroundId;
@@ -281,9 +306,23 @@ const TAB_ICONS: Record<Tab, string> = {
   record: '<svg class="tabs__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5 H17 V9 C17 12 14.8 14.2 12 14.2 C9.2 14.2 7 12 7 9 Z M7 5.5 H3.5 C3.5 8.5 5 10 7.3 10.3 M17 5.5 H20.5 C20.5 8.5 19 10 16.7 10.3 M12 14.2 V18 M8 20.5 H16 L15 18 H9 Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
 };
 
+/** 할 일 목록. 접을 수 있다. */
+function renderTodo(g: Game): string {
+  const items = agenda(g);
+  if (items.length === 0) return '';
+  const urgent = items.filter((t) => t.tone === 'bad').length;
+  return `<details class="todo"${urgent > 0 ? ' open' : ''}>
+    <summary class="todo__sum">할 일 ${items.length}${urgent > 0 ? ` <span class="todo__urgent">급함 ${urgent}</span>` : ''}</summary>
+    <ul class="todo__list">${items.map((t) => `<li class="todo__item todo__item--${t.tone}"><span>${esc(t.text)}</span><span class="todo__where">${esc(t.where)}</span></li>`).join('')}</ul>
+  </details>`;
+}
+
+const TODO_PHASES: Phase[] = ['style', 'focus', 'market', 'winter', 'half1', 'event', 'outcome', 'plan', 'end', 'growth'];
+
 function renderScene(g: Game): string {
   const s = g.scene;
   return `
+    ${TODO_PHASES.includes(g.phase) ? renderTodo(g) : ''}
     <article class="scene">
       <p class="eyebrow">${esc(s.eyebrow)}</p>
       <h2 class="scene__title">${esc(s.title)}</h2>
@@ -358,17 +397,79 @@ function renderBlock(g: Game, b: Block): string {
     case 'card': return playerCard(b.player, { price: b.price, note: b.note, compare: b.compare });
     case 'form': return `
       <section class="contract" aria-label="${esc(b.title)}">
-        <header class="contract__head"><span class="contract__seal">계약서</span><h3 class="contract__title">${esc(b.title)}</h3></header>
+        <header class="contract__head"><span class="contract__seal">제안서</span><h3 class="contract__title">${esc(b.title)}</h3></header>
         ${b.rows.map((r) => `
           <div class="contract__row">
             <p class="contract__label">${esc(r.label)}${r.note ? `<span class="contract__note">${esc(r.note)}</span>` : ''}</p>
-            <div class="chips">${r.options.map((o) => `<button type="button" class="chip${o.on ? ' is-on' : ''}" data-act="${esc(o.id)}" aria-pressed="${o.on}"${o.disabled ? ' disabled' : ''}>${esc(o.label)}</button>`).join('')}</div>
+            ${r.options ? `<div class="chips">${r.options.map((o) => `<button type="button" class="chip${o.on ? ' is-on' : ''}" data-act="${esc(o.id)}" aria-pressed="${o.on}"${o.disabled ? ' disabled' : ''}>${esc(o.label)}</button>`).join('')}</div>` : ''}
+            ${r.range ? renderRange(r.label, r.range) : ''}
           </div>`).join('')}
         <p class="contract__sign">구단 대표 ______ &nbsp; 선수 ______</p>
       </section>`;
     case 'feed': return `<ul class="feed">${b.items.map((f) => `
       <li class="feed__item feed__item--${f.tone}"><p class="feed__text">${esc(f.text)}</p><p class="feed__who">${esc(f.who)} · ${esc(f.where)}</p></li>`).join('')}</ul>`;
   }
+}
+
+type Range = NonNullable<FormRow['range']>;
+
+/** 화면에 보여 주는 값. 금액은 원 단위 글, 비율은 %. */
+function showValue(unit: Range['unit'], v: number): string {
+  if (unit === 'money') return won(v);
+  if (unit === 'pct') return `${Math.round(v * 100)}%`;
+  if (unit === 'pct100') return `${Math.round(v)}%`;
+  return `${v}년`;
+}
+
+/** 숫자 칸에 넣는 값. 금액은 만 원 단위로, 비율은 %로 입력한다. */
+const toInput = (unit: Range['unit'], v: number): number => (unit === 'money' ? Math.round(v * 100) : unit === 'pct' ? Math.round(v * 100) : v);
+const fromInput = (unit: Range['unit'], v: number): number => (unit === 'money' ? v / 100 : unit === 'pct' ? v / 100 : v);
+const inputUnit = (unit: Range['unit']): string => (unit === 'money' ? '만 원' : unit === 'years' ? '년' : '%');
+
+/** 금액·비율 입력: 슬라이더, 한 눈금씩 움직이는 버튼, 직접 입력 칸. 바꾸면 "id=값"으로 act()에 간다. */
+function renderRange(label: string, r: Range): string {
+  const id = esc(r.id);
+  return `<div class="amount" data-amount="${id}">
+    <div class="amount__row">
+      <button type="button" class="amount__step" data-step="-1" data-for="${id}" aria-label="${esc(label)} 줄이기">−</button>
+      <input type="range" class="amount__range" data-range="${id}" data-unit="${r.unit}" min="${r.min}" max="${r.max}" step="${r.step}" value="${r.value}" aria-label="${esc(label)}">
+      <button type="button" class="amount__step" data-step="1" data-for="${id}" aria-label="${esc(label)} 늘리기">+</button>
+    </div>
+    <label class="amount__direct">
+      <span class="amount__out" data-out="${id}">${esc(showValue(r.unit, r.value))}</span>
+      <span class="amount__type">직접 입력
+        <input type="number" class="amount__input" data-range="${id}" data-unit="${r.unit}" inputmode="decimal" min="${toInput(r.unit, r.min)}" max="${toInput(r.unit, r.max)}" step="any" value="${toInput(r.unit, r.value)}">
+        ${inputUnit(r.unit)}</span>
+    </label>
+  </div>`;
+}
+
+/** 슬라이더나 숫자 칸의 값을 확정한다. */
+function commitRange(el: HTMLInputElement): void {
+  if (!game) return;
+  const id = el.dataset.range as string;
+  const unit = el.dataset.unit as Range['unit'];
+  const slider = root.querySelector<HTMLInputElement>(`input[type="range"][data-range="${CSS.escape(id)}"]`);
+  if (!slider) return;
+  const min = Number(slider.min);
+  const max = Number(slider.max);
+  let v = el.type === 'range' ? Number(el.value) : fromInput(unit, Number(el.value));
+  if (!Number.isFinite(v)) return;
+  v = Math.min(max, Math.max(min, v));
+  act(game, `${id}=${Math.round(v * 1000) / 1000}`);
+  store(SAVE_KEY, game);
+  render();
+}
+
+/** 슬라이더를 끄는 동안 값 글자만 바꾼다. */
+function previewRange(el: HTMLInputElement): void {
+  const id = el.dataset.range as string;
+  const unit = el.dataset.unit as Range['unit'];
+  const out = root.querySelector<HTMLElement>(`[data-out="${CSS.escape(id)}"]`);
+  const box = root.querySelector<HTMLInputElement>(`input[type="number"][data-range="${CSS.escape(id)}"]`);
+  const v = Number(el.value);
+  if (out) out.textContent = showValue(unit, v);
+  if (box) box.value = String(toInput(unit, v));
 }
 
 function renderTables(g: Game): string {
@@ -418,13 +519,15 @@ function renderSquad(g: Game): string {
   const { level, money } = stage(g);
   const nation = club.nation;
   const shape = usualShape(g.lastStyle ?? 'possess', 0);
-  const lines = ['GK', 'DF', 'MF', 'FW'] as Pos[];
   const extra = (p: Player): string[] => [
     ...(nation ? [] : [`계약|${contractText(g, p.contract)}`, `시장가|${won(valueOf(p, level, money))}`]),
     `성장|${potentialText(g, p)}`,
     `이번 시즌|${p.goals}골 · 팀에서 ${p.years + 1}번째 시즌${p.homegrown ? ' · 유스 출신' : ''}`,
   ];
-  const flag = (p: Player): string | undefined => (p.unhappy ? '불만' : p.contract && p.contract.years <= 1 ? '계약 만료 임박' : undefined);
+  const flag = (p: Player): string | undefined => [p.unhappy ? '불만' : '', p.contract && p.contract.years <= 1 && !p.loan ? '계약 만료 임박' : '', p.loan?.dir === 'in' ? `임대(${p.loan.club})` : '', isForeign(g, p) ? '외국인' : ''].filter(Boolean).join(' · ') || undefined;
+  const q = quota(g);
+  const msg = notice;
+  notice = null;
   const busy = g.phase === 'match';
   return `
     <section class="section">
@@ -443,18 +546,35 @@ function renderSquad(g: Game): string {
         ${g.job.kind === 'club' ? `<div class="stats__row"><dt>이적 예산</dt><dd>${esc(won(g.job.budget))}</dd></div>
         <div class="stats__row"><dt>연봉 총액 / 예산</dt><dd>${g.job.wageBudget > 0 ? `${esc(won(totalWages(g)))} / ${esc(won(g.job.wageBudget))}` : '무급(아마추어)'}</dd></div>` : ''}
       </dl>
-      <p class="fine">선수를 누르면 능력치와 계약이 펼쳐진다. 핵심 선수나 주전으로 약속한 선수를 후보로 돌리면 불만을 품는다.</p>
-      <h3 class="section__sub">선발 ${g.squad.length}명</h3>
-      ${lines.map((pos) => `<ul class="plist plist--tight">${g.squad.filter((p) => p.pos === pos).map((p) => playerRow(p, {
-        note: `${POS_NAME[pos]}${p.contract ? ` · ${PROMISES[p.contract.promise].name}` : ''}`, extra: extra(p), kit: club.colors, flag: flag(p),
-      })).join('')}</ul>`).join('')}
+      ${renderTodo(g)}
+      ${msg ? `<p class="note note--bad" role="alert">${esc(msg)}</p>` : ''}
+      <p class="fine">선수를 누르면 능력치와 계약이 펼쳐진다. 자리마다 아무 선수나 세울 수 있지만, 자기 포지션이 아니면 OVR이 깎인다(옆 줄 -2~-5, 두 줄 -10, 골키퍼와 필드 -25). 핵심 선수나 주전으로 약속한 선수를 후보로 돌리면 불만을 품는다.</p>
+      <h3 class="section__sub">선발 7자리</h3>
+      <ul class="plist">${g.squad.map((p, i) => {
+        const line = lineAt(i);
+        const pen = posPenalty(p.spot, line);
+        const options = [...g.squad, ...g.reserves].filter((x) => !x.loan || x.loan.dir === 'in').map((x) => {
+          const v = effOvr(x, line);
+          return `<option value="${x.id}:${i}"${x.id === p.id ? ' selected' : ''}>${esc(x.name)} (${x.spot}${isForeign(g, x) ? '·외' : ''}) → ${line}에서 OVR ${v}${g.squad.includes(x) && x.id !== p.id ? ' · 선발끼리 맞바꿈' : ''}</option>`;
+        }).join('');
+        return `<li class="slot">
+          <div class="slot__head">
+            <span class="slot__line slot__line--${line}">${line}</span>
+            ${busy ? '' : `<select class="slot__pick" data-place="${i}" aria-label="${line} 자리 선수">${options}</select>`}
+            ${pen > 0 ? `<span class="flag">포지션 밖 OVR -${pen}</span>` : ''}
+          </div>
+          <ul class="plist plist--tight">${playerRow(p, {
+            note: `${POS_NAME[p.pos]}${p.contract ? ` · ${PROMISES[p.contract.promise].name}` : ''}`, extra: extra(p), kit: club.colors, flag: flag(p),
+          })}</ul>
+        </li>`;
+      }).join('')}</ul>
       ${nation ? '' : `
-      <h3 class="section__sub">후보 ${g.reserves.length}명</h3>
+      <h3 class="section__sub">후보 ${g.reserves.length}명${q.reg !== null || q.pitch !== null ? ` · 외국인 등록 ${foreignCount(g, [...g.squad, ...g.reserves])}${q.reg !== null ? `/${q.reg}` : ''} · 선발 ${foreignCount(g, g.squad)}/${q.pitch ?? '-'}` : ''}</h3>
       ${g.reserves.length === 0 ? '<p class="muted">후보 명단이 비어 있다. 이적시장에서 백업이나 로테이션으로 영입하면 여기에 들어온다.</p>' : `<ul class="plist">${g.reserves.map((p) => playerRow(p, {
         note: `${POS_NAME[p.pos]}${p.contract ? ` · ${PROMISES[p.contract.promise].name}` : ''}${promiseKept(g, p) ? '' : ' · 약속 위반 중'}`,
         extra: extra(p), kit: club.colors, flag: flag(p),
-        actions: busy ? '' : `<div class="chips">${g.squad.filter((s2) => s2.pos === p.pos).map((s2) => `<button type="button" class="chip" data-do="swap:${p.id}:${s2.id}">${esc(s2.name)} 대신 선발로</button>`).join('')}</div>`,
-      })).join('')}</ul>`}`}
+      })).join('')}</ul>`}
+      ${g.loaned.length ? `<h3 class="section__sub">임대 보낸 선수 ${g.loaned.length}명</h3><ul class="plist">${g.loaned.map((p) => playerRow(p, { note: `${p.loan!.club} · ${p.loan!.until === 'winter' ? '겨울 복귀' : '시즌 끝 복귀'}`, extra: extra(p), kit: club.colors })).join('')}</ul>` : ''}`}
     </section>
     <section class="section">
       <h2 class="section__title">${esc(g.manager.name)} 감독의 지도자 역량</h2>

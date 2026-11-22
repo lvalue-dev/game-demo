@@ -5,10 +5,11 @@ import { ko } from './josa.ts';
 import { STYLES, STYLE_IDS, foreignName, koreanName } from './data.ts';
 import { HALF, PER_MIN, TICKS, createLive, lineup, reshape, stepLive } from './live.ts';
 import type { Entrant, LiveEnv, LiveEvent } from './live.ts';
-import { makeDetail } from './player.ts';
+import { LINE_SPOT, makeDetail } from './player.ts';
+import { foreignCount, isForeign, quota } from './contract.ts';
 import { baseSide, drilled, skill } from './power.ts';
 import { chance, int, pick, poisson, rand, spread } from './rng.ts';
-import { myClub, stage } from './squad.ts';
+import { effOvr, lineAt, myClub, stage } from './squad.ts';
 import { BASE, ROLES, SHAPES, SHAPE_IDS, advantage, bestCounter, dialEdge, fits, matchup, roleEdge, shapeEdge, tempoCost, usualShape, why } from './tactics.ts';
 import type { Block, Choice, Club, Dials, Game, Pos, LeagueId, LiveHow, LiveState, LogLine, MatchState, Player, RoleId, ShapeId, StyleId, Tone, WeatherId } from './types.ts';
 
@@ -615,11 +616,19 @@ function startLive(g: Game, m: MatchState): void {
   const { region } = stage(g);
   const depth = g.depth + g.season.depthMod;
   const name = (foreign: boolean): string => (foreign ? foreignName(rand(g), rand(g)) : koreanName(rand(g), rand(g), rand(g)));
-  const keys: Entrant[] = g.squad.map((p) => ({ name: p.name, pos: p.pos, ovr: p.ovr + p.temp, key: p.id, spot: p.spot, foot: p.foot, dev: p.dev, no: p.no }));
-  // 남는 네 자리는 후보 명단에서 그 자리에 맞는 선수부터 쓴다. 후보가 모자라면 2군 선수가 뛴다.
-  const bench = [...g.reserves].sort((a, b) => b.ovr - a.ovr);
+  // 선발은 감독이 정한 자리(줄)에서 뛴다. 자기 포지션이 아니면 그 줄의 대표 자리에 서고 OVR이 깎인다.
+  const keys: Entrant[] = g.squad.map((p, i) => {
+    const line = lineAt(i);
+    return { name: p.name, pos: line, ovr: effOvr(p, line), key: p.id, spot: p.pos === line ? p.spot : LINE_SPOT[line], foot: p.foot, dev: p.dev, no: p.no };
+  });
+  // 남는 네 자리는 후보 명단에서 그 자리에 맞는 선수부터 쓴다. 외국인 출전 한도를 넘지 않게 한다. 후보가 모자라면 2군 선수가 뛴다.
+  const limit = quota(g).pitch;
+  let foreign = foreignCount(g, g.squad);
+  const bench = [...g.reserves].filter((r) => !r.loan || r.loan.dir === 'in').sort((a, b) => b.ovr - a.ovr);
   const mine = lineup(m.me.shape, keys, (pos, spot) => {
-    const pickIdx = [bench.findIndex((r) => r.spot === spot), bench.findIndex((r) => r.pos === pos)].find((i) => i >= 0) ?? -1;
+    const ok = (r: Player): boolean => limit === null || !isForeign(g, r) || foreign < limit;
+    const pickIdx = [bench.findIndex((r) => r.spot === spot && ok(r)), bench.findIndex((r) => r.pos === pos && ok(r))].find((i) => i >= 0) ?? -1;
+    if (pickIdx >= 0 && isForeign(g, bench[pickIdx] as Player)) foreign++;
     if (pickIdx >= 0) {
       const r = bench.splice(pickIdx, 1)[0] as Player;
       return { name: r.name, pos: r.pos, ovr: r.ovr + r.temp, key: -1, spot: r.spot, foot: r.foot, dev: r.dev, no: r.no };

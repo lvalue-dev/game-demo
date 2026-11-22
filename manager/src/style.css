@@ -1668,3 +1668,167 @@ button {
   color: #8a826d;
   letter-spacing: 0.04em;
 }
+
+/* ---------- 할 일 ---------- */
+
+.todo {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--amber);
+  border-radius: 4px;
+}
+
+.todo__sum {
+  padding: 10px 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.todo__urgent {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--red);
+  color: #fff;
+  font-size: 0.75rem;
+}
+
+.todo__list {
+  margin: 0;
+  padding: 0 12px 10px;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.todo__item {
+  display: grid;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 3px solid var(--line);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.todo__item--bad {
+  border-left-color: var(--red);
+}
+
+.todo__item--good {
+  border-left-color: var(--pitch);
+}
+
+.todo__where {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* ---------- 선발 자리 ---------- */
+
+.slot {
+  padding: 8px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.slot__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.slot__line {
+  flex: none;
+  min-width: 2.6em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--board);
+  color: var(--on-board);
+  font-family: var(--font-num);
+  font-weight: 600;
+  text-align: center;
+}
+
+.slot__pick {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.slot .plist--tight {
+  border-top: 0;
+}
+
+/* ---------- 금액 입력 ---------- */
+
+.amount {
+  display: grid;
+  gap: 6px;
+}
+
+.amount__row {
+  display: grid;
+  grid-template-columns: 40px 1fr 40px;
+  align-items: center;
+  gap: 8px;
+}
+
+.amount__step {
+  width: 40px;
+  height: 36px;
+  border: 1px solid #d8cfb5;
+  border-radius: 4px;
+  background: #fff;
+  color: #1d1d1d;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.amount__range {
+  width: 100%;
+  accent-color: #1d3a2b;
+}
+
+.amount__direct {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.amount__out {
+  font-family: var(--font-num);
+  font-weight: 600;
+  font-size: 1.25rem;
+  color: #1d3a2b;
+}
+
+.amount__type {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: #6b6455;
+}
+
+.amount__input {
+  width: 7.5em;
+  min-height: 32px;
+  padding: 2px 6px;
+  border: 1px solid #d8cfb5;
+  border-radius: 4px;
+  background: #fff;
+  color: #1d1d1d;
+  font: inherit;
+  font-size: 0.9375rem;
+  text-align: right;
+}

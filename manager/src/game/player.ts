@@ -53,6 +53,28 @@ const SPOT_ODDS: Record<Pos, [Spot, number][]> = {
 
 export const FOOT_NAME: Record<Foot, string> = { R: '오른발', L: '왼발', B: '양발' };
 
+/** 외국인 선수의 국적 후보. 유럽 무대는 잉글랜드 선수도 섞인다. */
+export const NATIONS_KR = ['브라질', '브라질', '일본', '호주', '콜롬비아', '세르비아', '아르헨티나', '나이지리아', '포르투갈', '스페인', '우즈베키스탄', '크로아티아'];
+export const NATIONS_EU = ['잉글랜드', '잉글랜드', '잉글랜드', '프랑스', '스페인', '포르투갈', '브라질', '네덜란드', '독일', '이탈리아', '벨기에', '아르헨티나', '덴마크', '노르웨이', '세네갈', '미국'];
+
+const RANK: Record<Pos, number> = { GK: 0, DF: 1, MF: 2, FW: 3 };
+
+/** 옆 줄로 가도 어색하지 않은 포지션(수비형 미드필더의 수비 가담, 윙어의 측면 미드필더 등). */
+const BRIDGE: Partial<Record<Spot, Pos>> = { CDM: 'DF', CB: 'MF', LB: 'MF', RB: 'MF', CAM: 'FW', LM: 'FW', RM: 'FW', LW: 'MF', RW: 'MF', ST: 'MF' };
+
+/** 자기 포지션이 아닌 줄에 세웠을 때 깎이는 OVR. */
+export function posPenalty(spot: Spot, line: Pos): number {
+  const nat = SPOTS[spot].pos;
+  if (nat === line) return 0;
+  if (nat === 'GK' || line === 'GK') return 25;
+  const dist = Math.abs(RANK[nat] - RANK[line]);
+  if (dist === 1) return BRIDGE[spot] === line ? 2 : 5;
+  return 10;
+}
+
+/** 그 줄의 대표 세부 포지션. 포지션 밖에 세운 선수가 경기장에서 서는 자리다. */
+export const LINE_SPOT: Record<Pos, Spot> = { GK: 'GK', DF: 'CB', MF: 'CM', FW: 'ST' };
+
 export interface Detail {
   spot: Spot;
   foot: Foot;
@@ -95,6 +117,13 @@ export function ensureDetail(p: Player): void {
   if (p.spot) return;
   const d = makeDetail({ rng: Math.imul(p.id + 1, 2654435761) | 0 }, p.pos);
   Object.assign(p, d);
+}
+
+/** 이름에 띄어쓰기가 있으면 외국 이름으로 지은 선수다. 이전 저장에서 국적을 채울 때 쓴다. */
+export function guessNat(p: Player, region: 'kr' | 'eu'): string {
+  if (!p.name.includes(' ')) return '대한민국';
+  const list = region === 'eu' ? NATIONS_EU : NATIONS_KR;
+  return list[p.id % list.length] as string;
 }
 
 /** 화면에 보여 줄 능력치 여섯 개. */

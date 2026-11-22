@@ -11,9 +11,9 @@ import { chance, int, pick, shuffle, spread } from './rng.ts';
 import {
   departures, develop, generateSquad, makePlayer, myClub, ratings, shareGoals, stage,
 } from './squad.ts';
-import { ensureDetail } from './player.ts';
-import { assignNumber, checkPromises, depthOf, existingContract, expireContracts, relegationCut, settle, totalWages, wageBudgetFor } from './contract.ts';
-import { actWindow, openWindow, windowScene } from './transfer.ts';
+import { ensureDetail, guessNat } from './player.ts';
+import { assignNumber, checkPromises, depthOf, enforceQuota, existingContract, expireContracts, relegationCut, settle, totalWages, wageBudgetFor } from './contract.ts';
+import { actWindow, openWindow, returnLoans, windowScene } from './transfer.ts';
 import { legacyTitle, reactions } from './talk.ts';
 import type { Mood } from './talk.ts';
 import { actMatch, beginMatch } from './match.ts';
@@ -46,13 +46,13 @@ export function createGame(seed: number, name: string, background: BackgroundId)
   const attrs: Record<AttrId, number> = { tactics: 6, lead: 6, youth: 6, deal: 6, eye: 6 };
   for (const [key, value] of Object.entries(BACKGROUNDS[background].bonus)) attrs[key as AttrId] += value as number;
   const g: Game = {
-    rng: seed | 0, version: 5, year: START_YEAR, nextId: 1,
+    rng: seed | 0, version: 6, year: START_YEAR, nextId: 1,
     manager: { name: name.trim() || '김감독', age: START_AGE, background, attrs, rep: 2, peakRep: 2 },
     clubs: [],
     leagues: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
     tables: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
     fixtures: { kr5: [], kr4: [], kr3: [], kr2: [], kr1: [], eu2: [], eu1: [], intl: [] },
-    round: 0, job: null, squad: [], reserves: [], depth: 0, morale: 60, cohesion: 25, season: blankSeason(), match: null, lastStyle: null,
+    round: 0, job: null, squad: [], reserves: [], loaned: [], depth: 0, morale: 60, cohesion: 25, season: blankSeason(), match: null, lastStyle: null,
     phase: 'offers', scene: { eyebrow: '', title: '', blocks: [], choices: [] }, eventId: null, offers: [], window: null,
     wcTicket: false, sacked: false, points: 0, history: [], trophies: [], promotions: 0,
   };
@@ -178,6 +178,16 @@ function beginSeason(g: Game): void {
     // 전력이 가장 비슷한 팀이 올 시즌의 라이벌이다. 그 팀과의 두 경기는 직접 지휘한다.
     g.season.rival = ids.filter((id) => id !== club.id).sort((a, b) => Math.abs(power(a) - power(club.id)) - Math.abs(power(b) - power(club.id)))[0] as number;
     job.budget = round1(job.budget + meta.money * (1 + club.wealth * 0.12));
+    // 분할 지급으로 남은 이적료 중 올해 몫을 낸다.
+    const due = job.debts.filter((d) => d.due <= g.year);
+    if (due.length) {
+      const sum = round1(due.reduce((s, d) => s + d.amount, 0));
+      job.budget = round1(job.budget - sum);
+      job.debts = job.debts.filter((d) => d.due > g.year);
+      g.season.notes.push(`분할 지급 이적료 ${won(sum)}을 냈다.`);
+    }
+    // 외국인 선발 한도를 넘으면(승격 등) 맞춘다.
+    for (const line of enforceQuota(g)) g.season.notes.push(line);
     // 연봉 예산. 이미 맺은 계약을 감당할 만큼은 늘 준다.
     settle(g);
     job.wageBudget = round1(Math.max(wageBudgetFor(g), totalWages(g) * 1.15));
@@ -255,7 +265,8 @@ function enterMarket(g: Game, window: 'summer' | 'winter'): void {
 
 /** 이전 버전의 저장을 지금 버전에 맞춘다. 맞출 수 없으면 false. */
 export function migrate(g: Game): boolean {
-  if (g.version < 3 || g.version > 5) return false;
+  if (g.version < 3 || g.version > 6) return false;
+  let reopen = false;
   for (const p of g.squad) ensureDetail(p);
   if (g.version === 3) {
     g.version = 4;
@@ -282,8 +293,19 @@ export function migrate(g: Game): boolean {
       for (const p of g.squad) assignNumber(g, p);
     }
     // 이적 시장 한가운데서 저장했다면 새 시장으로 다시 연다.
-    if (g.phase === 'market' || g.phase === 'winter') enterMarket(g, g.phase === 'market' ? 'summer' : 'winter');
+    reopen = true;
   }
+  if (g.version === 5) {
+    // 국적, 임대, 분할 지급이 생겼다.
+    g.version = 6;
+    g.loaned = [];
+    const region = g.job && !myClub(g).nation ? LEAGUES[myClub(g).league as ClubLeagueId].region : 'kr';
+    for (const p of [...g.squad, ...g.reserves]) Object.assign(p, { nat: p.nat ?? guessNat(p, region), loan: p.loan ?? null });
+    if (g.job) g.job.debts = g.job.debts ?? [];
+    reopen = true;
+  }
+  // 이적 시장 한가운데서 저장했다면, 모든 변환을 마친 뒤 새 시장으로 다시 연다.
+  if (reopen && (g.phase === 'market' || g.phase === 'winter')) enterMarket(g, g.phase === 'market' ? 'summer' : 'winter');
   return true;
 }
 
@@ -575,10 +597,13 @@ function finishClubSeason(g: Game, midSack: boolean): void {
   if (!g.sacked) {
     const nextLevel = LEAGUES[promoted ? (meta.up as ClubLeagueId) : relegated ? (meta.down as ClubLeagueId) : league].level;
     const changes = develop(g);
+    // 임대가 끝난 선수들이 오가고 나서 계약 만료를 따진다.
+    const loans = returnLoans(g, 'end');
     if (changes.length > 0) {
       blocks.push({ kind: 'text', text: '한 시즌 사이 선수들이 달라졌다.' });
       blocks.push({ kind: 'players', items: changes.map((c) => ({ player: c.player, delta: c.delta })) });
     }
+    for (const text of loans) blocks.push({ kind: 'note', text, tone: 'plain' });
     // 계약 기간이 한 시즌 줄고, 끝난 선수는 자유계약으로 떠난다. 그다음 은퇴와 빅클럽 이적이 있다.
     for (const text of expireContracts(g, nextLevel)) blocks.push({ kind: 'note', text, tone: 'plain' });
     const moves = departures(g, nextLevel);
@@ -766,7 +791,8 @@ function takeOffer(g: Game, offer: Offer): void {
   if (!offer.stay) {
     const club = g.clubs[offer.club] as Club;
     const region = club.nation ? 'kr' : LEAGUES[club.league as ClubLeagueId].region;
-    g.job = { kind: offer.kind, club: club.id, confidence: 50 + g.manager.attrs.deal / 2, objective: 0, budget: 0, wageBudget: 0, seasons: 0 };
+    g.job = { kind: offer.kind, club: club.id, confidence: 50 + g.manager.attrs.deal / 2, objective: 0, budget: 0, wageBudget: 0, debts: [], seasons: 0 };
+    g.loaned = [];
     g.squad = generateSquad(g, club, region);
     g.depth = (club.att + club.def) / 2 - 2;
     g.reserves = [];
@@ -819,9 +845,13 @@ function retire(g: Game, why: string): void {
 /** 지금 장면에서 선택지 하나를 고른다. 없는 선택지이거나 고를 수 없으면 아무 일도 일어나지 않는다. */
 export function act(g: Game, id: string): void {
   // 선택지 말고도 양식(계약 제안서)의 칩도 고를 수 있다.
-  const choice = g.scene.choices.find((c) => c.id === id)
-    ?? g.scene.blocks.flatMap((b) => (b.kind === 'form' ? b.rows.flatMap((r) => r.options) : [])).find((o) => o.id === id);
-  if (!choice || choice.disabled) return;
+  const rows = g.scene.blocks.flatMap((b) => (b.kind === 'form' ? b.rows : []));
+  // 슬라이더는 "id=값"으로 온다. 범위 안의 값만 받는다.
+  const [rid, raw] = id.split('=');
+  const range = raw !== undefined ? rows.find((r) => r.range?.id === rid)?.range : undefined;
+  const okRange = !!range && Number(raw) >= range.min - 1e-9 && Number(raw) <= range.max + 1e-9;
+  const choice = g.scene.choices.find((c) => c.id === id) ?? rows.flatMap((r) => r.options ?? []).find((o) => o.id === id);
+  if (!okRange && (!choice || choice.disabled)) return;
   const nation = g.job ? myClub(g).nation : false;
   switch (g.phase) {
     case 'offers': {

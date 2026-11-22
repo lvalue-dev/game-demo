@@ -74,11 +74,27 @@ function choose(g: Game, dice: { rng: number }): string {
       const w = g.window!;
       const key = (id: string): string => `${g.year}-${w.kind}-${id}`;
       const extra = g.reserves.length > (wageTight.has(key('')) ? 1 : 3) ? [...g.reserves].sort((a, b) => a.ovr - b.ovr)[0] : undefined;
-      if (w.view === 'sell') return extra && open.some((c) => c.id === `sell:${extra.id}`) ? `sell:${extra.id}` : 'back';
+      if (w.view === 'sell') {
+        if (!extra || visited.has(key(`sale-${extra.id}`)) || !open.some((c) => c.id === `sale:${extra.id}`)) return 'back';
+        visited.add(key(`sale-${extra.id}`));
+        return `sale:${extra.id}`;
+      }
+      if (w.view?.startsWith('sale:')) {
+        // 시장가의 80%를 희망가로 두 번까지 내놓는다.
+        const range = g.scene.blocks.flatMap((b) => (b.kind === 'form' ? b.rows : []))[0]?.range;
+        const priced = key(`${w.view}-price`);
+        if (range && !visited.has(priced)) {
+          visited.add(priced);
+          return `s:price=${Math.max(range.min, Math.round((range.min / 0.3) * 0.8 * 10) / 10)}`;
+        }
+        return open.some((c) => c.id === 'sell') ? 'sell' : 'back';
+      }
+      if (w.view?.startsWith('lend:')) return 'back';
       if (w.view) {
         const d = w.list.find((x) => x.id === w.view);
         if (!d) return 'back';
-        if (d.stage === 'fee') return open.some((c) => c.id === 'fee:100') ? 'fee:100' : 'back';
+        if (d.stage === 'fee') return open.some((c) => c.id === 'submit') ? 'submit' : 'back';
+        if (d.stage === 'loan') return 'back';
         if (!open.some((c) => c.id === 'submit')) {
           const why = g.scene.choices.find((c) => c.id === 'submit')?.detail ?? '?';
           const reason = why.split('(')[0]!.trim();
@@ -87,11 +103,11 @@ function choose(g: Game, dice: { rng: number }): string {
           return 'back';
         }
         // 협상마다 한 번만 연봉을 올린다(작은 연봉은 반올림 때문에 그대로일 수 있다).
-        const wageChip = g.scene.blocks.some((b) => b.kind === 'form' && b.rows.some((r) => r.options.some((o) => o.id === 't:wage:1.1')));
+        const wageRow = g.scene.blocks.flatMap((b) => (b.kind === 'form' ? b.rows : [])).find((r) => r.range?.id === 't:wage');
         const bump = key(`${d.id}-wage-${d.talks}`);
-        if (wageChip && !visited.has(bump)) {
+        if (wageRow && !visited.has(bump)) {
           visited.add(bump);
-          return 't:wage:1.1';
+          return `t:wage=${Math.min(wageRow.range!.max, Math.round(d.ask.wage * 1.1 * 10) / 10)}`;
         }
         return 'submit';
       }
@@ -109,7 +125,7 @@ function choose(g: Game, dice: { rng: number }): string {
         return `view:${renew.id}`;
       }
       const best = w.list
-        .filter((d) => d.kind !== 'renew' && !visited.has(key(d.id)) && d.price * 1.1 <= g.job!.budget && d.player.ovr - weakest(g.squad, d.player.pos).ovr >= 2)
+        .filter((d) => d.kind !== 'renew' && d.kind !== 'loan' && !visited.has(key(d.id)) && d.price * 1.1 <= g.job!.budget && d.player.ovr - weakest(g.squad, d.player.pos).ovr >= 2)
         .sort((a, b) => (b.player.ovr - weakest(g.squad, b.player.pos).ovr) - (a.player.ovr - weakest(g.squad, a.player.pos).ovr))[0];
       if (best && w.signed < 2 && (w.kind === 'summer' || w.signed < 1)) {
         visited.add(key(best.id));

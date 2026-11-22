@@ -47,6 +47,21 @@ export interface Player {
   contract: Contract | null;
   /** 약속이 깨졌거나 이적을 원해 불만이 있다. */
   unhappy: boolean;
+  /** 국적. 외국인 쿼터에 쓴다. */
+  nat: string;
+  /** 임대 중이면 그 조건. in은 우리가 빌려 온 선수, out은 빌려준 선수. */
+  loan: Loan | null;
+}
+
+export interface Loan {
+  dir: 'in' | 'out';
+  /** 상대 구단 이름. */
+  club: string;
+  /** 돌아가는(돌아오는) 때: 겨울 이적시장 또는 시즌 끝. */
+  until: 'winter' | 'end';
+  year: number;
+  /** 연봉 중 빌린 쪽이 내는 비율(0~1). */
+  share: number;
 }
 
 /** 출전 보장: 핵심 선수, 주전, 로테이션, 백업. */
@@ -140,6 +155,8 @@ export interface Job {
   budget: number;
   /** 한 시즌 연봉 총액의 상한(백만 원). */
   wageBudget: number;
+  /** 분할 지급으로 남은 이적료. due 시즌이 시작될 때 이적 예산에서 나간다. */
+  debts: { amount: number; due: number; what: string }[];
   seasons: number;
 }
 
@@ -200,37 +217,44 @@ export interface Offer {
   pitch: string;
 }
 
-/** 개인 조건 제안서. */
+/** 개인 조건 제안서. 금액은 모두 백만 원 단위다. */
 export interface Terms {
   wage: number;
   years: number;
   promise: PromiseId;
-  /** 바이아웃: 없음, 높게(시장가 2.5배), 낮게(시장가 1.5배). */
-  clause: 'none' | 'high' | 'low';
-  /** 계약금(서명 보너스)을 줄지. 연봉의 절반이다. */
-  bonus: boolean;
+  /** 바이아웃 금액. 0이면 조항이 없다. */
+  clause: number;
+  /** 계약금(서명 보너스) 금액. */
+  bonus: number;
+  /** 에이전트 수수료율(%). 이적료(자유계약이면 연봉) 기준이다. */
+  agent: number;
 }
 
 /** 이적 시장에 나온 영입 후보와 협상 진행 상태. */
 export interface Deal {
   id: string;
-  kind: 'sign' | 'youth' | 'free' | 'renew';
+  kind: 'sign' | 'youth' | 'free' | 'renew' | 'loan';
   player: Player;
-  /** 판매 구단의 요구 이적료(백만 원). 자유계약과 유스, 재계약은 0. */
+  /** 판매 구단의 요구 이적료(백만 원). 자유계약과 유스, 재계약, 임대는 0. */
   price: number;
-  /** 판매 구단 이름. 자유계약이면 '무소속'. */
+  /** 판매(임대) 구단 이름. 자유계약이면 '무소속'. */
   from: string;
-  /** 후보의 성격: 즉시 전력, 유망주, 베테랑, 자유계약, 유스, 재계약. */
+  /** 후보의 성격: 즉시 전력, 유망주, 베테랑, 자유계약, 유스, 재계약, 임대. */
   tag: string;
-  /** 협상 단계: 이적료 협상, 개인 조건 협상. */
-  stage: 'fee' | 'terms';
-  /** 합의한 이적료와 셀온 조항. */
+  /** 협상 단계: 이적료 협상, 개인 조건 협상, 임대 조건 협상. */
+  stage: 'fee' | 'terms' | 'loan';
+  /** 우리가 쓰고 있는 이적료 제안(금액, 셀온 비율, 분할 지급 시즌 수). */
+  draft: { fee: number; sellOn: number; inst: number };
+  /** 합의한 이적료와 조건. */
   fee: number;
   sellOn: number;
-  /** 선수의 요구: 연봉, 기대하는 출전 시간, 원하는 계약 기간. */
-  ask: { wage: number; promise: PromiseId; years: number };
+  inst: number;
+  /** 선수의 요구: 연봉, 기대하는 출전 시간, 원하는 계약 기간, 에이전트 수수료율. */
+  ask: { wage: number; promise: PromiseId; years: number; agent: number };
   /** 지금 우리가 쓰고 있는 제안서. */
   offer: Terms;
+  /** 임대 조건: 기간, 우리가 낼 연봉 비율, 임대료. ask는 원 소속 구단의 요구. */
+  loan: { until: 'winter' | 'end'; share: number; fee: number; askShare: number; askFee: number } | null;
   /** 이적료 협상과 개인 조건 협상에서 거절당한 횟수. */
   tries: number;
   talks: number;
@@ -260,6 +284,10 @@ export interface TransferWindow {
   sold: number;
   scouted: number;
   depthDone: boolean;
+  /** 판매 화면의 희망가와 선수별 판매 시도 횟수. */
+  sale: { price: number; tries: Record<number, number> };
+  /** 임대 보내기 화면의 조건: 기간, 상대가 낼 연봉 비율, 임대료. */
+  lend: { until: 'winter' | 'end'; share: number; fee: number };
 }
 
 /** 선수 개인에게 주는 역할. base는 포지션의 기본 역할이다. */
@@ -438,8 +466,19 @@ export type Block =
   | { kind: 'players'; items: { player: Player; delta?: number; note?: string }[] }
   | { kind: 'card'; player: Player; price?: string; compare?: Player; note?: string }
   /** 칩을 눌러 고르는 양식. 계약 제안서에 쓴다. 칩의 id는 선택지 id처럼 act()로 간다. */
-  | { kind: 'form'; title: string; rows: { label: string; note?: string; options: { id: string; label: string; on: boolean; disabled?: boolean }[] }[] }
+  | { kind: 'form'; title: string; rows: FormRow[] }
   | { kind: 'feed'; items: { who: string; where: string; text: string; tone: Tone }[] };
+
+/**
+ * 양식의 한 줄. options는 칩(누르면 그 id로 act), range는 슬라이더와 숫자 입력(바꾸면 "id=값"으로 act)이다.
+ * unit은 값을 보여 주는 방식: money(백만 원), pct(0~1 비율), pct100(%), years.
+ */
+export interface FormRow {
+  label: string;
+  note?: string;
+  options?: { id: string; label: string; on: boolean; disabled?: boolean }[];
+  range?: { id: string; min: number; max: number; step: number; value: number; unit: 'money' | 'pct' | 'pct100' | 'years' };
+}
 
 export interface Choice {
   id: string;
@@ -481,6 +520,8 @@ export interface Game {
   squad: Player[];
   /** 후보 명단. 선발 일곱 명 밖의 등록 선수들. */
   reserves: Player[];
+  /** 다른 구단에 임대 보낸 선수들. 등록 인원에 세지 않는다. */
+  loaned: Player[];
   /** 주전 일곱 명을 뺀 나머지 선수층의 수준. */
   depth: number;
   morale: number;

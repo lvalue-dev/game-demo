@@ -2,7 +2,7 @@
 import { ko } from './josa.ts';
 import { LEAGUES, LINEUP, TRAIT_IDS, foreignName, koreanName, won } from './data.ts';
 import { chance, int, pick, rand, spread } from './rng.ts';
-import { makeDetail } from './player.ts';
+import { NATIONS_EU, NATIONS_KR, makeDetail, posPenalty } from './player.ts';
 import type { Club, ClubLeagueId, Game, Player, Pos, Spot } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
@@ -27,7 +27,8 @@ export function makePlayer(g: Game, pos: Pos, ovr: number, age: number, region: 
   return {
     id: g.nextId++, name, pos, age, ovr: value, pot: Math.min(99, value + room),
     trait: chance(g, 0.35) ? pick(g, TRAIT_IDS) : null, years: 0, goals: 0, temp: 0, homegrown: false,
-    ...makeDetail(g, pos, spot), no: 0, contract: null, unhappy: false,
+    ...makeDetail(g, pos, spot), no: 0, contract: null, unhappy: false, loan: null,
+    nat: foreign ? pick(g, region === 'eu' ? NATIONS_EU : NATIONS_KR) : '대한민국',
   };
 }
 
@@ -40,9 +41,21 @@ export function generateSquad(g: Game, club: Club, region: 'kr' | 'eu'): Player[
   });
 }
 
+/** 선발 일곱 자리의 포지션. g.squad의 순서가 곧 자리다. */
+export const lineAt = (i: number): Pos => (LINEUP[i] ?? 'MF') as Pos;
+
+/** 선발에서 이 선수가 맡은 줄. 선발이 아니면 본래 포지션. */
+export function lineOf(g: Game, p: Player): Pos {
+  const i = g.squad.findIndex((q) => q.id === p.id);
+  return i >= 0 ? lineAt(i) : p.pos;
+}
+
+/** 그 줄에서 내는 OVR. 자기 포지션이 아니면 깎인다. */
+export const effOvr = (p: Player, line: Pos): number => p.ovr + p.temp - posPenalty(p.spot, line);
+
 const avg = (players: Player[], pos: Pos): number => {
-  const list = players.filter((p) => p.pos === pos);
-  return list.reduce((sum, p) => sum + p.ovr + p.temp, 0) / Math.max(1, list.length);
+  const list = players.map((p, i) => ({ p, line: lineAt(i) })).filter((x) => x.line === pos);
+  return list.reduce((sum, x) => sum + effOvr(x.p, x.line), 0) / Math.max(1, list.length);
 };
 
 /** 주전과 선수층에서 팀의 공격력과 수비력을 낸다. */
@@ -67,8 +80,10 @@ export function priceFor(g: Game, p: Player): number {
   return Math.round(valueOf(p, level, money) * (1 - g.manager.attrs.deal * 0.015) * 10) / 10;
 }
 
+/** 그 줄의 선발 중 가장 약한 선수(자리 기준). 선발 명단을 넘겨야 한다. */
 export function weakest(squad: Player[], pos: Pos): Player {
-  return squad.filter((p) => p.pos === pos).sort((a, b) => a.ovr - b.ovr)[0] as Player;
+  return squad.map((p, i) => ({ p, line: lineAt(i) })).filter((x) => x.line === pos)
+    .sort((a, b) => (a.p.ovr - posPenalty(a.p.spot, a.line)) - (b.p.ovr - posPenalty(b.p.spot, b.line)))[0]!.p;
 }
 
 /** 잠재력을 감독의 안목만큼만 알려 준다. */
@@ -97,10 +112,11 @@ export interface Change {
 export function develop(g: Game): Change[] {
   const { attrs } = g.manager;
   const changes: Change[] = [];
-  for (const p of [...g.squad, ...g.reserves]) {
+  for (const p of [...g.squad, ...g.reserves, ...g.loaned]) {
     let delta = 0;
     if (p.age <= 23) {
-      const rate = spread(g, 0.12, 0.3) * (1 + attrs.youth / 25) * (g.season.focus === 'youth' ? 1.4 : 1);
+      // 임대 가서 꾸준히 뛴 어린 선수는 더 큰다.
+      const rate = spread(g, 0.12, 0.3) * (1 + attrs.youth / 25) * (g.season.focus === 'youth' ? 1.4 : 1) * (p.loan?.dir === 'out' ? 1.3 : 1);
       delta = Math.round((p.pot - p.ovr) * rate + spread(g, -0.5, 1));
     } else if (p.age <= 29) {
       delta = Math.min(p.pot - p.ovr, int(g, -1, 1));
@@ -158,14 +174,15 @@ export function departures(g: Game, nextLevel: number): { income: number; lines:
 export function fillSlot(g: Game, out: Player, level: number, region: 'kr' | 'eu'): string {
   const club = myClub(g);
   const target = level + spread(g, -4, 1);
-  const bench = club.nation ? undefined : g.reserves.filter((q) => q.pos === out.pos).sort((a, b) => b.ovr - a.ovr)[0];
+  const line = lineOf(g, out);
+  const bench = club.nation ? undefined : g.reserves.filter((q) => q.pos === line && !q.loan).sort((a, b) => b.ovr - a.ovr)[0];
   // 후보가 새로 데려올 선수만큼 좋으면 후보를 올리고, 아니면 새 선수를 데려온다.
   if (bench && bench.ovr >= target - 1) {
     g.reserves = g.reserves.filter((q) => q.id !== bench.id);
     g.squad = g.squad.map((q) => (q.id === out.id ? bench : q));
     return ko`후보 ${bench.name}(${bench.spot}, OVR ${bench.ovr})이 선발로 올라섰다.`;
   }
-  const fill = makePlayer(g, out.pos, target, int(g, 20, 27), region, club.nation, out.spot);
+  const fill = makePlayer(g, line, target, int(g, 20, 27), region, club.nation, line === out.pos ? out.spot : undefined);
   if (!club.nation) {
     fill.contract = { wage: 0, years: int(g, 2, 3), promise: 'starter', clause: null, sellOn: 0, since: g.year };
   }

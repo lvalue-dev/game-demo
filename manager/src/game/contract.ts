@@ -6,7 +6,7 @@
 // - 계약금(서명 보너스), 에이전트 수수료, 셀온 조항.
 import { ko } from './josa.ts';
 import { LEAGUES, won } from './data.ts';
-import { fillSlot, myClub, stage, valueOf } from './squad.ts';
+import { fillSlot, lineAt, myClub, stage, valueOf } from './squad.ts';
 import type { ClubLeagueId, Contract, Deal, Game, Player, PromiseId, Spot, Terms } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
@@ -36,7 +36,7 @@ export function wageFor(g: Game, p: Player): number {
 
 /** 이 팀에 오면 기대하는 출전 시간. 지금 같은 포지션 주전들과 견준다. */
 export function expectedPromise(g: Game, p: Player): PromiseId {
-  const same = g.squad.filter((q) => q.pos === p.pos && q.id !== p.id).map((q) => q.ovr);
+  const same = g.squad.filter((q, i) => lineAt(i) === p.pos && q.id !== p.id).map((q) => q.ovr);
   const best = same.length ? Math.max(...same) : 0;
   const worst = same.length ? Math.min(...same) : 0;
   if (p.ovr >= best + 2 && p.ovr >= stage(g).level + 2) return 'star';
@@ -48,21 +48,26 @@ export function expectedPromise(g: Game, p: Player): PromiseId {
 /** 원하는 계약 기간. 어릴수록 길게, 노장은 짧게라도 보장받고 싶어 한다. */
 export const preferredYears = (p: Player): number => (p.age <= 23 ? 5 : p.age <= 28 ? 4 : p.age <= 31 ? 3 : 2);
 
-export function clauseAmount(g: Game, p: Player, kind: Terms['clause']): number | null {
-  if (kind === 'none') return null;
+/** 시장가. 바이아웃과 판매가의 기준이다. */
+export function marketValue(g: Game, p: Player): number {
   const { level, money } = stage(g);
-  return round1(valueOf(p, level, money) * (kind === 'high' ? 2.5 : 1.5));
+  return round1(valueOf(p, level, money));
 }
 
-/** 에이전트 수수료: 이적료의 8% 또는 연봉의 4분의 1 중 큰 쪽. */
-export const agentFee = (fee: number, wage: number): number => round1(Math.max(fee * 0.08, wage * 0.25));
+/** 바이아웃 추천값: 높게(시장가 2.5배), 낮게(1.5배). */
+export const clauseAmount = (g: Game, p: Player, kind: 'high' | 'low'): number => round1(marketValue(g, p) * (kind === 'high' ? 2.5 : 1.5));
 
-/** 계약금(서명 보너스): 연봉의 절반. */
-export const signingBonus = (t: Terms): number => (t.bonus ? round1(t.wage * 0.5) : 0);
+/** 에이전트 수수료: 이적료의 pct%. 이적료가 없으면(자유계약, 재계약) 연봉의 pct/32(8%면 4분의 1). */
+export const agentFee = (fee: number, wage: number, pct: number): number => round1(Math.max(fee * pct / 100, wage * pct / 32));
+
+/** 계약금(서명 보너스). */
+export const signingBonus = (t: Terms): number => round1(t.bonus);
 
 /** 지금 등록된 선수들의 연봉 합. except는 빼고 센다. */
 export function totalWages(g: Game, except?: number): number {
-  return round1([...g.squad, ...g.reserves].filter((p) => p.id !== except).reduce((s, p) => s + (p.contract?.wage ?? 0), 0));
+  // 임대 보낸 선수는 상대 구단이 내지 않는 몫만 우리가 낸다.
+  const out = (g.loaned ?? []).reduce((s, p) => s + (p.contract?.wage ?? 0) * (1 - (p.loan?.share ?? 0)), 0);
+  return round1([...g.squad, ...g.reserves].filter((p) => p.id !== except).reduce((s, p) => s + (p.contract?.wage ?? 0), 0) + out);
 }
 
 /** 한 시즌 연봉 예산. 구단의 재정 형편을 따른다. */
@@ -79,11 +84,12 @@ export function askOf(g: Game, p: Player, renew = false): Deal['ask'] {
   const greed = p.unhappy ? 1.2 : 1;
   // 아마추어 리그에서는 누구도 연봉을 받지 않는다.
   const wage = amateur(g) || myClub(g).nation ? 0 : round1(Math.max(market, now * 1.05) * greed);
-  return { wage, promise: expectedPromise(g, p), years: preferredYears(p) };
+  // 에이전트는 6~10%를 요구한다.
+  return { wage, promise: expectedPromise(g, p), years: preferredYears(p), agent: 6 + (p.id % 5) };
 }
 
 export function defaultTerms(ask: Deal['ask']): Terms {
-  return { wage: ask.wage, years: ask.years, promise: ask.promise, clause: 'none', bonus: false };
+  return { wage: ask.wage, years: ask.years, promise: ask.promise, clause: 0, bonus: 0, agent: ask.agent };
 }
 
 /** 개인 조건을 받아들일 가능성(0~1). 화면에 그대로 보여 준다. */
@@ -97,10 +103,14 @@ export function termsOdds(g: Game, d: Deal): number {
   const gap = PROMISES[t.promise].rank - PROMISES[d.ask.promise].rank;
   score += gap >= 0 ? Math.min(gap, 1) * 0.25 : gap * 0.9;
   score -= Math.abs(t.years - d.ask.years) * 0.15;
-  // 좋은 선수일수록 빠져나갈 길(바이아웃)을 원한다.
-  if (p.ovr >= level + 2) score += t.clause === 'none' ? -0.25 : t.clause === 'low' ? 0.25 : 0;
-  else if (t.clause === 'low') score += 0.15;
-  if (t.bonus) score += 0.35;
+  // 좋은 선수일수록 빠져나갈 길(바이아웃)을 원한다. 바이아웃이 낮을수록(시장가에 가까울수록) 좋아한다.
+  const ratio = t.clause > 0 ? t.clause / Math.max(0.1, marketValue(g, p)) : 0;
+  const clauseLike = t.clause > 0 ? clamp(0.25 - (ratio - 1.5) * 0.2, -0.05, 0.3) : 0;
+  score += p.ovr >= level + 2 ? (t.clause > 0 ? clauseLike : -0.25) : clauseLike * 0.6;
+  // 계약금은 연봉의 절반이면 +0.35, 많을수록 더(최대 +0.5).
+  if (t.bonus > 0) score += Math.min(0.5, (t.bonus / Math.max(0.1, t.wage || 1)) * 0.7);
+  // 에이전트 수수료를 요구보다 깎으면 에이전트가 반대한다.
+  score += clamp((t.agent - d.ask.agent) * 0.06, -0.5, 0.25);
   score += (g.manager.attrs.deal - 6) * 0.04;
   if (d.kind === 'renew' && p.unhappy) score -= 0.6;
   score -= d.talks * 0.1;
@@ -108,15 +118,18 @@ export function termsOdds(g: Game, d: Deal): number {
 }
 
 /** 판매 구단이 이적료 제안을 받아들일 가능성. frac은 요구액 대비 제안 비율. */
-export function feeOdds(g: Game, d: Deal, frac: number, sellOn: number): number {
-  const effective = frac + sellOn * 0.6;
+export function feeOdds(g: Game, d: Deal, frac: number, sellOn: number, inst = 1): number {
+  if (frac >= 1 && inst <= 1) return 1;
+  // 셀온 10%는 이적료 6%쯤의 값어치. 분할 지급은 한 시즌 늘 때마다 5%쯤 깎는 셈이다.
+  const effective = frac + sellOn * 0.6 - (inst - 1) * 0.05;
+  if (effective >= 1) return 0.97;
   return clamp(0.15 + (effective - 0.75) * 2.6 + (g.manager.attrs.deal - 6) * 0.03 - d.tries * 0.12 + (d.tag === '베테랑' ? 0.1 : 0), 0.02, 0.98);
 }
 
 export const oddsText = (p: number): string => (p >= 0.8 ? '매우 높음' : p >= 0.6 ? '높음' : p >= 0.4 ? '반반' : p >= 0.2 ? '낮음' : '매우 낮음');
 
-export function makeContract(g: Game, p: Player, t: Terms, sellOn = 0): Contract {
-  return { wage: round1(t.wage), years: t.years, promise: t.promise, clause: clauseAmount(g, p, t.clause), sellOn, since: g.year };
+export function makeContract(g: Game, t: Terms, sellOn = 0): Contract {
+  return { wage: round1(t.wage), years: t.years, promise: t.promise, clause: t.clause > 0 ? round1(t.clause) : null, sellOn, since: g.year };
 }
 
 /** 새로 팀을 맡았을 때나 이전 저장을 불러왔을 때 기존 선수들의 계약. */
@@ -224,13 +237,86 @@ export function expireContracts(g: Game, nextLevel: number): string[] {
 
 /** 선발과 후보를 맞바꾼다. 같은 포지션끼리만 된다. 경기 중에는 못 바꾼다. */
 export function swapLineup(g: Game, inId: number, outId: number): boolean {
-  if (g.phase === 'match') return false;
-  const sub = g.reserves.find((p) => p.id === inId);
-  const starter = g.squad.find((p) => p.id === outId);
-  if (!sub || !starter || sub.pos !== starter.pos) return false;
-  g.squad = g.squad.map((p) => (p.id === outId ? sub : p));
-  g.reserves = g.reserves.map((p) => (p.id === inId ? starter : p));
-  return true;
+  const at = g.squad.findIndex((p) => p.id === outId);
+  return at >= 0 && placeAt(g, inId, at) === null;
+}
+
+/**
+ * 선수를 선발 자리 at(0~6: GK, DF, DF, MF, MF, FW, FW)에 세운다. 선발끼리는 자리를 맞바꾸고,
+ * 후보면 그 자리의 선발과 맞바꾼다. 포지션이 달라도 되지만 OVR이 깎인다. 안 되면 이유를 돌려준다.
+ */
+export function placeAt(g: Game, id: number, at: number): string | null {
+  if (g.phase === 'match') return '경기 중에는 바꿀 수 없다';
+  if (at < 0 || at >= g.squad.length) return '없는 자리다';
+  const from = g.squad.findIndex((p) => p.id === id);
+  if (from === at) return null;
+  const squad = [...g.squad];
+  const reserves = [...g.reserves];
+  const target = squad[at] as Player;
+  if (from >= 0) {
+    squad[at] = squad[from] as Player;
+    squad[from] = target;
+  } else {
+    const r = reserves.findIndex((p) => p.id === id);
+    if (r < 0) return '등록 선수가 아니다';
+    squad[at] = reserves[r] as Player;
+    reserves[r] = target;
+  }
+  const limit = quota(g).pitch;
+  const foreign = (list: Player[]): number => list.filter((p) => isForeign(g, p)).length;
+  if (limit !== null && foreign(squad) > limit && foreign(squad) > foreign(g.squad)) return `외국인 선발은 ${limit}명까지다`;
+  g.squad = squad;
+  g.reserves = reserves;
+  return null;
+}
+
+// ---------- 외국인 쿼터 ----------
+
+/**
+ * 리그별 외국인 한도. reg는 등록, pitch는 선발(동시 출전). null은 제한 없음.
+ * K리그1·2는 2026 시즌부터 보유 한도가 없고 동시 출전은 5명, 4명이다. K4는 2025 시즌 기준 보유·출전 4명이고,
+ * K3도 같게 두었다(원문 미확인). K5는 게임용 규칙이다. 잉글랜드에는 외국인 쿼터가 없다.
+ */
+const QUOTA: Record<ClubLeagueId, { reg: number | null; pitch: number | null }> = {
+  kr5: { reg: 3, pitch: 3 }, kr4: { reg: 4, pitch: 4 }, kr3: { reg: 4, pitch: 4 }, kr2: { reg: null, pitch: 4 }, kr1: { reg: null, pitch: 5 },
+  eu2: { reg: null, pitch: null }, eu1: { reg: null, pitch: null },
+};
+
+export function quota(g: Game): { reg: number | null; pitch: number | null } {
+  const club = myClub(g);
+  return club.nation ? { reg: null, pitch: null } : QUOTA[club.league as ClubLeagueId];
+}
+
+/** 쿼터에 세는 외국인인지. 국내 리그에서만 센다. */
+export function isForeign(g: Game, p: Player): boolean {
+  const club = myClub(g);
+  return !club.nation && LEAGUES[club.league as ClubLeagueId].region === 'kr' && p.nat !== '대한민국';
+}
+
+export const foreignCount = (g: Game, list: Player[]): number => list.filter((p) => isForeign(g, p)).length;
+
+/**
+ * 선발의 외국인이 한도를 넘으면(승격, 규정 변경 등) 가장 약한 외국인 선발을 국내 후보와 바꾼다.
+ * 맞는 국내 후보가 없으면 2군 선수가 선다. 바꾼 내용을 돌려준다.
+ */
+export function enforceQuota(g: Game): string[] {
+  const limit = quota(g).pitch;
+  const lines: string[] = [];
+  while (limit !== null && foreignCount(g, g.squad) > limit) {
+    const at = g.squad.map((p, i) => ({ p, i })).filter((x) => isForeign(g, x.p)).sort((a, b) => a.p.ovr - b.p.ovr)[0]!;
+    const line = lineAt(at.i);
+    const sub = g.reserves.filter((r) => !isForeign(g, r) && !r.loan).sort((a, b) => (b.pos === line ? 5 : 0) + b.ovr - ((a.pos === line ? 5 : 0) + a.ovr))[0];
+    if (sub) {
+      placeAt(g, sub.id, at.i);
+      lines.push(ko`외국인 선발 한도(${limit}명) 때문에 ${at.p.name} 대신 ${sub.name}이 선발로 나선다.`);
+    } else {
+      const { level, region } = stage(g);
+      lines.push(ko`외국인 선발 한도(${limit}명) 때문에 ${at.p.name}이 빠졌다. ${fillSlot(g, at.p, level - 2, region)}`);
+      if (!g.reserves.includes(at.p)) g.reserves.push(at.p);
+      settle(g);
+    }
+  }
+  return lines;
 }
 
 /**
