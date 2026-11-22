@@ -11,9 +11,10 @@ import { effOvr, lineAt, potentialText, ratings, stage, valueOf } from '../game/
 import { formationBoard, formationMini, playerCard, playerRow, spotBadge } from './cards.ts';
 import { face } from './face.ts';
 import type { BoardSpot } from './cards.ts';
-import { ESC_SLOTS, NON_HG_LIMIT, PROMISES, oddsText, contractText, depthOf, englandStatus, englandText, foreignCount, inEngland, isForeign, placeAt, promiseKept, quota, swapLineup, totalWages } from '../game/contract.ts';
+import { ESC_SLOTS, NON_HG_LIMIT, PROMISES, RESERVE_LIMIT, oddsText, quotaWord, contractText, depthOf, englandStatus, englandText, foreignCount, inEngland, isForeign, placeAt, promiseKept, quota, swapLineup, totalWages } from '../game/contract.ts';
 import { SLOTS, lineup } from '../game/live.ts';
 import { agenda } from '../game/agenda.ts';
+import { manage } from '../game/manage.ts';
 import { posPenalty } from '../game/player.ts';
 import type { Entrant } from '../game/live.ts';
 import { SHAPES, SHAPE_IDS, usualShape } from '../game/tactics.ts';
@@ -48,6 +49,8 @@ let tab: Tab = 'play';
 let tableLeague: LeagueId | null = null;
 /** 이적시장에서 보고 있는 탭. */
 let marketTab: string | null = null;
+/** 구단 관리 탭에서 맞바꾸려고 고른 자리나 후보. */
+let squadPick: { kind: 'slot'; at: number } | { kind: 'res'; id: number } | null = null;
 let confirmReset = false;
 /** 선발 배치가 거절됐을 때 잠깐 보여 줄 이유. */
 let notice: string | null = null;
@@ -122,7 +125,7 @@ function begin(): void {
 }
 
 function onClick(e: Event): void {
-  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-country],[data-mtab],[data-do],[data-live],[data-live-do],[data-step]');
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-country],[data-mtab],[data-todo],[data-lineup],[data-do],[data-live],[data-live-do],[data-step]');
   if (!el) return;
   if (el.dataset.step && el.dataset.for) {
     const slider = root.querySelector<HTMLInputElement>(`input[type="range"][data-range="${CSS.escape(el.dataset.for)}"]`);
@@ -167,6 +170,53 @@ function onClick(e: Event): void {
     confirmReset = false;
     render();
     window.scrollTo(0, 0);
+    return;
+  }
+  if (el.dataset.todo && game) {
+    const res = manage(game, el.dataset.todo);
+    notice = res.msg;
+    store(SAVE_KEY, game);
+    if (res.go) {
+      tab = 'play';
+      if (res.tab) marketTab = res.tab;
+      squadPick = null;
+      render();
+      window.scrollTo(0, 0);
+    } else {
+      const y = window.scrollY;
+      squadPick = null;
+      render();
+      window.scrollTo(0, y);
+    }
+    return;
+  }
+  if (el.dataset.lineup && game) {
+    const v = el.dataset.lineup;
+    const y = window.scrollY;
+    if (v === 'clear') squadPick = null;
+    else {
+      const [kind, raw] = v.split(':');
+      const n = Number(raw);
+      const cur = squadPick;
+      if (kind === 's') {
+        if (cur?.kind === 'slot' && cur.at === n) squadPick = null;
+        else if (cur?.kind === 'slot') {
+          notice = manage(game, `place:${(game.squad[n] as Player).id}.${cur.at}`).msg;
+          squadPick = null;
+        } else if (cur?.kind === 'res') {
+          notice = manage(game, `place:${cur.id}.${n}`).msg;
+          squadPick = null;
+        } else squadPick = { kind: 'slot', at: n };
+      } else if (kind === 'r') {
+        if (cur?.kind === 'slot') {
+          notice = manage(game, `place:${n}.${cur.at}`).msg;
+          squadPick = null;
+        } else squadPick = cur?.kind === 'res' && cur.id === n ? null : { kind: 'res', id: n };
+      }
+      store(SAVE_KEY, game);
+    }
+    render();
+    window.scrollTo(0, y);
     return;
   }
   if (el.dataset.mtab) {
@@ -328,8 +378,11 @@ function renderGame(g: Game): string {
     </header>
     <main class="page">${tab === 'play' ? (isLive(g) ? renderLive(g) : renderScene(g)) : tab === 'table' ? renderTables(g) : tab === 'squad' ? renderSquad(g) : renderRecord(g)}</main>
     <nav class="tabs" aria-label="화면 전환">
-      ${([['play', '진행'], ['table', '순위'], ['squad', '스쿼드'], ['record', '기록']] as [Tab, string][]).map(([id, label]) =>
-        `<button type="button" class="tabs__item${tab === id ? ' is-on' : ''}" data-tab="${id}"${tab === id ? ' aria-current="page"' : ''}>${TAB_ICONS[id]}<span>${label}</span></button>`).join('')}
+      ${([['play', '진행'], ['table', '순위'], ['squad', '구단 관리'], ['record', '기록']] as [Tab, string][]).map(([id, label]) => {
+        const n = id === 'squad' && g.job ? agenda(g).length : 0;
+        const hot = id === 'squad' && g.job ? agenda(g).some((t) => t.tone === 'bad') : false;
+        return `<button type="button" class="tabs__item${tab === id ? ' is-on' : ''}" data-tab="${id}"${tab === id ? ' aria-current="page"' : ''}>${TAB_ICONS[id]}${n ? `<span class="tabs__badge${hot ? ' is-hot' : ''}" aria-label="할 일 ${n}건">${n}</span>` : ''}<span>${label}</span></button>`;
+      }).join('')}
     </nav>`;
 }
 
@@ -341,15 +394,16 @@ const TAB_ICONS: Record<Tab, string> = {
   record: '<svg class="tabs__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5 H17 V9 C17 12 14.8 14.2 12 14.2 C9.2 14.2 7 12 7 9 Z M7 5.5 H3.5 C3.5 8.5 5 10 7.3 10.3 M17 5.5 H20.5 C20.5 8.5 19 10 16.7 10.3 M12 14.2 V18 M8 20.5 H16 L15 18 H9 Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
 };
 
-/** 할 일 목록. 접을 수 있다. */
+/** 진행 화면 위의 할 일 요약. 처리는 구단 관리 탭에서 한다. */
 function renderTodo(g: Game): string {
   const items = agenda(g);
   if (items.length === 0) return '';
   const urgent = items.filter((t) => t.tone === 'bad').length;
-  return `<details class="todo"${urgent > 0 ? ' open' : ''}>
-    <summary class="todo__sum">할 일 ${items.length}${urgent > 0 ? ` <span class="todo__urgent">급함 ${urgent}</span>` : ''}</summary>
-    <ul class="todo__list">${items.map((t) => `<li class="todo__item todo__item--${t.tone}"><span>${esc(t.text)}</span><span class="todo__where">${esc(t.where)}</span></li>`).join('')}</ul>
-  </details>`;
+  return `<button type="button" class="todo-bar${urgent ? ' is-urgent' : ''}" data-tab="squad">
+    <span class="todo-bar__count">${items.length}</span>
+    <span class="todo-bar__text">할 일 ${items.length}건${urgent ? ` · 급함 ${urgent}` : ''} — ${esc(items[0]!.text.split('.')[0] as string)}</span>
+    <span class="todo-bar__go">구단 관리에서 처리 ›</span>
+  </button>`;
 }
 
 const TODO_PHASES: Phase[] = ['style', 'focus', 'market', 'winter', 'half1', 'event', 'outcome', 'plan', 'end', 'growth'];
@@ -614,8 +668,16 @@ function bestEleven(g: Game, shape: ShapeId): BoardSpot[] {
   });
 }
 
+/** 할 일 한 줄과 바로 처리하는 버튼들. */
+function todoItem(t: ReturnType<typeof agenda>[number]): string {
+  return `<li class="todo__item todo__item--${t.tone}">
+    <span>${esc(t.text)}</span>
+    ${t.actions?.length ? `<span class="todo__acts">${t.actions.map((a) => `<button type="button" class="chip${a.disabled ? '' : ' chip--primary'}" data-todo="${esc(a.id)}"${a.disabled ? ' disabled' : ''}>${esc(a.label)}</button>`).join('')}</span>` : `<span class="todo__where">${esc(t.where)}</span>`}
+  </li>`;
+}
+
 function renderSquad(g: Game): string {
-  if (!g.job) return '<p class="prose">아직 맡은 팀이 없다.</p>';
+  if (!g.job) return '<p class="prose">아직 맡은 팀이 없다. 구직 화면에서 지원서를 낸다.</p>';
   const club = g.clubs[g.job.club] as Club;
   const r = ratings(g.squad, depthOf(g));
   const a = g.manager.attrs;
@@ -628,57 +690,85 @@ function renderSquad(g: Game): string {
     ...(inEngland(g) ? [`잉글랜드 규정|${p.nat} · ${englandText(g, p)}`] : p.nat !== localNat(g) ? [`국적|${p.nat}${isForeign(g, p) ? ' · 쿼터에 든다' : ''}`] : []),
     `이번 시즌|${p.goals}골 · 팀에서 ${p.years + 1}번째 시즌${p.homegrown ? ' · 유스 출신' : ''}`,
   ];
-  const flag = (p: Player): string | undefined => [p.unhappy ? '불만' : '', p.contract && p.contract.years <= 1 && !p.loan ? '계약 만료 임박' : '', p.loan?.dir === 'in' ? `임대(${p.loan.club})` : '', isForeign(g, p) ? '외국인' : ''].filter(Boolean).join(' · ') || undefined;
+  const flags = (p: Player): string[] => [p.unhappy ? '불만' : '', p.contract && p.contract.years <= 1 && !p.loan ? '만료 임박' : '', p.loan?.dir === 'in' ? '임대' : '', isForeign(g, p) ? quotaWord(g) : '', !promiseKept(g, p) ? '약속 위반' : ''].filter(Boolean);
   const q = quota(g);
   const msg = notice;
   notice = null;
   const busy = g.phase === 'match';
+  const items = agenda(g);
+  const pickSlot = squadPick?.kind === 'slot' ? squadPick.at : -1;
+  const pickRes = squadPick?.kind === 'res' ? squadPick.id : -1;
+  const target = pickSlot >= 0 ? lineAt(pickSlot) : null;
+
+  const slotCard = (p: Player, i: number): string => {
+    const line = lineAt(i);
+    const pen = posPenalty(p.spot, line);
+    const v = effOvr(p, line) + p.temp;
+    const hint = pickRes >= 0 ? (() => {
+      const rp = g.reserves.find((x) => x.id === pickRes);
+      return rp ? `<span class="xi__hint">넣으면 ${effOvr(rp, line) + rp.temp}</span>` : '';
+    })() : pickSlot >= 0 && pickSlot !== i ? `<span class="xi__hint">맞바꾸기</span>` : '';
+    return `<button type="button" class="xi${i === pickSlot ? ' is-picked' : ''}${pen ? ' is-off' : ''}" data-lineup="s:${i}"${busy ? ' disabled' : ''}>
+      <span class="xi__line xi__line--${line}">${line}</span>
+      ${face(p.id, p.nat, 38, club.colors, p.name)}
+      <span class="xi__name">${esc(p.name)}</span>
+      <span class="xi__meta">${p.spot}${pen ? ` <b class="xi__pen">-${pen}</b>` : ''} · ${PROMISES[p.contract?.promise ?? 'rotation'].name}</span>
+      <span class="xi__ovr">${v}</span>
+      ${flags(p).length ? `<span class="xi__flags">${flags(p).map((f) => `<span class="tag tag--warn">${esc(f)}</span>`).join('')}</span>` : ''}
+      ${hint}
+    </button>`;
+  };
+  const resCard = (p: Player): string => {
+    const canPlay = !p.loan || p.loan.dir === 'in';
+    const there = target ? effOvr(p, target) + p.temp : null;
+    return `<button type="button" class="bench-card${p.id === pickRes ? ' is-picked' : ''}" data-lineup="r:${p.id}"${busy || !canPlay ? ' disabled' : ''}>
+      ${face(p.id, p.nat, 34, club.colors, p.name)}
+      <span class="bench-card__who"><span class="bench-card__name">${esc(p.name)}</span><span class="bench-card__meta">${p.spot} · ${p.age}세 · ${PROMISES[p.contract?.promise ?? 'backup'].name}${flags(p).length ? ` · ${esc(flags(p).join(' · '))}` : ''}</span></span>
+      <span class="bench-card__ovr">${there !== null ? `<small>${target}에서</small>${there}` : p.ovr + p.temp}</span>
+    </button>`;
+  };
+
   return `
     <section class="section">
-      <p class="eyebrow">${esc(club.name)}</p>
-      <h2 class="scene__title">스쿼드</h2>
+      <p class="eyebrow">${esc(club.name)} · 구단 관리</p>
+      <h2 class="scene__title">할 일과 선수단</h2>
       <dl class="teamrate" aria-label="팀 지표">
         <div><dt>ATT</dt><dd>${Math.round(r.att)}</dd></div>
         <div><dt>MID</dt><dd>${Math.round(r.mid)}</dd></div>
         <div><dt>DEF</dt><dd>${Math.round(r.def)}</dd></div>
         <div><dt>뎁스</dt><dd>${Math.round(depthOf(g))}</dd></div>
       </dl>
+      ${msg ? `<p class="note note--plain" role="status">${esc(msg)}</p>` : ''}
+      <h3 class="section__sub">할 일 ${items.length ? `<span class="muted">${items.length}건 · 버튼으로 바로 처리한다</span>` : ''}</h3>
+      ${items.length ? `<ul class="todo__list todo__list--open">${items.map(todoItem).join('')}</ul>` : '<p class="muted">지금 챙길 일이 없다.</p>'}
+
+      <h3 class="section__sub">선발 7자리</h3>
+      <p class="fine">${busy ? '경기 중에는 바꿀 수 없다.' : squadPick ? '바꿀 상대(다른 자리나 아래 후보)를 누른다. 같은 칸을 다시 누르면 취소.' : '자리를 누르고, 바꿀 선수(다른 자리나 후보)를 누르면 맞바꾼다. 자기 포지션이 아니면 OVR이 깎인다(빨간 숫자).'}</p>
+      <div class="xi-actions">
+        <button type="button" class="chip chip--primary" data-todo="auto"${busy ? ' disabled' : ''}>가장 강한 배치로</button>
+        ${squadPick ? '<button type="button" class="chip" data-lineup="clear">선택 취소</button>' : ''}
+      </div>
+      <div class="xi-grid">${g.squad.map(slotCard).join('')}</div>
+
+      ${nation ? '' : `
+      <h3 class="section__sub">후보 ${g.reserves.length}/${RESERVE_LIMIT}${q.reg !== null || q.pitch !== null ? ` <span class="muted">${quotaWord(g)} 등록 ${foreignCount(g, [...g.squad, ...g.reserves])}${q.reg !== null ? `/${q.reg}` : ''} · 선발 ${foreignCount(g, g.squad)}/${q.pitch ?? '-'}</span>` : ''}${inEngland(g) ? ` <span class="muted">비홈그로운 ${englandStatus(g).nonHg}/${NON_HG_LIMIT} · ESC ${englandStatus(g).esc}/${ESC_SLOTS}</span>` : ''}</h3>
+      ${g.reserves.length === 0 ? '<p class="muted">후보 명단이 비어 있다. 이적시장에서 백업이나 로테이션으로 영입하면 여기에 들어온다.</p>' : `<div class="bench-grid">${g.reserves.map(resCard).join('')}</div>`}
+      ${g.loaned.length ? `<p class="fine">임대 보낸 선수: ${g.loaned.map((p) => `${esc(p.name)}(${esc(p.loan!.club)}, ${p.loan!.until === 'winter' ? '겨울 복귀' : '시즌 끝 복귀'})`).join(', ')}</p>` : ''}
+      <div class="xi-actions">${marketOpenNow(g) ? '<button type="button" class="chip" data-todo="market:mine">이적시장에서 판매 · 임대 · 해지</button><button type="button" class="chip" data-todo="market:sign">영입 후보 보기</button>' : '<span class="fine">영입, 판매, 임대, 재계약은 여름·겨울 이적시장에서 한다.</span>'}</div>`}
+
       ${formationBoard(bestEleven(g, shape), club.colors, `베스트 11 · ${SHAPES[shape].name}(전술에 어울리는 기본 대형, 경기마다 바꿀 수 있다). 흐린 자리는 이름 없는 2군 선수다.`)}
+      <details class="squad-more">
+        <summary class="section__sub">선수 정보 자세히 보기(능력치, 계약, 성장)</summary>
+        <ul class="plist">${[...g.squad, ...g.reserves].map((p) => playerRow(p, {
+          note: `${g.squad.includes(p) ? '선발' : '후보'} · ${POS_NAME[p.pos]}${p.contract ? ` · ${PROMISES[p.contract.promise].name}` : ''}`, extra: extra(p), kit: club.colors, flag: flags(p).join(' · ') || undefined,
+        })).join('')}</ul>
+      </details>
       <dl class="stats">
         <div class="stats__row"><dt>전술</dt><dd>${g.lastStyle ? esc(STYLES[g.lastStyle].name) : '미정'} · 전술 완성도 ${Math.round(g.cohesion)}</dd></div>
         <div class="stats__row"><dt>라커룸 분위기</dt><dd>${Math.round(g.morale)}</dd></div>
         ${g.job.kind === 'club' ? `<div class="stats__row"><dt>이적 예산</dt><dd>${esc(won(g.job.budget))}</dd></div>
         <div class="stats__row"><dt>연봉 총액 / 예산</dt><dd>${g.job.wageBudget > 0 ? `${esc(won(totalWages(g)))} / ${esc(won(g.job.wageBudget))}` : '무급(아마추어)'}</dd></div>` : ''}
       </dl>
-      ${renderTodo(g)}
-      ${msg ? `<p class="note note--bad" role="alert">${esc(msg)}</p>` : ''}
-      <p class="fine">선수를 누르면 능력치와 계약이 펼쳐진다. 자리마다 아무 선수나 세울 수 있지만, 자기 포지션이 아니면 OVR이 깎인다(옆 줄 -2~-5, 두 줄 -10, 골키퍼와 필드 -25). 핵심 선수나 주전으로 약속한 선수를 후보로 돌리면 불만을 품는다.</p>
-      <h3 class="section__sub">선발 7자리</h3>
-      <ul class="plist">${g.squad.map((p, i) => {
-        const line = lineAt(i);
-        const pen = posPenalty(p.spot, line);
-        const options = [...g.squad, ...g.reserves].filter((x) => !x.loan || x.loan.dir === 'in').map((x) => {
-          const v = effOvr(x, line);
-          return `<option value="${x.id}:${i}"${x.id === p.id ? ' selected' : ''}>${esc(x.name)} (${x.spot}${isForeign(g, x) ? '·외' : ''}) → ${line}에서 OVR ${v}${g.squad.includes(x) && x.id !== p.id ? ' · 선발끼리 맞바꿈' : ''}</option>`;
-        }).join('');
-        return `<li class="slot">
-          <div class="slot__head">
-            <span class="slot__line slot__line--${line}">${line}</span>
-            ${busy ? '' : `<select class="slot__pick" data-place="${i}" aria-label="${line} 자리 선수">${options}</select>`}
-            ${pen > 0 ? `<span class="flag">포지션 밖 OVR -${pen}</span>` : ''}
-          </div>
-          <ul class="plist plist--tight">${playerRow(p, {
-            note: `${POS_NAME[p.pos]}${p.contract ? ` · ${PROMISES[p.contract.promise].name}` : ''}`, extra: extra(p), kit: club.colors, flag: flag(p),
-          })}</ul>
-        </li>`;
-      }).join('')}</ul>
-      ${nation ? '' : `
-      <h3 class="section__sub">후보 ${g.reserves.length}명${q.reg !== null || q.pitch !== null ? ` · 외국인 등록 ${foreignCount(g, [...g.squad, ...g.reserves])}${q.reg !== null ? `/${q.reg}` : ''} · 선발 ${foreignCount(g, g.squad)}/${q.pitch ?? '-'}` : ''}${inEngland(g) ? ` · 비홈그로운 ${englandStatus(g).nonHg}/${NON_HG_LIMIT} · ESC ${englandStatus(g).esc}/${ESC_SLOTS}` : ''}</h3>
-      ${g.reserves.length === 0 ? '<p class="muted">후보 명단이 비어 있다. 이적시장에서 백업이나 로테이션으로 영입하면 여기에 들어온다.</p>' : `<ul class="plist">${g.reserves.map((p) => playerRow(p, {
-        note: `${POS_NAME[p.pos]}${p.contract ? ` · ${PROMISES[p.contract.promise].name}` : ''}${promiseKept(g, p) ? '' : ' · 약속 위반 중'}`,
-        extra: extra(p), kit: club.colors, flag: flag(p),
-      })).join('')}</ul>`}
-      ${g.loaned.length ? `<h3 class="section__sub">임대 보낸 선수 ${g.loaned.length}명</h3><ul class="plist">${g.loaned.map((p) => playerRow(p, { note: `${p.loan!.club} · ${p.loan!.until === 'winter' ? '겨울 복귀' : '시즌 끝 복귀'}`, extra: extra(p), kit: club.colors })).join('')}</ul>` : ''}`}
     </section>
     <section class="section">
       <h2 class="section__title">${esc(g.manager.name)} 감독의 지도자 역량</h2>
@@ -687,6 +777,8 @@ function renderSquad(g: Game): string {
       </dl>
     </section>`;
 }
+
+const marketOpenNow = (g: Game): boolean => (g.phase === 'market' || g.phase === 'winter') && !!g.window;
 
 /** 맡은 팀 나라의 국적. */
 const localNat = (g: Game): string => (g.job && !(g.clubs[g.job.club] as Club).nation ? COUNTRIES[countryOf((g.clubs[g.job.club] as Club).league)].name : '대한민국');

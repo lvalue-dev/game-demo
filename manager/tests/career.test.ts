@@ -875,3 +875,34 @@ test('실시간 경기 교체: 고른 선수가 실제로 경기장에 들어가
   assert.ok(shots > 0, '슈팅이 선수 개인 기록에 쌓인다');
   assert.equal(shots, L.teams[0].shots + L.teams[1].shots, '개인 슈팅의 합이 팀 슈팅과 같다');
 });
+
+test('구단 관리: 할 일 버튼으로 바로 처리한다(자동 배치, 선발로 올리기, 재계약 협상 열기)', async () => {
+  const { manage } = await import('../src/game/manage.ts');
+  const { agenda } = await import('../src/game/agenda.ts');
+  const { effOvr, lineAt } = await import('../src/game/squad.ts');
+  const g = toMarket(5151);
+  const sum = (): number => g.squad.reduce((s, p, i) => s + effOvr(p, lineAt(i)), 0);
+  // 골키퍼를 공격수 자리에 세워 일부러 망가뜨린다.
+  const gk = g.squad[0]!;
+  const fw = g.squad[6]!;
+  g.squad[0] = fw;
+  g.squad[6] = gk;
+  const broken = sum();
+  assert.ok(agenda(g).some((t) => t.actions?.some((a) => a.id === 'auto')), '포지션 밖 기용이면 자동 배치 버튼이 있다');
+  manage(g, 'auto');
+  assert.ok(sum() > broken, '자동 배치가 선발을 더 강하게 만든다');
+  assert.equal(g.squad[0]!.pos, 'GK', '골키퍼가 골키퍼 자리로 돌아간다');
+  assert.equal(g.squad.length, 7);
+  // 후보를 선발로.
+  const r = g.reserves[0]!;
+  manage(g, `up:${r.id}`);
+  assert.ok(g.squad.includes(r));
+  // 재계약 버튼은 시장의 재계약 협상 화면을 연다.
+  const exp = g.squad[1]!;
+  exp.contract!.years = 1;
+  g.window!.list.push({ ...g.window!.list.find((d) => d.kind === 'renew') ?? g.window!.list[0]!, id: `r${exp.id}`, kind: 'renew', player: exp, stage: 'terms' });
+  const res = manage(g, `renew:${exp.id}`);
+  assert.equal(res.go, true);
+  assert.equal(g.window!.view, `r${exp.id}`);
+  assert.match(g.scene.title, /재계약/);
+});

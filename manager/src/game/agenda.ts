@@ -10,11 +10,20 @@ import { positionOf } from './world.ts';
 import { lineAt, myClub } from './squad.ts';
 import type { Game, Player, Tone } from './types.ts';
 
+export interface TodoAction {
+  /** manage.ts의 동작 이름. */
+  id: string;
+  label: string;
+  disabled?: boolean;
+}
+
 export interface Todo {
   text: string;
   tone: Tone;
   /** 어디서 처리하는지: 이적시장, 스쿼드 탭. */
   where: string;
+  /** 바로 처리하는 버튼들. */
+  actions?: TodoAction[];
 }
 
 const names = (list: Player[]): string => list.map((p) => p.name).join(', ');
@@ -26,35 +35,43 @@ export function agenda(g: Game): Todo[] {
   const everyone = [...g.squad, ...g.reserves];
   const market = g.phase === 'market' || g.phase === 'winter';
   const w = market ? g.window : null;
+  // 이적시장에서만 할 수 있는 일은 시장이 닫혀 있으면 버튼을 막고 언제 할 수 있는지 적는다.
+  const inMarket = (id: string, label: string): TodoAction => (w ? { id, label } : { id, label: `${label}(이적시장에서)`, disabled: true });
+  const mine = inMarket('market:mine', '내 선수 정리');
 
-  if (w && w.bids.length > 0) todo.push({ text: `들어온 이적 제안 ${w.bids.length}건. 답하지 않으면 시장 마감과 함께 사라진다.`, tone: 'plain', where: '이적시장' });
+  if (w && w.bids.length > 0) todo.push({ text: `들어온 이적 제안 ${w.bids.length}건. 답하지 않으면 시장 마감과 함께 사라진다.`, tone: 'plain', where: '이적시장', actions: [{ id: 'market:bids', label: '제안 보기' }] });
 
   if (!club.nation) {
     const expiring = everyone.filter((p) => p.contract && p.contract.years <= 1 && !p.loan);
-    if (expiring.length) todo.push({ text: `계약 만료 임박: ${names(expiring)}. 재계약하지 않으면 시즌이 끝나고 이적료 없이 떠난다.`, tone: 'bad', where: '이적시장 재계약' });
+    if (expiring.length) todo.push({ text: `계약 만료 임박: ${names(expiring)}. 재계약하지 않으면 시즌이 끝나고 이적료 없이 떠난다.`, tone: 'bad', where: '이적시장 재계약', actions: expiring.map((p) => inMarket(`renew:${p.id}`, `${p.name} 재계약`)) });
     const unhappy = everyone.filter((p) => p.unhappy);
-    if (unhappy.length) todo.push({ text: `불만 있는 선수: ${names(unhappy)}. 이적 요구가 들어오기 쉽고 재계약이 어렵다.`, tone: 'bad', where: '스쿼드 · 이적시장' });
+    if (unhappy.length) {
+      todo.push({
+        text: `불만 있는 선수: ${names(unhappy)}. 이적 요구가 들어오기 쉽고 재계약이 어렵다.`, tone: 'bad', where: '스쿼드 · 이적시장',
+        actions: [...unhappy.filter((p) => g.reserves.includes(p) && !p.loan).map((p) => ({ id: `up:${p.id}`, label: `${p.name} 선발로` })), mine],
+      });
+    }
     const broken = g.reserves.filter((p) => !promiseKept(g, p) && !p.unhappy);
-    if (broken.length) todo.push({ text: `출전 약속을 어기고 있다: ${names(broken)}. 시장 마감이나 시즌 끝에 불만으로 번진다.`, tone: 'bad', where: '스쿼드 선발 배치' });
+    if (broken.length) todo.push({ text: `출전 약속을 어기고 있다: ${names(broken)}. 시장 마감이나 시즌 끝에 불만으로 번진다.`, tone: 'bad', where: '스쿼드 선발 배치', actions: broken.map((p) => ({ id: `up:${p.id}`, label: `${p.name} 선발로` })) });
 
     const job = g.job;
-    if (job.budget < 0) todo.push({ text: `이적 예산이 바닥났다(${won(job.budget)}).`, tone: 'bad', where: '이적시장 판매' });
+    if (job.budget < 0) todo.push({ text: `이적 예산이 바닥났다(${won(job.budget)}).`, tone: 'bad', where: '이적시장 판매', actions: [mine] });
     if (job.wageBudget > 0) {
       const wages = totalWages(g);
-      if (wages > job.wageBudget) todo.push({ text: `연봉 총액 ${won(wages)}이 예산 ${won(job.wageBudget)}을 넘었다. 새 계약을 맺을 수 없다.`, tone: 'bad', where: '이적시장 판매 · 임대 · 해지' });
+      if (wages > job.wageBudget) todo.push({ text: `연봉 총액 ${won(wages)}이 예산 ${won(job.wageBudget)}을 넘었다. 새 계약을 맺을 수 없다.`, tone: 'bad', where: '이적시장 판매 · 임대 · 해지', actions: [mine] });
       else if (wages > job.wageBudget * 0.92) todo.push({ text: `연봉 예산이 거의 찼다(${won(wages)} / ${won(job.wageBudget)}).`, tone: 'plain', where: '이적시장' });
     }
-    if (g.reserves.length >= RESERVE_LIMIT) todo.push({ text: `등록 인원이 꽉 찼다(후보 ${RESERVE_LIMIT}명). 영입하려면 먼저 자리를 비워야 한다.`, tone: 'plain', where: '이적시장 판매 · 임대' });
+    if (g.reserves.length >= RESERVE_LIMIT) todo.push({ text: `등록 인원이 꽉 찼다(후보 ${RESERVE_LIMIT}명). 영입하려면 먼저 자리를 비워야 한다.`, tone: 'plain', where: '이적시장 판매 · 임대', actions: [mine] });
 
     const q = quota(g);
     const reg = foreignCount(g, everyone);
     const start = foreignCount(g, g.squad);
-    if (q.reg !== null && reg > q.reg) todo.push({ text: `외국인 등록 ${reg}명으로 한도 ${q.reg}명을 넘었다. 새 외국인 선수를 등록할 수 없다.`, tone: 'bad', where: '이적시장' });
-    if (q.pitch !== null && start > q.pitch) todo.push({ text: `외국인 선발 ${start}명으로 한도 ${q.pitch}명을 넘었다. 시즌이 시작되면 자동으로 빠진다.`, tone: 'bad', where: '스쿼드 선발 배치' });
+    if (q.reg !== null && reg > q.reg) todo.push({ text: `외국인 등록 ${reg}명으로 한도 ${q.reg}명을 넘었다. 새 외국인 선수를 등록할 수 없다.`, tone: 'bad', where: '이적시장', actions: [mine] });
+    if (q.pitch !== null && start > q.pitch) todo.push({ text: `외국인 선발 ${start}명으로 한도 ${q.pitch}명을 넘었다. 시즌이 시작되면 자동으로 빠진다.`, tone: 'bad', where: '스쿼드 선발 배치', actions: [{ id: 'quota', label: '지금 맞추기' }] });
 
     if (inEngland(g)) {
       const st = englandStatus(g);
-      if (st.nonHg > NON_HG_LIMIT) todo.push({ text: `홈그로운이 아닌 21세 이상 선수가 ${st.nonHg}명으로 한도 ${NON_HG_LIMIT}명을 넘었다. 이런 선수를 새로 등록할 수 없다.`, tone: 'bad', where: '이적시장 판매 · 임대' });
+      if (st.nonHg > NON_HG_LIMIT) todo.push({ text: `홈그로운이 아닌 21세 이상 선수가 ${st.nonHg}명으로 한도 ${NON_HG_LIMIT}명을 넘었다. 이런 선수를 새로 등록할 수 없다.`, tone: 'bad', where: '이적시장 판매 · 임대', actions: [mine] });
       else if (st.nonHg >= NON_HG_LIMIT) todo.push({ text: `비홈그로운 등록 한도가 찼다(${st.nonHg}/${NON_HG_LIMIT}). 새로 데려올 수 있는 건 홈그로운이나 21세 이하 선수뿐이다.`, tone: 'plain', where: '이적시장' });
       if (st.esc > 0) todo.push({ text: `ESC 예외 슬롯 ${st.esc}/${ESC_SLOTS} 사용 중. 워크퍼밋 점수가 모자란 23세 이하 선수만 이 슬롯으로 데려올 수 있다.`, tone: 'plain', where: '이적시장' });
     }
@@ -79,7 +96,7 @@ export function agenda(g: Game): Todo[] {
   }
 
   const off = g.squad.map((p, i) => ({ p, line: lineAt(i) })).filter((x) => posPenalty(x.p.spot, x.line) > 0);
-  if (off.length) todo.push({ text: `포지션 밖 기용: ${off.map((x) => `${x.p.name}(${x.p.spot}→${x.line}, OVR -${posPenalty(x.p.spot, x.line)})`).join(', ')}.`, tone: 'plain', where: '스쿼드 선발 배치' });
+  if (off.length && g.phase !== 'match') todo.push({ text: `포지션 밖 기용: ${off.map((x) => `${x.p.name}(${x.p.spot}→${x.line}, OVR -${posPenalty(x.p.spot, x.line)})`).join(', ')}.`, tone: 'plain', where: '스쿼드 선발 배치', actions: [{ id: 'auto', label: '가장 강한 배치로' }] });
 
   const loanIn = everyone.filter((p) => p.loan?.dir === 'in');
   if (loanIn.length) todo.push({ text: `임대 온 선수: ${loanIn.map((p) => `${p.name}(${p.loan!.until === 'winter' ? '겨울에' : '시즌 끝에'} ${p.loan!.club} 복귀)`).join(', ')}.`, tone: 'plain', where: '스쿼드' });
