@@ -384,6 +384,14 @@ export interface LivePlayer {
   spot: Spot;
   foot: Foot;
   dev: number[];
+  /** 우리 선수(후보 포함)의 선수 번호. 얼굴과 정보 연결에 쓴다. 상대와 2군은 없다. */
+  pid?: number;
+  /** 국적. 얼굴 그림에 쓴다. */
+  nat?: string;
+  /** 경기장에 들어온 틱(선발은 0). 선수별 체력 표시에 쓴다. */
+  on?: number;
+  /** 이 경기의 개인 기록. */
+  rec?: { goals: number; shots: number; onTarget: number; steals: number; fouls: number };
 }
 
 export interface LiveTeam {
@@ -445,6 +453,8 @@ export interface LiveState {
   calls: { tick: number; text: string; tone: Tone }[];
   /** 이미 교체로 들어간 후보들의 이름. */
   subbed?: string[];
+  /** 이 경기만 벤치에 앉힌 2군 선수들. 후보가 모자라도 벤치가 일곱 자리가 되게 한다. */
+  youth?: Player[];
   halfTimeDone: boolean;
   /** 하프타임 대화를 마쳤는지. 마치기 전에는 후반이 시작되지 않는다. */
   talked: boolean;

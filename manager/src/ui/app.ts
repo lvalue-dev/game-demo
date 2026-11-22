@@ -9,6 +9,7 @@ import { licenseName } from '../game/hiring.ts';
 import { ko } from '../game/josa.ts';
 import { effOvr, lineAt, potentialText, ratings, stage, valueOf } from '../game/squad.ts';
 import { formationBoard, formationMini, playerCard, playerRow, spotBadge } from './cards.ts';
+import { face } from './face.ts';
 import type { BoardSpot } from './cards.ts';
 import { ESC_SLOTS, NON_HG_LIMIT, PROMISES, oddsText, contractText, depthOf, englandStatus, englandText, foreignCount, inEngland, isForeign, placeAt, promiseKept, quota, swapLineup, totalWages } from '../game/contract.ts';
 import { SLOTS, lineup } from '../game/live.ts';
@@ -409,7 +410,7 @@ function marketCard(c: MarketCard): string {
   const p = c.player;
   const gain = c.gain === undefined ? '' : `<span class="mcard__gain mcard__gain--${c.gain > 0 ? 'up' : c.gain < 0 ? 'down' : 'flat'}" title="같은 포지션 가장 약한 선발 대비">${c.gain > 0 ? '+' : ''}${c.gain}</span>`;
   const body = `
-    <span class="mcard__top">${spotBadge(p)}<span class="mcard__who"><span class="mcard__name">${esc(p.name)}</span><span class="mcard__meta">${p.age}세 · ${esc(c.from)}</span></span><span class="mcard__ovr"><span class="mcard__ovrn">${p.ovr + p.temp}</span>${gain}</span></span>
+    <span class="mcard__top">${face(p.id, p.nat, 40, undefined, p.name)}${spotBadge(p)}<span class="mcard__who"><span class="mcard__name">${esc(p.name)}</span><span class="mcard__meta">${p.age}세 · ${esc(c.from)}</span></span><span class="mcard__ovr"><span class="mcard__ovrn">${p.ovr + p.temp}</span>${gain}</span></span>
     <span class="mcard__price">${esc(c.price)}</span>
     ${c.tags.length ? `<span class="mcard__tags">${c.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</span>` : ''}
     ${c.status ? `<span class="mcard__status mcard__status--${c.status.tone}">${esc(c.status.text)}</span>` : ''}`;

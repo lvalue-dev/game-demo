@@ -844,3 +844,34 @@ test('이적시장 화면: 탭으로 나눈 선수 카드에서 바로 협상, �
   act(g, 'back');
   assert.equal(g.window!.view, null, '판매 화면에서 돌아오면 시장 첫 화면');
 });
+
+test('실시간 경기 교체: 고른 선수가 실제로 경기장에 들어가고, 나간 선수는 다시 못 들어오며, 개인 기록이 쌓인다', async () => {
+  const { benchPlayers } = await import('../src/game/match.ts');
+  const { g, liveTick, liveCommand } = await liveGame(4545);
+  for (let i = 0; i < 300; i++) liveTick(g);
+  const L = g.match!.live!;
+  const bench = benchPlayers(g, L);
+  assert.ok(bench.length > 0, '벤치에 후보가 있다');
+  const r = bench[0]!;
+  const at = L.teams[0].players.findIndex((p) => !p.off && p.line !== 'GK');
+  const out = L.teams[0].players[at]!.name;
+  const subs = g.match!.subs;
+  liveCommand(g, `swap:${at}:${r.id}`);
+  assert.equal(g.match!.subs, subs - 1, '교체 카드 한 장');
+  const lp = L.teams[0].players[at]!;
+  assert.equal(lp.name, r.name, '들어간 선수가 그 자리에서 뛴다');
+  assert.equal(lp.pid, r.id);
+  assert.equal(lp.on, L.tick, '들어온 시각을 적는다(체력 표시)');
+  assert.ok(!benchPlayers(g, L).some((p) => p.id === r.id), '들어간 선수는 벤치에서 빠진다');
+  assert.ok((L.subbed ?? []).includes(out), '나간 선수는 다시 들어오지 못한다');
+  // 같은 후보를 또 넣으려 하면 무시한다.
+  liveCommand(g, `swap:${at}:${r.id}`);
+  assert.equal(g.match!.subs, subs - 1);
+  for (let i = 0; i < 800 && g.match!.step === 'live'; i++) {
+    if (g.match!.live!.halfTimeDone && !g.match!.live!.talked) liveCommand(g, 'talk:calm');
+    liveTick(g);
+  }
+  const shots = L.teams.flatMap((t) => t.players).reduce((s, p) => s + (p.rec?.shots ?? 0), 0);
+  assert.ok(shots > 0, '슈팅이 선수 개인 기록에 쌓인다');
+  assert.equal(shots, L.teams[0].shots + L.teams[1].shots, '개인 슈팅의 합이 팀 슈팅과 같다');
+});

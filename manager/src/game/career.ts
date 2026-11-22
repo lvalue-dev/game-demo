@@ -3,7 +3,7 @@
 // 전술 → 훈련 → 여름 시장 → 전반기 → 사건 → 겨울 시장 → 후반기 운영 → 결산 → 성장 → 제안
 import { ko } from './josa.ts';
 import {
-  ATTRS, ATTR_IDS, BACKGROUNDS, CLUB_LEAGUES, FOCUSES, FOCUS_IDS, LEAGUES, NATION_REP, PLANS, PLAN_IDS, POS_NAME,
+  ATTRS, ATTR_IDS, BACKGROUNDS, CLUB_LEAGUES, CLUB_SEEDS, FOCUSES, FOCUS_IDS, LEAGUES, NATION_REP, PLANS, PLAN_IDS, POS_NAME,
   RETIRE_AGE, START_AGE, START_YEAR, STYLES, STYLE_IDS, TRAITS, won,
 } from './data.ts';
 import { eventById, pickEvent } from './events.ts';
@@ -339,6 +339,15 @@ export function migrate(g: Game): boolean {
   if (g.version === 7) {
     migrateWorld(g);
     reopen = true;
+  }
+  // 구단 유니폼 색이 새로 생기거나 바뀌었으면 저장된 구단에도 입힌다.
+  const seeds = new Map(CLUB_LEAGUES.flatMap((l) => CLUB_SEEDS[l] ?? []).filter((x) => x.colors).map((x) => [x.name, x]));
+  for (const c of g.clubs) {
+    const seed = seeds.get(c.name);
+    if (seed?.colors) {
+      c.colors = seed.colors;
+      c.pattern = seed.pattern ?? 0;
+    }
   }
   // 이적 시장 한가운데서 저장했다면, 모든 변환을 마친 뒤 새 시장으로 다시 연다.
   if (reopen && (g.phase === 'market' || g.phase === 'winter')) enterMarket(g, g.phase === 'market' ? 'summer' : 'winter');

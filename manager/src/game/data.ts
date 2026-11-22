@@ -1,6 +1,7 @@
 // 구단 명단, 전술, 능력치 같은 고정 자료. 리그 구조와 나라별 규정은 countries.ts에 있다.
 // 구단은 모두 실제 구단이다(이름과 색만 쓰고 문장은 그리지 않는다). 선수와 감독, 매체는 지어낸 것이다.
 import { CLUB_LEAGUES, RESEARCHED } from './countries.ts';
+import { KITS } from './kits.ts';
 import type { AttrId, BackgroundId, FocusId, PlanId, Pos, StyleId, TraitId } from './types.ts';
 
 export type { LeagueMeta } from './countries.ts';
@@ -74,7 +75,10 @@ const HAND: Record<string, ClubSeed[]> = {
 
 /** 리그별 구단. 한국 리그와 잉글랜드 1·2부는 손으로 적은 명단(색 포함), 나머지는 위키백과에서 모은 명단이다. */
 export const CLUB_SEEDS: Record<string, ClubSeed[]> = Object.fromEntries(
-  CLUB_LEAGUES.map((id) => [id, HAND[id] ?? (RESEARCHED[id] ?? []).map(([name, edge]) => c(name, edge))]),
+  CLUB_LEAGUES.map((id) => [id, HAND[id] ?? (RESEARCHED[id] ?? []).map(([name, edge]) => {
+    const kit = KITS[name];
+    return kit ? c(name, edge, kit[0], kit[1], kit[2]) : c(name, edge);
+  })]),
 );
 
 /** 국가대표팀. 첫 줄이 감독이 맡을 수 있는 팀이다. 전력 수치는 게임용으로 정한 것이다. */

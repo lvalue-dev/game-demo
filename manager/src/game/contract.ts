@@ -283,11 +283,13 @@ export function quota(g: Game): Quota {
 /** 규정에서 세는 선수를 부르는 말: 외국인 또는 비EU. */
 export const quotaWord = (g: Game): string => (quota(g).basis === 'noneu' ? '비EU' : '외국인');
 
-/** 쿼터에 세는 선수인지: 그 나라 국적이 아니고, 면제 국적이 아니며, 비EU 규정이면 EU 밖 국적. */
+/** 쿼터에 세는 선수인지: 한도가 있는 리그에서, 그 나라 국적이 아니고, 면제 국적이 아니며, 비EU 규정이면 EU 밖 국적. */
 export function isForeign(g: Game, p: Player): boolean {
   const club = myClub(g);
   if (club.nation) return false;
   const q = quotaOf(club.league);
+  // 한도가 없는 리그(잉글랜드, 독일 등)에서는 쿼터에 세는 선수가 없다. 잉글랜드는 워크퍼밋을 따로 본다.
+  if (q.reg === null && q.pitch === null) return false;
   if (p.nat === COUNTRIES[countryOf(club.league)].name || q.exempt.has(p.nat)) return false;
   return q.basis === 'noneu' ? !EU.has(p.nat) : true;
 }

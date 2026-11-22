@@ -3,15 +3,15 @@
 // 규칙의 근거는 TACTICS.md에 있다.
 import { ko } from './josa.ts';
 import { STYLES, STYLE_IDS } from './data.ts';
-import { HALF, PER_MIN, TICKS, createLive, lineup, reshape, stepLive } from './live.ts';
+import { HALF, PER_MIN, SLOTS, TICKS, createLive, lineup, reshape, stepLive } from './live.ts';
 import type { Entrant, LiveEnv, LiveEvent } from './live.ts';
 import { LINE_SPOT, makeDetail } from './player.ts';
 import { foreignCount, isForeign, quota } from './contract.ts';
 import { baseSide, drilled, skill } from './power.ts';
 import { chance, int, pick, poisson, rand, spread } from './rng.ts';
-import { effOvr, lineAt, myClub, nameFor, randomNat, stage } from './squad.ts';
+import { effOvr, lineAt, makePlayer, myClub, nameFor, randomNat, stage } from './squad.ts';
 import { BASE, ROLES, SHAPES, SHAPE_IDS, advantage, bestCounter, dialEdge, fits, matchup, roleEdge, shapeEdge, tempoCost, usualShape, why } from './tactics.ts';
-import type { Block, Choice, Club, Dials, Game, Pos, LeagueId, LiveHow, LiveState, LogLine, MatchState, Player, RoleId, ShapeId, StyleId, Tone, WeatherId } from './types.ts';
+import type { Block, Choice, Club, Dials, Game, Pos, LeagueId, LiveHow, LivePlayer, LiveState, LogLine, MatchState, Player, RoleId, ShapeId, StyleId, Tone, WeatherId } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 
@@ -618,7 +618,7 @@ function startLive(g: Game, m: MatchState): void {
   // 선발은 감독이 정한 자리(줄)에서 뛴다. 자기 포지션이 아니면 그 줄의 대표 자리에 서고 OVR이 깎인다.
   const keys: Entrant[] = g.squad.map((p, i) => {
     const line = lineAt(i);
-    return { name: p.name, pos: line, ovr: effOvr(p, line), key: p.id, spot: p.pos === line ? p.spot : LINE_SPOT[line], foot: p.foot, dev: p.dev, no: p.no };
+    return { name: p.name, pos: line, ovr: effOvr(p, line), key: p.id, spot: p.pos === line ? p.spot : LINE_SPOT[line], foot: p.foot, dev: p.dev, no: p.no, pid: p.id, nat: p.nat };
   });
   // 남는 네 자리는 후보 명단에서 그 자리에 맞는 선수부터 쓴다. 외국인 출전 한도를 넘지 않게 한다. 후보가 모자라면 2군 선수가 뛴다.
   const limit = quota(g).pitch;
@@ -630,10 +630,11 @@ function startLive(g: Game, m: MatchState): void {
     if (pickIdx >= 0 && isForeign(g, bench[pickIdx] as Player)) foreign++;
     if (pickIdx >= 0) {
       const r = bench.splice(pickIdx, 1)[0] as Player;
-      return { name: r.name, pos: r.pos, ovr: r.ovr + r.temp, key: -1, spot: r.spot, foot: r.foot, dev: r.dev, no: r.no };
+      return { name: r.name, pos: r.pos, ovr: r.ovr + r.temp, key: -1, spot: r.spot, foot: r.foot, dev: r.dev, no: r.no, pid: r.id, nat: r.nat };
     }
     const d = makeDetail(g, pos, spot);
-    return { name: nameFor(g, club.nation ? '대한민국' : randomNat(g, where)), pos, ovr: Math.round(depth + spread(g, -2, 2)), key: -1, ...d };
+    const nat = club.nation ? '대한민국' : randomNat(g, where);
+    return { name: nameFor(g, nat), nat, pos, ovr: Math.round(depth + spread(g, -2, 2)), key: -1, ...d };
   });
   // 상대 선수 이름: 대표팀은 그 나라 이름, 구단은 그 구단 리그의 국적 비율대로. 이름만 빌린 대륙 대회 상대는 우리 리그 기준.
   const opp = g.clubs[m.oppId] as Club | undefined;
@@ -641,18 +642,70 @@ function startLive(g: Game, m: MatchState): void {
   const theirs = lineup(m.opp.shape, [], (pos, spot) => {
     const base = pos === 'FW' ? m.oppAtt + 1 : pos === 'MF' ? (m.oppAtt + m.oppDef) / 2 : m.oppDef + 1;
     const d = makeDetail(g, pos, spot);
-    return { name: nameFor(g, oppNat()), pos, ovr: Math.round(base + spread(g, -4, 4)), key: -1, ...d };
+    const nat = oppNat();
+    return { name: nameFor(g, nat), nat, pos, ovr: Math.round(base + spread(g, -4, 4)), key: -1, ...d };
   });
   m.live = createLive(mine, theirs, [m.me.shape, m.opp.shape]);
+  callYouth(g, m.live);
 }
 
 /** 교체로 들어갈 후보. 경기장에 없는 같은 포지션 후보 중 가장 좋은 선수, 없으면 2군 선수. */
-function bench(g: Game, L: LiveState, pos: Pos, fallback: string): string {
+/** 벤치에서 들어갈 수 있는 후보: 경기장에 없고, 아직 교체로 들어갔거나 나온 적이 없는 선수. */
+export function benchPlayers(g: Game, L: LiveState): Player[] {
   const used = new Set([...L.teams[0].players.map((p) => p.name), ...(L.subbed ?? [])]);
-  const r = g.reserves.filter((p) => p.pos === pos && !used.has(p.name)).sort((a, b) => b.ovr - a.ovr)[0];
+  return [...g.reserves, ...(L.youth ?? [])].filter((p) => !used.has(p.name) && (!p.loan || p.loan.dir === 'in'));
+}
+
+/** 벤치 일곱 자리: 경기장에 서지 않은 후보로 먼저 채우고, 모자라면 2군 선수를 부른다(골키퍼 한 명은 꼭). */
+const BENCH = 7;
+function callYouth(g: Game, L: LiveState): void {
+  const club = myClub(g);
+  const bench = benchPlayers(g, L);
+  const need = BENCH - bench.length;
+  const youth: Player[] = [];
+  if (need > 0) {
+    const { where } = stage(g);
+    const order: Pos[] = bench.some((p) => p.pos === 'GK') ? ['DF', 'MF', 'FW', 'DF', 'MF', 'FW', 'MF'] : ['GK', 'DF', 'MF', 'FW', 'DF', 'MF', 'FW'];
+    const used = new Set([...L.teams[0].players.map((p) => p.n), ...g.reserves.map((p) => p.no)]);
+    let no = 30;
+    for (let k = 0; k < need; k++) {
+      const p = makePlayer(g, order[k % order.length] as Pos, g.depth - 1 + spread(g, -2, 2), int(g, 18, 22), where, club.nation);
+      while (used.has(no)) no++;
+      p.no = no;
+      used.add(no);
+      youth.push(p);
+    }
+  }
+  L.youth = youth;
+}
+
+/** 경기장의 i번 선수를 후보 r로 바꾼다. 나간 선수는 다시 들어오지 못한다. */
+function swapIn(L: LiveState, i: number, r: Player, slotLine: Pos): LivePlayer {
+  const lp = L.teams[0].players[i] as LivePlayer;
+  (L.subbed ??= []).push(lp.name, r.name);
+  call(L, `교체: ${lp.n}번 ${lp.name} 아웃, ${r.no}번 ${r.name} 인`, 'plain');
+  const out = { ...lp };
+  Object.assign(lp, {
+    n: r.no, name: r.name, line: r.pos, key: -1, pid: r.id, nat: r.nat, ovr: effOvr(r, slotLine), spot: r.spot, foot: r.foot, dev: r.dev, on: L.tick,
+    rec: { goals: 0, shots: 0, onTarget: 0, steals: 0, fouls: 0 },
+  });
+  return out;
+}
+
+/** 빠른 교체: 그 포지션 후보 중 가장 좋은 선수를, 같은 줄에서 가장 약한(나중에는 오래 뛴) 선수와 바꾼다. 후보가 없으면 2군이 들어간 것으로 친다. */
+function bench(g: Game, L: LiveState, pos: Pos, fallback: string): string {
+  const m = g.match as MatchState;
+  const r = benchPlayers(g, L).filter((p) => p.pos === pos).sort((a, b) => b.ovr - a.ovr)[0];
   if (!r) return `2군 ${fallback}`;
-  (L.subbed ??= []).push(r.name);
-  call(L, `교체: ${r.no}번 ${r.name} 투입`, 'plain');
+  const slots = SLOTS[m.me.shape];
+  const cands = L.teams[0].players.map((p, i) => ({ p, i })).filter(({ p }) => !p.off && (slots[p.slot] as { line: Pos }).line === pos);
+  const pick = cands.sort((a, b) => a.p.ovr - b.p.ovr)[0];
+  if (!pick) {
+    (L.subbed ??= []).push(r.name);
+    call(L, `교체: ${r.no}번 ${r.name} 투입`, 'plain');
+    return `${r.no}번 ${r.name}`;
+  }
+  swapIn(L, pick.i, r, pos);
   return `${r.no}번 ${r.name}`;
 }
 
@@ -669,7 +722,39 @@ function who(L: LiveState, t: 0 | 1, i: number): string {
 }
 
 /** 골과 퇴장 말고도 경기 흐름을 자막으로 전한다. */
+/** 선수 개인 기록을 쌓는다. */
+function tally(L: LiveState, events: LiveEvent[]): void {
+  const rec = (t: 0 | 1, i: number): NonNullable<LivePlayer['rec']> | null => {
+    const p = L.teams[t].players[i];
+    if (!p) return null;
+    return (p.rec ??= { goals: 0, shots: 0, onTarget: 0, steals: 0, fouls: 0 });
+  };
+  for (const e of events) {
+    if (e.kind === 'goal') {
+      const r = rec(e.team, e.by);
+      if (r) {
+        r.goals++;
+        r.shots++;
+        r.onTarget++;
+      }
+    } else if (e.kind === 'shot') {
+      const r = rec(e.team, e.by);
+      if (r) {
+        r.shots++;
+        if (e.result === 'save') r.onTarget++;
+      }
+    } else if (e.kind === 'steal') {
+      const r = rec(e.team, e.by);
+      if (r) r.steals++;
+    } else if (e.kind === 'foul') {
+      const r = rec(e.team, e.by);
+      if (r) r.fouls++;
+    }
+  }
+}
+
 function narrate(L: LiveState, events: LiveEvent[]): void {
+  tally(L, events);
   const shotCorner = events.some((e) => e.kind === 'shot' && e.result === 'corner');
   for (const e of events) {
     if (e.kind === 'goal') call(L, ko`골! ${who(L, e.team, e.by)}의 득점`, e.team === 0 ? 'good' : 'bad');
@@ -830,6 +915,23 @@ export function liveCommand(g: Game, cmd: string): void {
     case 'push':
       m.me.push = level;
       return;
+    case 'swap': {
+      // 감독이 고른 교체: 경기장의 a번 자리 선수를 후보 b(선수 번호)로 바꾼다.
+      const i = Number(a);
+      const lp = L.teams[0].players[i];
+      const r = benchPlayers(g, L).find((p) => p.id === Number(b));
+      if (!lp || lp.off || !r || m.subs < 1) return;
+      const line = (SLOTS[m.me.shape][lp.slot] as { line: Pos }).line;
+      const fresh = clamp((100 - m.me.stamina) / 30, 0.25, 1) * (minute >= 70 ? 0.7 : 1);
+      const diff = effOvr(r, line) - lp.ovr;
+      m.subs--;
+      const out = swapIn(L, i, r, line);
+      m.me.stamina = clamp(m.me.stamina + 11 * fresh, 0, 100);
+      m.subAtt += diff * 0.12 * (line === 'FW' ? 1 : line === 'MF' ? 0.5 : 0) + (line === 'FW' ? 0.5 * fresh : 0);
+      m.subDef += diff * 0.12 * (line === 'DF' || line === 'GK' ? 1 : line === 'MF' ? 0.5 : 0) + (line === 'DF' ? 0.5 * fresh : 0);
+      say(m, minute, ko`${out.n}번 ${out.name}을 빼고 ${r.no}번 ${r.name}을 넣었다.`, 'plain');
+      return;
+    }
     case 'sub': {
       const cost = a === 'legs' ? 2 : 1;
       if (m.subs < cost || !['fw', 'mf', 'df', 'legs'].includes(a)) return;

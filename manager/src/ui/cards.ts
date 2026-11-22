@@ -2,6 +2,7 @@
 import { POS_NAME, TRAITS } from '../game/data.ts';
 import { FOOT_NAME, SPOTS, statNames, statsOf } from '../game/player.ts';
 import type { Player } from '../game/types.ts';
+import { face } from './face.ts';
 
 const esc = (text: string | number): string => String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
@@ -67,7 +68,8 @@ export function playerRow(p: Player, opts: { note?: string; delta?: number; extr
   return `<li class="prow">
     <details class="prow__box"${opts.open ? ' open' : ''}>
       <summary class="prow__sum">
-        ${opts.kit && p.no ? jersey(opts.kit, p.no, 30, p.pos === 'GK') : ''}
+        ${face(p.id, p.nat, 34, opts.kit, p.name)}
+        ${opts.kit && p.no ? jersey(opts.kit, p.no, 26, p.pos === 'GK') : ''}
         ${spotBadge(p)}
         <span class="prow__name">${esc(p.name)}${opts.flag ? ` <span class="flag">${esc(opts.flag)}</span>` : ''}<span class="muted"> ${p.age}세 · ${FOOT_NAME[p.foot]}${opts.note ? ` · ${esc(opts.note)}` : ''}</span></span>
         ${opts.delta ? `<span class="delta delta--${opts.delta > 0 ? 'up' : 'down'}">${opts.delta > 0 ? '▲' : '▼'}${Math.abs(opts.delta)}</span>` : ''}
@@ -82,6 +84,7 @@ export function playerRow(p: Player, opts: { note?: string; delta?: number; extr
 export function playerCard(p: Player, opts: { price?: string; note?: string; compare?: Player }): string {
   return `<article class="pcard">
     <header class="pcard__head">
+      ${face(p.id, p.nat, 48, undefined, p.name)}
       ${spotBadge(p)}
       <div class="pcard__who"><p class="pcard__name">${esc(p.name)}</p><p class="muted">${esc(POS_NAME[p.pos])} · ${esc(opts.note ?? '')}</p></div>
       <p class="pcard__ovr"><span>OVR</span>${p.ovr + p.temp}</p>

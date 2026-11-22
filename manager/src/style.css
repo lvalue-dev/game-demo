@@ -2207,3 +2207,225 @@ button.mcard__main:focus-visible {
 .gauge--plain .gauge__fill {
   background: var(--amber);
 }
+
+/* ---------- 얼굴 ---------- */
+
+.face {
+  flex: none;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--line);
+  background: #dfe7e0;
+}
+
+/* ---------- 실시간 경기: 선수단과 벤치 ---------- */
+
+.kitdot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin: 0 5px;
+  border-radius: 50%;
+  background: linear-gradient(90deg, var(--kit) 0 60%, var(--trim) 60% 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  vertical-align: middle;
+}
+
+.split {
+  display: flex;
+  width: 70px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+.split span {
+  display: block;
+  height: 100%;
+}
+
+.live__tickerbox summary {
+  cursor: pointer;
+}
+
+.lsq {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 14px;
+}
+
+.lsq__group {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.lsq__row {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.lsq__row.is-picked {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 40%, transparent);
+}
+
+.lsq__row.is-off {
+  opacity: 0.5;
+}
+
+.lsq__main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lsq__no {
+  flex: none;
+  min-width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--kit, var(--board));
+  color: var(--ink, #fff);
+  font-family: var(--font-num);
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.lsq__no--bench {
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.lsq__who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.lsq__name {
+  font-weight: 700;
+  font-size: 0.9375rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lsq__meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lsq__cond .meter {
+  display: block;
+  width: 100%;
+  max-width: 140px;
+  height: 4px;
+  margin-top: 3px;
+}
+
+.meter__fill.is-low {
+  background: var(--red);
+}
+
+.lsq__mark {
+  display: inline-block;
+  margin-left: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--tint-good);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  vertical-align: 1px;
+}
+
+.lsq__mark--red {
+  background: var(--tint-bad);
+  color: var(--red);
+}
+
+.lsq__rt,
+.lsq__ovr {
+  flex: none;
+  min-width: 38px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  text-align: center;
+  font-family: var(--font-num);
+  font-weight: 700;
+  font-size: 1rem;
+  background: var(--bg);
+}
+
+.lsq__rt--good {
+  background: var(--tint-good);
+  color: var(--pitch);
+}
+
+.lsq__rt--bad {
+  background: var(--tint-bad);
+  color: var(--red);
+}
+
+.lsq__more {
+  padding: 4px 10px 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.lsq__empty {
+  padding: 8px 2px;
+  font-size: 0.875rem;
+}
+
+.subbar {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--board);
+  color: var(--on-board);
+}
+
+.subbar__text {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.subbar__out {
+  color: #ff9c8a;
+}
+
+.subbar__in {
+  color: #9de3b5;
+}
+
+.subbar .chip {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.live__halfsquad {
+  margin-top: 14px;
+}

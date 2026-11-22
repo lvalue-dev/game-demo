@@ -117,6 +117,8 @@ export interface Entrant {
   dev: number[];
   /** 정해진 등번호가 있으면 그 번호를 쓴다. */
   no?: number;
+  pid?: number;
+  nat?: string;
 }
 
 /** 선수들을 자리에 앉힌다. 주전부터, 잘하는 선수부터 자기 포지션에 가장 가까운 빈자리를 고른다. */
@@ -148,6 +150,7 @@ export function lineup(shape: ShapeId, keys: Entrant[], filler: (pos: Pos, spot:
     return {
       n: e.no && e.no > 0 ? e.no : shirt(e.key >= 0 ? e.spot : slotSpot(slot), used), name: e.name, line: e.pos, slot: i, key: e.key, ovr: e.ovr,
       x: 0, y: 0, px: 0, py: 0, off: false, spot: e.spot, foot: e.foot, dev: e.dev,
+      ...(e.pid !== undefined ? { pid: e.pid } : {}), ...(e.nat ? { nat: e.nat } : {}), on: 0,
     };
   });
 }
