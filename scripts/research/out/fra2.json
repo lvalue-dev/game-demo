@@ -1,0 +1,134 @@
+{
+ "id": "fra2",
+ "lang": "en",
+ "page": "2026–27 Ligue 2",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "Annecy",
+   "title": "FC Annecy",
+   "inter": null,
+   "cap": 15660,
+   "ko": "FC 안시"
+  },
+  {
+   "name": "Boulogne",
+   "title": "US Boulogne",
+   "inter": null,
+   "cap": 9534,
+   "ko": "US 불로뉴"
+  },
+  {
+   "name": "Clermont",
+   "title": "Clermont Foot",
+   "inter": null,
+   "cap": 11980,
+   "ko": "클레르몽 푸트"
+  },
+  {
+   "name": "Dijon",
+   "title": "Dijon FCO",
+   "inter": null,
+   "cap": 15995,
+   "ko": "디종 FCO"
+  },
+  {
+   "name": "Dunkerque",
+   "title": "USL Dunkerque",
+   "inter": null,
+   "cap": 4933,
+   "ko": "USL 됭케르크"
+  },
+  {
+   "name": "Grenoble",
+   "title": "Grenoble Foot 38",
+   "inter": null,
+   "cap": 20068,
+   "ko": "그르노블 푸트 38"
+  },
+  {
+   "name": "Guingamp",
+   "title": "En Avant Guingamp",
+   "inter": null,
+   "cap": 18378,
+   "ko": "EA 갱강"
+  },
+  {
+   "name": "Laval",
+   "title": "Stade Lavallois",
+   "inter": null,
+   "cap": 18607,
+   "ko": "스타드 라발루아"
+  },
+  {
+   "name": "Metz",
+   "title": "FC Metz",
+   "inter": null,
+   "cap": 28786,
+   "ko": "FC 메스"
+  },
+  {
+   "name": "Montpellier",
+   "title": "Montpellier HSC",
+   "inter": null,
+   "cap": 32900,
+   "ko": "몽펠리에 HSC"
+  },
+  {
+   "name": "Nancy",
+   "title": "AS Nancy Lorraine",
+   "inter": null,
+   "cap": 20087,
+   "ko": "AS 낭시"
+  },
+  {
+   "name": "Nantes",
+   "title": "FC Nantes",
+   "inter": null,
+   "cap": 35322,
+   "ko": "FC 낭트"
+  },
+  {
+   "name": "Pau",
+   "title": "Pau FC",
+   "inter": null,
+   "cap": 4031,
+   "ko": "포 FC"
+  },
+  {
+   "name": "Red Star",
+   "title": "Red Star FC",
+   "inter": null,
+   "cap": 10000,
+   "ko": "레드 스타 FC"
+  },
+  {
+   "name": "Reims",
+   "title": "Stade de Reims",
+   "inter": null,
+   "cap": 21029,
+   "ko": "스타드 드 랭스"
+  },
+  {
+   "name": "Rodez",
+   "title": "Rodez AF",
+   "inter": null,
+   "cap": 5955,
+   "ko": "로데스 AF"
+  },
+  {
+   "name": "Saint-Étienne",
+   "title": "AS Saint-Étienne",
+   "inter": null,
+   "cap": 41965,
+   "ko": "AS 생테티엔"
+  },
+  {
+   "name": "Sochaux",
+   "title": "FC Sochaux-Montbéliard",
+   "inter": null,
+   "cap": 20005,
+   "ko": "FC 소쇼-몽벨리아르"
+  }
+ ]
+}

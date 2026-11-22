@@ -1,0 +1,148 @@
+{
+ "id": "jpn3",
+ "lang": "en",
+ "page": "2026–27 J3 League",
+ "section": "Location and stadium",
+ "clubs": [
+  {
+   "name": "Ehime",
+   "title": "Ehime FC",
+   "inter": null,
+   "cap": 20919,
+   "ko": "에히메 FC"
+  },
+  {
+   "name": "FC Gifu",
+   "title": "FC Gifu",
+   "inter": null,
+   "cap": 16310,
+   "ko": "FC 기후"
+  },
+  {
+   "name": "FC Osaka",
+   "title": "FC Osaka",
+   "inter": null,
+   "cap": 27346,
+   "ko": "FC 오사카"
+  },
+  {
+   "name": "Fukushima United",
+   "title": "Fukushima United FC",
+   "inter": null,
+   "cap": 15454,
+   "ko": "후쿠시마 유나이티드 FC"
+  },
+  {
+   "name": "Gainare Tottori",
+   "title": "Gainare Tottori",
+   "inter": null,
+   "cap": 16033,
+   "ko": "가이나레 돗토리"
+  },
+  {
+   "name": "Giravanz Kitakyushu",
+   "title": "Giravanz Kitakyushu",
+   "inter": null,
+   "cap": 15300,
+   "ko": "기라반츠 기타큐슈"
+  },
+  {
+   "name": "Kagoshima United",
+   "title": "Kagoshima United FC",
+   "inter": null,
+   "cap": 19934,
+   "ko": "가고시마 유나이티드 FC"
+  },
+  {
+   "name": "Kamatamare Sanuki",
+   "title": "Kamatamare Sanuki",
+   "inter": null,
+   "cap": 30099,
+   "ko": "가마타마레 사누키"
+  },
+  {
+   "name": "Kochi United",
+   "title": "Kochi United SC",
+   "inter": null,
+   "cap": 25000,
+   "ko": "고치 유나이티드 SC"
+  },
+  {
+   "name": "Matsumoto Yamaga",
+   "title": "Matsumoto Yamaga FC",
+   "inter": null,
+   "cap": 20000,
+   "ko": "마쓰모토 야마가 FC"
+  },
+  {
+   "name": "Nagano Parceiro",
+   "title": "AC Nagano Parceiro",
+   "inter": null,
+   "cap": 15515,
+   "ko": "AC 나가노 파르세이루"
+  },
+  {
+   "name": "Nara Club",
+   "title": "Nara Club",
+   "inter": null,
+   "cap": 30600,
+   "ko": "나라 클럽"
+  },
+  {
+   "name": "Reilac Shiga",
+   "title": "Reilac Shiga FC",
+   "inter": null,
+   "cap": 6444,
+   "ko": "레일락 시가 FC"
+  },
+  {
+   "name": "Renofa Yamaguchi",
+   "title": "Renofa Yamaguchi FC",
+   "inter": null,
+   "cap": 15115,
+   "ko": "레노파 야마구치 FC"
+  },
+  {
+   "name": "Roasso Kumamoto",
+   "title": "Roasso Kumamoto",
+   "inter": null,
+   "cap": 30275,
+   "ko": "로아소 구마모토"
+  },
+  {
+   "name": "Ryukyu Okinawa",
+   "title": "FC Ryukyu",
+   "inter": null,
+   "cap": 10189,
+   "ko": "FC 류큐"
+  },
+  {
+   "name": "SC Sagamihara",
+   "title": "SC Sagamihara",
+   "inter": null,
+   "cap": 6291,
+   "ko": "SC 사가미하라"
+  },
+  {
+   "name": "Thespa Gunma",
+   "title": "Thespa Gunma",
+   "inter": null,
+   "cap": 15253,
+   "ko": "더스파 군마"
+  },
+  {
+   "name": "Tochigi SC",
+   "title": "Tochigi SC",
+   "inter": null,
+   "cap": 25244,
+   "ko": "도치기 SC"
+  },
+  {
+   "name": "Zweigen Kanazawa",
+   "title": "Zweigen Kanazawa",
+   "inter": null,
+   "cap": 10444,
+   "ko": "츠바이겐 가나자와"
+  }
+ ]
+}

@@ -1,0 +1,148 @@
+{
+ "id": "esp3",
+ "lang": "en",
+ "page": "2026–27 Primera Federación",
+ "section": "Teams and locations",
+ "clubs": [
+  {
+   "name": "Arenas",
+   "title": "Arenas Club de Getxo",
+   "inter": null,
+   "cap": 2000,
+   "ko": "아레나스 클루브 데 게초"
+  },
+  {
+   "name": "Avilés Industrial",
+   "title": "Real Avilés Industrial CF",
+   "inter": null,
+   "cap": 5400,
+   "ko": "레알 아빌레스 CF"
+  },
+  {
+   "name": "Barakaldo",
+   "title": "Barakaldo CF",
+   "inter": null,
+   "cap": 7960,
+   "ko": null
+  },
+  {
+   "name": "Bilbao Athletic",
+   "title": "Athletic Bilbao B",
+   "inter": null,
+   "cap": 3250,
+   "ko": "빌바오 아틀레틱"
+  },
+  {
+   "name": "Cacereño",
+   "title": "CP Cacereño",
+   "inter": null,
+   "cap": 7000,
+   "ko": null
+  },
+  {
+   "name": "Coria",
+   "title": "CD Coria",
+   "inter": null,
+   "cap": 3000,
+   "ko": null
+  },
+  {
+   "name": "Cultural Leonesa",
+   "title": "Cultural y Deportiva Leonesa",
+   "inter": null,
+   "cap": null,
+   "ko": "쿨투랄 이 데포르티바 레오네사"
+  },
+  {
+   "name": "Deportivo Fabril",
+   "title": "Deportivo Fabril",
+   "inter": null,
+   "cap": 1000,
+   "ko": "데포르티보 파브릴"
+  },
+  {
+   "name": "Extremadura",
+   "title": "CD Extremadura",
+   "inter": null,
+   "cap": 11580,
+   "ko": "CD 엑스트레마두라"
+  },
+  {
+   "name": "UD Logroñés",
+   "title": "UD Logroñés",
+   "inter": null,
+   "cap": 16000,
+   "ko": "UD 로그로녜스"
+  },
+  {
+   "name": "Lugo",
+   "title": "CD Lugo",
+   "inter": null,
+   "cap": 7070,
+   "ko": "CD 루고"
+  },
+  {
+   "name": "Mérida",
+   "title": "Mérida AD",
+   "inter": null,
+   "cap": 14600,
+   "ko": "메리다 AD"
+  },
+  {
+   "name": "Mirandés",
+   "title": "CD Mirandés",
+   "inter": null,
+   "cap": null,
+   "ko": "CD 미란데스"
+  },
+  {
+   "name": "UD Ourense",
+   "title": "UD Ourense",
+   "inter": null,
+   "cap": 5659,
+   "ko": "UD 오우렌세"
+  },
+  {
+   "name": "Ponferradina",
+   "title": "SD Ponferradina",
+   "inter": null,
+   "cap": 8400,
+   "ko": "SD 폰페라디나"
+  },
+  {
+   "name": "Pontevedra",
+   "title": "Pontevedra CF",
+   "inter": null,
+   "cap": 12000,
+   "ko": "폰테베드라 CF"
+  },
+  {
+   "name": "Racing Ferrol",
+   "title": "Racing de Ferrol",
+   "inter": null,
+   "cap": 12043,
+   "ko": "라싱 페롤"
+  },
+  {
+   "name": "Real Unión",
+   "title": "Real Unión",
+   "inter": null,
+   "cap": 5000,
+   "ko": "레알 우니온"
+  },
+  {
+   "name": "Unionistas",
+   "title": "Unionistas de Salamanca CF",
+   "inter": null,
+   "cap": 5000,
+   "ko": "우니오니스타스 데 살라망카 CF"
+  },
+  {
+   "name": "Zamora",
+   "title": "Zamora CF",
+   "inter": null,
+   "cap": 7813,
+   "ko": "사모라 CF"
+  }
+ ]
+}

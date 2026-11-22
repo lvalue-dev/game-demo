@@ -1,0 +1,134 @@
+{
+ "id": "fra3",
+ "lang": "en",
+ "page": "2026–27 Ligue 3",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "Amiens",
+   "title": "Amiens SC",
+   "inter": null,
+   "cap": 12097,
+   "ko": "아미앵 SC"
+  },
+  {
+   "name": "Aubagne Air Bel",
+   "title": "SC Aubagne Air Bel",
+   "inter": null,
+   "cap": 1000,
+   "ko": null
+  },
+  {
+   "name": "Bastia",
+   "title": "SC Bastia",
+   "inter": null,
+   "cap": 16048,
+   "ko": "SC 바스티아"
+  },
+  {
+   "name": "Bourg-Péronnas",
+   "title": "Football Bourg-en-Bresse Péronnas 01",
+   "inter": null,
+   "cap": 11400,
+   "ko": "부르캉브레스 01"
+  },
+  {
+   "name": "Caen",
+   "title": "Stade Malherbe Caen",
+   "inter": null,
+   "cap": 21215,
+   "ko": "SM 캉"
+  },
+  {
+   "name": "Cannes",
+   "title": "AS Cannes",
+   "inter": null,
+   "cap": 9819,
+   "ko": "AS 칸"
+  },
+  {
+   "name": "Concarneau",
+   "title": "US Concarneau",
+   "inter": null,
+   "cap": 5800,
+   "ko": null
+  },
+  {
+   "name": "Fleury",
+   "title": "FC Fleury 91 (men)",
+   "inter": null,
+   "cap": 2000,
+   "ko": null
+  },
+  {
+   "name": "La Roche",
+   "title": "VFC La Roche-sur-Yon",
+   "inter": null,
+   "cap": 10000,
+   "ko": null
+  },
+  {
+   "name": "Le Puy",
+   "title": "Le Puy Foot 43 Auvergne",
+   "inter": null,
+   "cap": 4800,
+   "ko": null
+  },
+  {
+   "name": "Orléans",
+   "title": "US Orléans",
+   "inter": null,
+   "cap": 7000,
+   "ko": "US 오를레앙"
+  },
+  {
+   "name": "Paris 13 Atletico",
+   "title": "Paris 13 Atletico",
+   "inter": null,
+   "cap": 20000,
+   "ko": null
+  },
+  {
+   "name": "Quevilly-Rouen",
+   "title": "US Quevilly-Rouen Métropole",
+   "inter": null,
+   "cap": 8372,
+   "ko": null
+  },
+  {
+   "name": "Rouen",
+   "title": "Football Club de Rouen 1899",
+   "inter": null,
+   "cap": 8372,
+   "ko": "FC 루앙"
+  },
+  {
+   "name": "Thionville",
+   "title": "US Thionville Lusitanos",
+   "inter": null,
+   "cap": 1000,
+   "ko": null
+  },
+  {
+   "name": "Valenciennes",
+   "title": "Valenciennes FC",
+   "inter": null,
+   "cap": 25172,
+   "ko": "발랑시엔 FC"
+  },
+  {
+   "name": "Versailles",
+   "title": "FC Versailles 78",
+   "inter": null,
+   "cap": 7545,
+   "ko": null
+  },
+  {
+   "name": "Villefranche",
+   "title": "FC Villefranche Beaujolais",
+   "inter": null,
+   "cap": 3500,
+   "ko": null
+  }
+ ]
+}

@@ -1,0 +1,113 @@
+{
+ "id": "fra4",
+ "lang": "en",
+ "page": "Championnat National 1",
+ "section": "Group A",
+ "clubs": [
+  {
+   "name": "Angoulême",
+   "title": "Angoulême Charente FC",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Avranches",
+   "title": "US Avranches",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Bayonne",
+   "title": "Aviron Bayonnais FC",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Châteaubriant",
+   "title": "Voltigeurs de Châteaubriant",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Chauray",
+   "title": "FC Chauray",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Dinan Léhon",
+   "title": "Dinan Léhon FC",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Granville",
+   "title": "US Granville",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "La Roche",
+   "title": "La Roche VF",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Les Herbiers",
+   "title": "Les Herbiers VF",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Lorient",
+   "title": "FC Lorient",
+   "inter": null,
+   "cap": null,
+   "ko": "FC 로리앙"
+  },
+  {
+   "name": "Montlouis",
+   "title": "FC Montlouis",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Poitiers",
+   "title": "Stade Poitevin FC",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Saint-Colomban Locminé",
+   "title": "Saint-Colomban Sportive Locminé",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Saint-Malo",
+   "title": "US Saint-Malo",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Saumur",
+   "title": "Olympique Saumur FC",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  }
+ ]
+}

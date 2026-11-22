@@ -1,0 +1,134 @@
+{
+ "id": "fra1",
+ "lang": "en",
+ "page": "2026–27 Ligue 1",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "Angers",
+   "title": "Angers SCO",
+   "inter": null,
+   "cap": null,
+   "ko": "앙제 SCO"
+  },
+  {
+   "name": "Auxerre",
+   "title": "AJ Auxerre",
+   "inter": null,
+   "cap": null,
+   "ko": "AJ 오세르"
+  },
+  {
+   "name": "Brest",
+   "title": "Stade Brestois 29",
+   "inter": null,
+   "cap": 15220,
+   "ko": "스타드 브레스투아 29"
+  },
+  {
+   "name": "Le Havre",
+   "title": "Le Havre AC",
+   "inter": null,
+   "cap": 25181,
+   "ko": "르아브르 AC"
+  },
+  {
+   "name": "Le Mans",
+   "title": "Le Mans FC",
+   "inter": null,
+   "cap": 25064,
+   "ko": "르망 FC"
+  },
+  {
+   "name": "Lens",
+   "title": "RC Lens",
+   "inter": null,
+   "cap": 38223,
+   "ko": "RC 랑스"
+  },
+  {
+   "name": "Lille",
+   "title": "Lille OSC",
+   "inter": null,
+   "cap": 50186,
+   "ko": "릴 OSC"
+  },
+  {
+   "name": "Lorient",
+   "title": "FC Lorient",
+   "inter": null,
+   "cap": 18110,
+   "ko": "FC 로리앙"
+  },
+  {
+   "name": "Lyon",
+   "title": "Olympique Lyonnais",
+   "inter": null,
+   "cap": 59186,
+   "ko": "올랭피크 리옹"
+  },
+  {
+   "name": "Marseille",
+   "title": "Olympique de Marseille",
+   "inter": null,
+   "cap": 67394,
+   "ko": "올랭피크 드 마르세유"
+  },
+  {
+   "name": "Monaco",
+   "title": "AS Monaco FC",
+   "inter": null,
+   "cap": 16360,
+   "ko": "AS 모나코 FC"
+  },
+  {
+   "name": "Nice",
+   "title": "OGC Nice",
+   "inter": null,
+   "cap": 36178,
+   "ko": "OGC 니스"
+  },
+  {
+   "name": "Paris FC",
+   "title": "Paris FC",
+   "inter": null,
+   "cap": 20000,
+   "ko": "파리 FC"
+  },
+  {
+   "name": "Paris Saint-Germain",
+   "title": "Paris Saint-Germain FC",
+   "inter": null,
+   "cap": 47926,
+   "ko": "파리 생제르맹 FC"
+  },
+  {
+   "name": "Rennes",
+   "title": "Stade Rennais FC",
+   "inter": null,
+   "cap": 29778,
+   "ko": "스타드 렌 FC"
+  },
+  {
+   "name": "Strasbourg",
+   "title": "RC Strasbourg Alsace",
+   "inter": null,
+   "cap": 32000,
+   "ko": "RC 스트라스부르"
+  },
+  {
+   "name": "Toulouse",
+   "title": "Toulouse FC",
+   "inter": null,
+   "cap": 33150,
+   "ko": "툴루즈 FC"
+  },
+  {
+   "name": "Troyes",
+   "title": "ES Troyes AC",
+   "inter": null,
+   "cap": 21877,
+   "ko": "ES 트루아 AC"
+  }
+ ]
+}

@@ -1,0 +1,134 @@
+{
+ "id": "ger1",
+ "lang": "en",
+ "page": "2026–27 Bundesliga",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "FC Augsburg",
+   "title": "FC Augsburg",
+   "inter": null,
+   "cap": 30660,
+   "ko": "FC 아우크스부르크"
+  },
+  {
+   "name": "Union Berlin",
+   "title": "1. FC Union Berlin",
+   "inter": null,
+   "cap": 22012,
+   "ko": "1. FC 우니온 베를린"
+  },
+  {
+   "name": "Werder Bremen",
+   "title": "SV Werder Bremen",
+   "inter": null,
+   "cap": 42100,
+   "ko": "SV 베르더 브레멘"
+  },
+  {
+   "name": "Borussia Dortmund",
+   "title": "Borussia Dortmund",
+   "inter": null,
+   "cap": 81365,
+   "ko": "보루시아 도르트문트"
+  },
+  {
+   "name": "SV Elversberg",
+   "title": "SV Elversberg",
+   "inter": null,
+   "cap": 10000,
+   "ko": "SV 엘페르스베르크"
+  },
+  {
+   "name": "Eintracht Frankfurt",
+   "title": "Eintracht Frankfurt",
+   "inter": null,
+   "cap": 59500,
+   "ko": "아인트라흐트 프랑크푸르트"
+  },
+  {
+   "name": "SC Freiburg",
+   "title": "SC Freiburg",
+   "inter": null,
+   "cap": 34700,
+   "ko": "SC 프라이부르크"
+  },
+  {
+   "name": "Hamburger SV",
+   "title": "Hamburger SV",
+   "inter": null,
+   "cap": 57000,
+   "ko": "함부르거 SV"
+  },
+  {
+   "name": "TSG Hoffenheim",
+   "title": "TSG 1899 Hoffenheim",
+   "inter": null,
+   "cap": 30150,
+   "ko": "TSG 1899 호펜하임"
+  },
+  {
+   "name": "1. FC Köln",
+   "title": "1. FC Köln",
+   "inter": null,
+   "cap": 49698,
+   "ko": "1. FC 쾰른"
+  },
+  {
+   "name": "RB Leipzig",
+   "title": "RB Leipzig",
+   "inter": null,
+   "cap": 47800,
+   "ko": "RB 라이프치히"
+  },
+  {
+   "name": "Bayer Leverkusen",
+   "title": "Bayer 04 Leverkusen",
+   "inter": null,
+   "cap": 30210,
+   "ko": "바이어 04 레버쿠젠"
+  },
+  {
+   "name": "Mainz 05",
+   "title": "1. FSV Mainz 05",
+   "inter": null,
+   "cap": 33305,
+   "ko": "1. FSV 마인츠 05"
+  },
+  {
+   "name": "Borussia Mönchengladbach",
+   "title": "Borussia Mönchengladbach",
+   "inter": null,
+   "cap": 54057,
+   "ko": "보루시아 묀헨글라트바흐"
+  },
+  {
+   "name": "Bayern Munich",
+   "title": "FC Bayern Munich",
+   "inter": null,
+   "cap": 75000,
+   "ko": "FC 바이에른 뮌헨"
+  },
+  {
+   "name": "SC Paderborn",
+   "title": "SC Paderborn 07",
+   "inter": null,
+   "cap": 15000,
+   "ko": "SC 파더보른 07"
+  },
+  {
+   "name": "Schalke 04",
+   "title": "FC Schalke 04",
+   "inter": null,
+   "cap": 62271,
+   "ko": "FC 샬케 04"
+  },
+  {
+   "name": "VfB Stuttgart",
+   "title": "VfB Stuttgart",
+   "inter": null,
+   "cap": 60058,
+   "ko": "VfB 슈투트가르트"
+  }
+ ]
+}

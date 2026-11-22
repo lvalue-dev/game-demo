@@ -1,0 +1,148 @@
+{
+ "id": "ita2",
+ "lang": "en",
+ "page": "2026–27 Serie B",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "Arezzo",
+   "title": "SS Arezzo",
+   "inter": null,
+   "cap": 13128,
+   "ko": "SS 아레초"
+  },
+  {
+   "name": "Ascoli",
+   "title": "Ascoli Calcio 1898 FC",
+   "inter": null,
+   "cap": 12461,
+   "ko": "아스콜리 칼초 1898 FC"
+  },
+  {
+   "name": "Avellino",
+   "title": "US Avellino 1912",
+   "inter": null,
+   "cap": 26000,
+   "ko": "US 아벨리노 1912"
+  },
+  {
+   "name": "Benevento",
+   "title": "Benevento Calcio",
+   "inter": null,
+   "cap": 16867,
+   "ko": "베네벤토 칼초"
+  },
+  {
+   "name": "Carrarese",
+   "title": "Carrarese Calcio 1908",
+   "inter": null,
+   "cap": 4194,
+   "ko": null
+  },
+  {
+   "name": "Catanzaro",
+   "title": "US Catanzaro 1929",
+   "inter": null,
+   "cap": 14650,
+   "ko": "US 카탄차로 1929"
+  },
+  {
+   "name": "Cesena",
+   "title": "Cesena FC",
+   "inter": null,
+   "cap": 20194,
+   "ko": "체세나 FC"
+  },
+  {
+   "name": "Cremonese",
+   "title": "US Cremonese",
+   "inter": null,
+   "cap": 20641,
+   "ko": "US 크레모네세"
+  },
+  {
+   "name": "Empoli",
+   "title": "Empoli FC",
+   "inter": null,
+   "cap": 16284,
+   "ko": "엠폴리 FC"
+  },
+  {
+   "name": "Hellas Verona",
+   "title": "Hellas Verona FC",
+   "inter": null,
+   "cap": 39211,
+   "ko": "엘라스 베로나 FC"
+  },
+  {
+   "name": "Juve Stabia",
+   "title": "SS Juve Stabia",
+   "inter": null,
+   "cap": 7642,
+   "ko": "SS 유베 스타비아"
+  },
+  {
+   "name": "Mantova",
+   "title": "Mantova 1911",
+   "inter": null,
+   "cap": 14884,
+   "ko": "만토바 1911"
+  },
+  {
+   "name": "Modena",
+   "title": "Modena FC 2018",
+   "inter": null,
+   "cap": 21151,
+   "ko": "모데나 FC 2018"
+  },
+  {
+   "name": "Padova",
+   "title": "Calcio Padova",
+   "inter": null,
+   "cap": 32420,
+   "ko": "칼초 파도바"
+  },
+  {
+   "name": "Palermo",
+   "title": "Palermo FC",
+   "inter": null,
+   "cap": 36365,
+   "ko": "팔레르모 FC"
+  },
+  {
+   "name": "Pisa",
+   "title": "Pisa SC",
+   "inter": null,
+   "cap": 12508,
+   "ko": "피사 SC"
+  },
+  {
+   "name": "Sampdoria",
+   "title": "Sampdoria",
+   "inter": null,
+   "cap": 33205,
+   "ko": "UC 삼프도리아"
+  },
+  {
+   "name": "Südtirol",
+   "title": "FC Südtirol",
+   "inter": null,
+   "cap": 5539,
+   "ko": "FC 쥐트티롤"
+  },
+  {
+   "name": "Vicenza",
+   "title": "LR Vicenza",
+   "inter": null,
+   "cap": 12000,
+   "ko": "L.R. 비첸차"
+  },
+  {
+   "name": "Virtus Entella",
+   "title": "Virtus Entella",
+   "inter": null,
+   "cap": 5535,
+   "ko": "비르투스 엔텔라"
+  }
+ ]
+}

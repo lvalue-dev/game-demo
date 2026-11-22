@@ -1,0 +1,134 @@
+{
+ "id": "ger2",
+ "lang": "en",
+ "page": "2026–27 2. Bundesliga",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "Hertha BSC",
+   "title": "Hertha BSC",
+   "inter": null,
+   "cap": 74649,
+   "ko": "헤르타 BSC"
+  },
+  {
+   "name": "Arminia Bielefeld",
+   "title": "Arminia Bielefeld",
+   "inter": null,
+   "cap": 27332,
+   "ko": "아르미니아 빌레펠트"
+  },
+  {
+   "name": "VfL Bochum",
+   "title": "VfL Bochum",
+   "inter": null,
+   "cap": 26000,
+   "ko": "VfL 보훔"
+  },
+  {
+   "name": "Eintracht Braunschweig",
+   "title": "Eintracht Braunschweig",
+   "inter": null,
+   "cap": 23325,
+   "ko": "아인트라흐트 브라운슈바이크"
+  },
+  {
+   "name": "Energie Cottbus",
+   "title": "FC Energie Cottbus",
+   "inter": null,
+   "cap": 22528,
+   "ko": "FC 에네르기 콧부스"
+  },
+  {
+   "name": "Darmstadt 98",
+   "title": "SV Darmstadt 98",
+   "inter": null,
+   "cap": 17650,
+   "ko": "SV 다름슈타트 98"
+  },
+  {
+   "name": "Dynamo Dresden",
+   "title": "Dynamo Dresden",
+   "inter": null,
+   "cap": 32249,
+   "ko": "뒤나모 드레스덴"
+  },
+  {
+   "name": "Greuther Fürth",
+   "title": "SpVgg Greuther Fürth",
+   "inter": null,
+   "cap": 16626,
+   "ko": "SpVgg 그로이터 퓌르트"
+  },
+  {
+   "name": "Hannover 96",
+   "title": "Hannover 96",
+   "inter": null,
+   "cap": 49000,
+   "ko": "하노버 96"
+  },
+  {
+   "name": "1. FC Heidenheim",
+   "title": "1. FC Heidenheim",
+   "inter": null,
+   "cap": 15000,
+   "ko": "1. FC 하이덴하임"
+  },
+  {
+   "name": "1. FC Kaiserslautern",
+   "title": "1. FC Kaiserslautern",
+   "inter": null,
+   "cap": 49327,
+   "ko": "1. FC 카이저슬라우테른"
+  },
+  {
+   "name": "Karlsruher SC",
+   "title": "Karlsruher SC",
+   "inter": null,
+   "cap": 34302,
+   "ko": "카를스루어 SC"
+  },
+  {
+   "name": "Holstein Kiel",
+   "title": "Holstein Kiel",
+   "inter": null,
+   "cap": 15034,
+   "ko": "홀슈타인 킬"
+  },
+  {
+   "name": "1. FC Magdeburg",
+   "title": "1. FC Magdeburg",
+   "inter": null,
+   "cap": 30098,
+   "ko": "1. FC 마그데부르크"
+  },
+  {
+   "name": "1. FC Nürnberg",
+   "title": "1. FC Nürnberg",
+   "inter": null,
+   "cap": 49923,
+   "ko": "1. FC 뉘른베르크"
+  },
+  {
+   "name": "VfL Osnabrück",
+   "title": "VfL Osnabrück",
+   "inter": null,
+   "cap": 15741,
+   "ko": "VfL 오스나브뤼크"
+  },
+  {
+   "name": "FC St. Pauli",
+   "title": "FC St. Pauli",
+   "inter": null,
+   "cap": 29546,
+   "ko": "FC 장크트파울리"
+  },
+  {
+   "name": "VfL Wolfsburg",
+   "title": "VfL Wolfsburg",
+   "inter": null,
+   "cap": 30000,
+   "ko": "VfL 볼프스부르크"
+  }
+ ]
+}

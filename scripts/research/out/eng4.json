@@ -1,0 +1,176 @@
+{
+ "id": "eng4",
+ "lang": "en",
+ "page": "2026–27 EFL League Two",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "Accrington Stanley",
+   "title": "Accrington Stanley F.C.",
+   "inter": null,
+   "cap": 5450,
+   "ko": "애크링턴 스탠리 FC"
+  },
+  {
+   "name": "Barnet",
+   "title": "Barnet F.C.",
+   "inter": null,
+   "cap": 6500,
+   "ko": "바닛 FC"
+  },
+  {
+   "name": "Bristol Rovers",
+   "title": "Bristol Rovers F.C.",
+   "inter": null,
+   "cap": 12500,
+   "ko": "브리스틀 로버스 FC"
+  },
+  {
+   "name": "Cheltenham Town",
+   "title": "Cheltenham Town F.C.",
+   "inter": null,
+   "cap": 7066,
+   "ko": "첼트넘 타운 FC"
+  },
+  {
+   "name": "Chesterfield",
+   "title": "Chesterfield F.C.",
+   "inter": null,
+   "cap": 10292,
+   "ko": "체스터필드 FC"
+  },
+  {
+   "name": "Colchester United",
+   "title": "Colchester United F.C.",
+   "inter": null,
+   "cap": 10105,
+   "ko": "콜체스터 유나이티드 FC"
+  },
+  {
+   "name": "Crawley Town",
+   "title": "Crawley Town F.C.",
+   "inter": null,
+   "cap": 6134,
+   "ko": "크롤리 타운 FC"
+  },
+  {
+   "name": "Crewe Alexandra",
+   "title": "Crewe Alexandra F.C.",
+   "inter": null,
+   "cap": 10153,
+   "ko": "크루 알렉산드라 FC"
+  },
+  {
+   "name": "Exeter City",
+   "title": "Exeter City F.C.",
+   "inter": null,
+   "cap": 8219,
+   "ko": "엑서터 시티 FC"
+  },
+  {
+   "name": "Fleetwood Town",
+   "title": "Fleetwood Town F.C.",
+   "inter": null,
+   "cap": 5327,
+   "ko": "플리트우드 타운 FC"
+  },
+  {
+   "name": "Gillingham",
+   "title": "Gillingham F.C.",
+   "inter": null,
+   "cap": 11582,
+   "ko": "질링엄 FC"
+  },
+  {
+   "name": "Grimsby Town",
+   "title": "Grimsby Town F.C.",
+   "inter": null,
+   "cap": 9546,
+   "ko": "그림즈비 타운 FC"
+  },
+  {
+   "name": "Newport County",
+   "title": "Newport County A.F.C.",
+   "inter": null,
+   "cap": 7850,
+   "ko": "뉴포트 카운티 AFC"
+  },
+  {
+   "name": "Northampton Town",
+   "title": "Northampton Town F.C.",
+   "inter": null,
+   "cap": 8203,
+   "ko": "노샘프턴 타운 FC"
+  },
+  {
+   "name": "Oldham Athletic",
+   "title": "Oldham Athletic A.F.C.",
+   "inter": null,
+   "cap": 13186,
+   "ko": "올덤 애슬레틱 AFC"
+  },
+  {
+   "name": "Port Vale",
+   "title": "Port Vale F.C.",
+   "inter": null,
+   "cap": 16800,
+   "ko": "포트 베일 FC"
+  },
+  {
+   "name": "Rochdale",
+   "title": "Rochdale A.F.C.",
+   "inter": null,
+   "cap": 10249,
+   "ko": "로치데일 AFC"
+  },
+  {
+   "name": "Rotherham United",
+   "title": "Rotherham United F.C.",
+   "inter": null,
+   "cap": 12021,
+   "ko": "로더럼 유나이티드 FC"
+  },
+  {
+   "name": "Salford City",
+   "title": "Salford City F.C.",
+   "inter": null,
+   "cap": 5108,
+   "ko": "솔퍼드 시티 FC"
+  },
+  {
+   "name": "Shrewsbury Town",
+   "title": "Shrewsbury Town F.C.",
+   "inter": null,
+   "cap": 9875,
+   "ko": "슈루즈베리 타운 FC"
+  },
+  {
+   "name": "Swindon Town",
+   "title": "Swindon Town F.C.",
+   "inter": null,
+   "cap": 14753,
+   "ko": "스윈던 타운 FC"
+  },
+  {
+   "name": "Tranmere Rovers",
+   "title": "Tranmere Rovers F.C.",
+   "inter": null,
+   "cap": 16587,
+   "ko": "트랜미어 로버스 FC"
+  },
+  {
+   "name": "Walsall",
+   "title": "Walsall F.C.",
+   "inter": null,
+   "cap": 11300,
+   "ko": "월솔 FC"
+  },
+  {
+   "name": "York City",
+   "title": "York City F.C.",
+   "inter": null,
+   "cap": 8500,
+   "ko": "요크 시티 FC"
+  }
+ ]
+}

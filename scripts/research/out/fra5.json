@@ -1,0 +1,92 @@
+{
+ "id": "fra5",
+ "lang": "en",
+ "page": "Championnat National 2",
+ "section": "Current teams (2026–27)",
+ "clubs": [
+  {
+   "name": "Blagnac FC",
+   "title": "Blagnac FC",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "FC Bassin d'Arcachon",
+   "title": "FC Bassin d'Arcachon",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Castanéenne FC",
+   "title": "Castanéenne FC",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "AS Chamalièrs",
+   "title": "AS Chamalièrs",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "AS Colomiers",
+   "title": "AS Colomiers",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Gazinet-Cestas",
+   "title": "Gazinet-Cestas",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "US Lège-Cap-Ferret",
+   "title": "US Lège-Cap-Ferret",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Les Genêts d'Anglet",
+   "title": "Les Genêts d'Anglet",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Mérignac-Arlac",
+   "title": "Mérignac-Arlac",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Onet-le-Château Football",
+   "title": "Onet-le-Château Football",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Pau FC 2",
+   "title": "Pau FC",
+   "inter": null,
+   "ko": "포 FC"
+  },
+  {
+   "name": "Rodez AF 2",
+   "title": "Rodez AF",
+   "inter": null,
+   "ko": "로데스 AF"
+  },
+  {
+   "name": "Toulouse FC 2",
+   "title": "Toulouse FC",
+   "inter": null,
+   "ko": "툴루즈 FC"
+  },
+  {
+   "name": "Trélissac-Antonne",
+   "title": "Trélissac-Antonne",
+   "inter": null,
+   "ko": null
+  }
+ ]
+}

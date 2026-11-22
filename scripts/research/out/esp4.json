@@ -1,0 +1,116 @@
+{
+ "id": "esp4",
+ "lang": "en",
+ "page": "2026–27 Segunda Federación",
+ "section": "Group 1",
+ "clubs": [
+  {
+   "name": "Arosa",
+   "title": "Arosa SC",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "At. Astorga",
+   "title": "Atlético Astorga FC",
+   "inter": null,
+   "ko": "아틀레티코 아스토르가 FC"
+  },
+  {
+   "name": "Bergantiños",
+   "title": "Bergantiños CF",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Compostela",
+   "title": "SD Compostela",
+   "inter": null,
+   "ko": "SD 콤포스텔라"
+  },
+  {
+   "name": "Coruxo",
+   "title": "Coruxo FC",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Gimnástica",
+   "title": "Gimnástica de Torrelavega",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Llanera",
+   "title": "UD Llanera",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Marino Luanco",
+   "title": "Marino de Luanco",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Ourense CF",
+   "title": "Ourense CF",
+   "inter": null,
+   "ko": "오우렌세 CF"
+  },
+  {
+   "name": "Vetusta",
+   "title": "Real Oviedo Vetusta",
+   "inter": null,
+   "ko": "레알 오비에도 베투스타"
+  },
+  {
+   "name": "Rayo Cantabria",
+   "title": "Rayo Cantabria",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Alavés B",
+   "title": "Deportivo Alavés B",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Amorebieta",
+   "title": "SD Amorebieta",
+   "inter": null,
+   "ko": "SD 아모레비에타"
+  },
+  {
+   "name": "Basconia",
+   "title": "CD Basconia",
+   "inter": null,
+   "ko": "CD 바스코니아"
+  },
+  {
+   "name": "Eibar B",
+   "title": "SD Eibar B",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Gernika",
+   "title": "Gernika Club",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Portugalete",
+   "title": "Club Portugalete",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Sestao",
+   "title": "Sestao River Club",
+   "inter": null,
+   "ko": null
+  }
+ ]
+}

@@ -1,0 +1,148 @@
+{
+ "id": "eng1",
+ "lang": "en",
+ "page": "2026–27 Premier League",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "Arsenal",
+   "title": "Arsenal F.C.",
+   "inter": null,
+   "cap": 60704,
+   "ko": "아스널 FC"
+  },
+  {
+   "name": "Aston Villa",
+   "title": "Aston Villa F.C.",
+   "inter": null,
+   "cap": 36887,
+   "ko": "애스턴 빌라 FC"
+  },
+  {
+   "name": "Bournemouth",
+   "title": "AFC Bournemouth",
+   "inter": null,
+   "cap": 12357,
+   "ko": "AFC 본머스"
+  },
+  {
+   "name": "Brentford",
+   "title": "Brentford F.C.",
+   "inter": null,
+   "cap": 17250,
+   "ko": "브렌트퍼드 FC"
+  },
+  {
+   "name": "Brighton & Hove Albion",
+   "title": "Brighton & Hove Albion F.C.",
+   "inter": null,
+   "cap": 32176,
+   "ko": "브라이턴 & 호브 앨비언 FC"
+  },
+  {
+   "name": "Chelsea",
+   "title": "Chelsea F.C.",
+   "inter": null,
+   "cap": 40044,
+   "ko": "첼시 FC"
+  },
+  {
+   "name": "Coventry City",
+   "title": "Coventry City F.C.",
+   "inter": null,
+   "cap": 32609,
+   "ko": "코번트리 시티 FC"
+  },
+  {
+   "name": "Crystal Palace",
+   "title": "Crystal Palace F.C.",
+   "inter": null,
+   "cap": 25194,
+   "ko": "크리스털 팰리스 FC"
+  },
+  {
+   "name": "Everton",
+   "title": "Everton F.C.",
+   "inter": null,
+   "cap": 52769,
+   "ko": "에버턴 FC"
+  },
+  {
+   "name": "Fulham",
+   "title": "Fulham F.C.",
+   "inter": null,
+   "cap": 28107,
+   "ko": "풀럼 FC"
+  },
+  {
+   "name": "Hull City",
+   "title": "Hull City A.F.C.",
+   "inter": null,
+   "cap": 24983,
+   "ko": "헐 시티 AFC"
+  },
+  {
+   "name": "Ipswich Town",
+   "title": "Ipswich Town F.C.",
+   "inter": null,
+   "cap": 30056,
+   "ko": "입스위치 타운 FC"
+  },
+  {
+   "name": "Leeds United",
+   "title": "Leeds United F.C.",
+   "inter": null,
+   "cap": 37633,
+   "ko": "리즈 유나이티드 FC"
+  },
+  {
+   "name": "Liverpool",
+   "title": "Liverpool F.C.",
+   "inter": null,
+   "cap": 61276,
+   "ko": "리버풀 FC"
+  },
+  {
+   "name": "Manchester City",
+   "title": "Manchester City F.C.",
+   "inter": null,
+   "cap": 61038,
+   "ko": "맨체스터 시티 FC"
+  },
+  {
+   "name": "Manchester United",
+   "title": "Manchester United F.C.",
+   "inter": null,
+   "cap": 74158,
+   "ko": "맨체스터 유나이티드 FC"
+  },
+  {
+   "name": "Newcastle United",
+   "title": "Newcastle United F.C.",
+   "inter": null,
+   "cap": 52729,
+   "ko": "뉴캐슬 유나이티드 FC"
+  },
+  {
+   "name": "Nottingham Forest",
+   "title": "Nottingham Forest F.C.",
+   "inter": null,
+   "cap": 31212,
+   "ko": "노팅엄 포리스트 FC"
+  },
+  {
+   "name": "Sunderland",
+   "title": "Sunderland A.F.C.",
+   "inter": null,
+   "cap": 48095,
+   "ko": "선덜랜드 AFC"
+  },
+  {
+   "name": "Tottenham Hotspur",
+   "title": "Tottenham Hotspur F.C.",
+   "inter": null,
+   "cap": 62850,
+   "ko": "토트넘 홋스퍼 FC"
+  }
+ ]
+}

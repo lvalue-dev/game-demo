@@ -1,0 +1,176 @@
+{
+ "id": "eng5",
+ "lang": "en",
+ "page": "2026–27 National League",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "AFC Fylde",
+   "title": "AFC Fylde",
+   "inter": null,
+   "cap": 6000,
+   "ko": null
+  },
+  {
+   "name": "Aldershot Town",
+   "title": "Aldershot Town F.C.",
+   "inter": null,
+   "cap": 7100,
+   "ko": "올더숏 타운 FC"
+  },
+  {
+   "name": "Altrincham",
+   "title": "Altrincham F.C.",
+   "inter": null,
+   "cap": 7700,
+   "ko": "알트링엄 FC"
+  },
+  {
+   "name": "Barrow",
+   "title": "Barrow A.F.C.",
+   "inter": null,
+   "cap": 6500,
+   "ko": "배로 AFC"
+  },
+  {
+   "name": "Boreham Wood",
+   "title": "Boreham Wood F.C.",
+   "inter": null,
+   "cap": 4500,
+   "ko": "보어럼 우드 FC"
+  },
+  {
+   "name": "Boston United",
+   "title": "Boston United F.C.",
+   "inter": null,
+   "cap": 5061,
+   "ko": "보스턴 유나이티드 FC"
+  },
+  {
+   "name": "Carlisle United",
+   "title": "Carlisle United F.C.",
+   "inter": null,
+   "cap": 17949,
+   "ko": "칼라일 유나이티드 FC"
+  },
+  {
+   "name": "Eastleigh",
+   "title": "Eastleigh F.C.",
+   "inter": null,
+   "cap": 5250,
+   "ko": "이스트레이 FC"
+  },
+  {
+   "name": "FC Halifax Town",
+   "title": "FC Halifax Town",
+   "inter": null,
+   "cap": 10400,
+   "ko": "FC 핼리팩스 타운"
+  },
+  {
+   "name": "Forest Green Rovers",
+   "title": "Forest Green Rovers F.C.",
+   "inter": null,
+   "cap": 5147,
+   "ko": "포리스트 그린 로버스 FC"
+  },
+  {
+   "name": "Gateshead",
+   "title": "Gateshead F.C.",
+   "inter": null,
+   "cap": 11800,
+   "ko": "게이츠헤드 FC"
+  },
+  {
+   "name": "Harrogate Town",
+   "title": "Harrogate Town A.F.C.",
+   "inter": null,
+   "cap": 5000,
+   "ko": "해러깃 타운 AFC"
+  },
+  {
+   "name": "Hartlepool United",
+   "title": "Hartlepool United F.C.",
+   "inter": null,
+   "cap": 7856,
+   "ko": "하틀풀 유나이티드 FC"
+  },
+  {
+   "name": "Hornchurch",
+   "title": "Hornchurch F.C.",
+   "inter": null,
+   "cap": 3500,
+   "ko": null
+  },
+  {
+   "name": "Kidderminster Harriers",
+   "title": "Kidderminster Harriers F.C.",
+   "inter": null,
+   "cap": 6444,
+   "ko": "키더민스터 해리어스 FC"
+  },
+  {
+   "name": "Scunthorpe United",
+   "title": "Scunthorpe United F.C.",
+   "inter": null,
+   "cap": 9088,
+   "ko": "스컨소프 유나이티드 FC"
+  },
+  {
+   "name": "Solihull Moors",
+   "title": "Solihull Moors F.C.",
+   "inter": null,
+   "cap": 5500,
+   "ko": "솔리헐 무어스 FC"
+  },
+  {
+   "name": "Southend United",
+   "title": "Southend United F.C.",
+   "inter": null,
+   "cap": 12392,
+   "ko": "사우스엔드 유나이티드 FC"
+  },
+  {
+   "name": "Sutton United",
+   "title": "Sutton United F.C.",
+   "inter": null,
+   "cap": 5013,
+   "ko": "서턴 유나이티드 FC"
+  },
+  {
+   "name": "Tamworth",
+   "title": "Tamworth F.C.",
+   "inter": null,
+   "cap": 4565,
+   "ko": "탬워스 FC"
+  },
+  {
+   "name": "Wealdstone",
+   "title": "Wealdstone F.C.",
+   "inter": null,
+   "cap": 4085,
+   "ko": null
+  },
+  {
+   "name": "Woking",
+   "title": "Woking F.C.",
+   "inter": null,
+   "cap": 6036,
+   "ko": "워킹 FC"
+  },
+  {
+   "name": "Worthing",
+   "title": "Worthing F.C.",
+   "inter": null,
+   "cap": 4000,
+   "ko": "워딩 FC"
+  },
+  {
+   "name": "Yeovil Town",
+   "title": "Yeovil Town F.C.",
+   "inter": null,
+   "cap": 9566,
+   "ko": "요빌 타운 FC"
+  }
+ ]
+}

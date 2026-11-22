@@ -1,0 +1,176 @@
+{
+ "id": "eng2",
+ "lang": "en",
+ "page": "2026–27 EFL Championship",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "Birmingham City",
+   "title": "Birmingham City F.C.",
+   "inter": null,
+   "cap": 29409,
+   "ko": "버밍엄 시티 FC"
+  },
+  {
+   "name": "Blackburn Rovers",
+   "title": "Blackburn Rovers F.C.",
+   "inter": null,
+   "cap": 31367,
+   "ko": "블랙번 로버스 FC"
+  },
+  {
+   "name": "Bolton Wanderers",
+   "title": "Bolton Wanderers F.C.",
+   "inter": null,
+   "cap": 28723,
+   "ko": "볼턴 원더러스 FC"
+  },
+  {
+   "name": "Bristol City",
+   "title": "Bristol City F.C.",
+   "inter": null,
+   "cap": 26462,
+   "ko": "브리스틀 시티 FC"
+  },
+  {
+   "name": "Burnley",
+   "title": "Burnley F.C.",
+   "inter": null,
+   "cap": 21990,
+   "ko": "번리 FC"
+  },
+  {
+   "name": "Cardiff City",
+   "title": "Cardiff City F.C.",
+   "inter": null,
+   "cap": 33280,
+   "ko": "카디프 시티 FC"
+  },
+  {
+   "name": "Charlton Athletic",
+   "title": "Charlton Athletic F.C.",
+   "inter": null,
+   "cap": 27111,
+   "ko": "찰턴 애슬레틱 FC"
+  },
+  {
+   "name": "Derby County",
+   "title": "Derby County F.C.",
+   "inter": null,
+   "cap": 33597,
+   "ko": "더비 카운티 FC"
+  },
+  {
+   "name": "Lincoln City",
+   "title": "Lincoln City F.C.",
+   "inter": null,
+   "cap": 11400,
+   "ko": "링컨 시티 FC"
+  },
+  {
+   "name": "Middlesbrough",
+   "title": "Middlesbrough F.C.",
+   "inter": null,
+   "cap": 34742,
+   "ko": "미들즈브러 FC"
+  },
+  {
+   "name": "Millwall",
+   "title": "Millwall F.C.",
+   "inter": null,
+   "cap": 20146,
+   "ko": "밀월 FC"
+  },
+  {
+   "name": "Norwich City",
+   "title": "Norwich City F.C.",
+   "inter": null,
+   "cap": 27359,
+   "ko": "노리치 시티 FC"
+  },
+  {
+   "name": "Portsmouth",
+   "title": "Portsmouth F.C.",
+   "inter": null,
+   "cap": 20867,
+   "ko": "포츠머스 FC"
+  },
+  {
+   "name": "Preston North End",
+   "title": "Preston North End F.C.",
+   "inter": null,
+   "cap": 23408,
+   "ko": "프레스턴 노스 엔드 FC"
+  },
+  {
+   "name": "Queens Park Rangers",
+   "title": "Queens Park Rangers F.C.",
+   "inter": null,
+   "cap": 18439,
+   "ko": "퀸스 파크 레인저스 FC"
+  },
+  {
+   "name": "Sheffield United",
+   "title": "Sheffield United F.C.",
+   "inter": null,
+   "cap": 32050,
+   "ko": "셰필드 유나이티드 FC"
+  },
+  {
+   "name": "Southampton",
+   "title": "Southampton F.C.",
+   "inter": null,
+   "cap": 32384,
+   "ko": "사우샘프턴 FC"
+  },
+  {
+   "name": "Stoke City",
+   "title": "Stoke City F.C.",
+   "inter": null,
+   "cap": 30089,
+   "ko": "스토크 시티 FC"
+  },
+  {
+   "name": "Swansea City",
+   "title": "Swansea City A.F.C.",
+   "inter": null,
+   "cap": 21088,
+   "ko": "스완지 시티 AFC"
+  },
+  {
+   "name": "Watford",
+   "title": "Watford F.C.",
+   "inter": null,
+   "cap": 22200,
+   "ko": "왓퍼드 FC"
+  },
+  {
+   "name": "West Bromwich Albion",
+   "title": "West Bromwich Albion F.C.",
+   "inter": null,
+   "cap": 26850,
+   "ko": "웨스트브로미치 앨비언 FC"
+  },
+  {
+   "name": "West Ham United",
+   "title": "West Ham United F.C.",
+   "inter": null,
+   "cap": 62500,
+   "ko": "웨스트햄 유나이티드 FC"
+  },
+  {
+   "name": "Wolverhampton Wanderers",
+   "title": "Wolverhampton Wanderers F.C.",
+   "inter": null,
+   "cap": 31750,
+   "ko": "울버햄프턴 원더러스 FC"
+  },
+  {
+   "name": "Wrexham",
+   "title": "Wrexham A.F.C.",
+   "inter": null,
+   "cap": 10771,
+   "ko": "렉섬 AFC"
+  }
+ ]
+}

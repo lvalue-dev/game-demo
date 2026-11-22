@@ -1,0 +1,176 @@
+{
+ "id": "eng3",
+ "lang": "en",
+ "page": "2026–27 EFL League One",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "AFC Wimbledon",
+   "title": "AFC Wimbledon",
+   "inter": null,
+   "cap": 9215,
+   "ko": "AFC 윔블던"
+  },
+  {
+   "name": "Barnsley",
+   "title": "Barnsley F.C.",
+   "inter": null,
+   "cap": 23287,
+   "ko": "반즐리 FC"
+  },
+  {
+   "name": "Blackpool",
+   "title": "Blackpool F.C.",
+   "inter": null,
+   "cap": 16500,
+   "ko": "블랙풀 FC"
+  },
+  {
+   "name": "Bradford City",
+   "title": "Bradford City A.F.C.",
+   "inter": null,
+   "cap": 24840,
+   "ko": "브래드퍼드 시티 AFC"
+  },
+  {
+   "name": "Bromley",
+   "title": "Bromley F.C.",
+   "inter": null,
+   "cap": 6100,
+   "ko": "브롬리 FC"
+  },
+  {
+   "name": "Burton Albion",
+   "title": "Burton Albion F.C.",
+   "inter": null,
+   "cap": 6912,
+   "ko": "버턴 앨비언 FC"
+  },
+  {
+   "name": "Cambridge United",
+   "title": "Cambridge United F.C.",
+   "inter": null,
+   "cap": 7937,
+   "ko": "케임브리지 유나이티드 FC"
+  },
+  {
+   "name": "Doncaster Rovers",
+   "title": "Doncaster Rovers F.C.",
+   "inter": null,
+   "cap": 15231,
+   "ko": "동커스터 로버스 FC"
+  },
+  {
+   "name": "Huddersfield Town",
+   "title": "Huddersfield Town A.F.C.",
+   "inter": null,
+   "cap": 24121,
+   "ko": "허더즈필드 타운 AFC"
+  },
+  {
+   "name": "Leicester City",
+   "title": "Leicester City F.C.",
+   "inter": null,
+   "cap": 32259,
+   "ko": "레스터 시티 FC"
+  },
+  {
+   "name": "Leyton Orient",
+   "title": "Leyton Orient F.C.",
+   "inter": null,
+   "cap": 9271,
+   "ko": "레이턴 오리엔트 FC"
+  },
+  {
+   "name": "Luton Town",
+   "title": "Luton Town F.C.",
+   "inter": null,
+   "cap": 12056,
+   "ko": "루턴 타운 FC"
+  },
+  {
+   "name": "Mansfield Town",
+   "title": "Mansfield Town F.C.",
+   "inter": null,
+   "cap": 10022,
+   "ko": "맨스필드 타운 FC"
+  },
+  {
+   "name": "Milton Keynes Dons",
+   "title": "Milton Keynes Dons F.C.",
+   "inter": null,
+   "cap": 30500,
+   "ko": "밀턴킨스 던스 FC"
+  },
+  {
+   "name": "Notts County",
+   "title": "Notts County F.C.",
+   "inter": null,
+   "cap": 19841,
+   "ko": "노츠 카운티 FC"
+  },
+  {
+   "name": "Oxford United",
+   "title": "Oxford United F.C.",
+   "inter": null,
+   "cap": 12500,
+   "ko": "옥스퍼드 유나이티드 FC"
+  },
+  {
+   "name": "Peterborough United",
+   "title": "Peterborough United F.C.",
+   "inter": null,
+   "cap": 13512,
+   "ko": "피터버러 유나이티드 FC"
+  },
+  {
+   "name": "Plymouth Argyle",
+   "title": "Plymouth Argyle F.C.",
+   "inter": null,
+   "cap": 17900,
+   "ko": "플리머스 아가일 FC"
+  },
+  {
+   "name": "Reading",
+   "title": "Reading F.C.",
+   "inter": null,
+   "cap": 24161,
+   "ko": "레딩 FC"
+  },
+  {
+   "name": "Sheffield Wednesday",
+   "title": "Sheffield Wednesday F.C.",
+   "inter": null,
+   "cap": 39732,
+   "ko": "셰필드 웬즈데이 FC"
+  },
+  {
+   "name": "Stevenage",
+   "title": "Stevenage F.C.",
+   "inter": null,
+   "cap": 7318,
+   "ko": "스테버니지 FC"
+  },
+  {
+   "name": "Stockport County",
+   "title": "Stockport County F.C.",
+   "inter": null,
+   "cap": 10852,
+   "ko": "스톡포트 카운티 FC"
+  },
+  {
+   "name": "Wigan Athletic",
+   "title": "Wigan Athletic F.C.",
+   "inter": null,
+   "cap": 25138,
+   "ko": "위건 애슬레틱 FC"
+  },
+  {
+   "name": "Wycombe Wanderers",
+   "title": "Wycombe Wanderers F.C.",
+   "inter": null,
+   "cap": 10446,
+   "ko": "위컴 원더러스 FC"
+  }
+ ]
+}

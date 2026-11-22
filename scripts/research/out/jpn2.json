@@ -1,0 +1,148 @@
+{
+ "id": "jpn2",
+ "lang": "en",
+ "page": "2026–27 J2 League",
+ "section": "Location and stadium",
+ "clubs": [
+  {
+   "name": "Albirex Niigata",
+   "title": "Albirex Niigata",
+   "inter": null,
+   "cap": 41684,
+   "ko": "알비렉스 니가타"
+  },
+  {
+   "name": "Blaublitz Akita",
+   "title": "Blaublitz Akita",
+   "inter": null,
+   "cap": 18560,
+   "ko": "블라우블리츠 아키타"
+  },
+  {
+   "name": "FC Imabari",
+   "title": "FC Imabari",
+   "inter": null,
+   "cap": 5316,
+   "ko": "FC 이마바리"
+  },
+  {
+   "name": "Fujieda MYFC",
+   "title": "Fujieda MYFC",
+   "inter": null,
+   "cap": 10057,
+   "ko": "후지에다 MYFC"
+  },
+  {
+   "name": "Hokkaido Consadole Sapporo",
+   "title": "Hokkaido Consadole Sapporo",
+   "inter": null,
+   "cap": 38794,
+   "ko": "홋카이도 콘사돌레 삿포로"
+  },
+  {
+   "name": "Iwaki FC",
+   "title": "Iwaki FC",
+   "inter": null,
+   "cap": 5066,
+   "ko": "이와키 FC"
+  },
+  {
+   "name": "Júbilo Iwata",
+   "title": "Júbilo Iwata",
+   "inter": null,
+   "cap": 15156,
+   "ko": "주빌로 이와타"
+  },
+  {
+   "name": "Kataller Toyama",
+   "title": "Kataller Toyama",
+   "inter": null,
+   "cap": 18588,
+   "ko": "카탈레 도야마"
+  },
+  {
+   "name": "Montedio Yamagata",
+   "title": "Montedio Yamagata",
+   "inter": null,
+   "cap": 20638,
+   "ko": "몬테디오 야마가타"
+  },
+  {
+   "name": "Oita Trinita",
+   "title": "Oita Trinita",
+   "inter": null,
+   "cap": 31997,
+   "ko": "오이타 트리니타"
+  },
+  {
+   "name": "RB Omiya Ardija",
+   "title": "RB Omiya Ardija",
+   "inter": null,
+   "cap": 15491,
+   "ko": "RB 오미야 아르디자"
+  },
+  {
+   "name": "Sagan Tosu",
+   "title": "Sagan Tosu",
+   "inter": null,
+   "cap": 20805,
+   "ko": "사간 도스"
+  },
+  {
+   "name": "Shonan Bellmare",
+   "title": "Shonan Bellmare",
+   "inter": null,
+   "cap": 15380,
+   "ko": "쇼난 벨마레"
+  },
+  {
+   "name": "Tegevajaro Miyazaki",
+   "title": "Tegevajaro Miyazaki",
+   "inter": null,
+   "cap": 5354,
+   "ko": "테게바자로 미야자키"
+  },
+  {
+   "name": "Tochigi City",
+   "title": "Tochigi City FC",
+   "inter": null,
+   "cap": 5129,
+   "ko": "도치기 시티 FC"
+  },
+  {
+   "name": "Tokushima Vortis",
+   "title": "Tokushima Vortis",
+   "inter": null,
+   "cap": 17924,
+   "ko": "도쿠시마 보르티스"
+  },
+  {
+   "name": "Vanraure Hachinohe",
+   "title": "Vanraure Hachinohe",
+   "inter": null,
+   "cap": 5124,
+   "ko": "반라우레 하치노헤"
+  },
+  {
+   "name": "Vegalta Sendai",
+   "title": "Vegalta Sendai",
+   "inter": null,
+   "cap": 19694,
+   "ko": "베갈타 센다이"
+  },
+  {
+   "name": "Ventforet Kofu",
+   "title": "Ventforet Kofu",
+   "inter": null,
+   "cap": 15853,
+   "ko": "방포레 고후"
+  },
+  {
+   "name": "Yokohama FC",
+   "title": "Yokohama FC",
+   "inter": null,
+   "cap": 15454,
+   "ko": "요코하마 FC"
+  }
+ ]
+}

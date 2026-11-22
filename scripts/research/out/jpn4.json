@@ -1,0 +1,120 @@
+{
+ "id": "jpn4",
+ "lang": "en",
+ "page": "2026–27 Japan Football League",
+ "section": "Locations and stadiums",
+ "clubs": [
+  {
+   "name": "Azul Claro Numazu",
+   "title": "Azul Claro Numazu",
+   "inter": null,
+   "cap": 10000,
+   "ko": "아술 클라로 누마즈"
+  },
+  {
+   "name": "Briobecca Urayasu Ichikawa",
+   "title": "Briobecca Urayasu Ichikawa",
+   "inter": null,
+   "cap": 2100,
+   "ko": "브리오베카 우라야스 이치카와"
+  },
+  {
+   "name": "Criacao Shinjuku",
+   "title": "Criacao Shinjuku",
+   "inter": null,
+   "cap": 7258,
+   "ko": null
+  },
+  {
+   "name": "Honda",
+   "title": "Honda FC",
+   "inter": null,
+   "cap": 2506,
+   "ko": "혼다 FC"
+  },
+  {
+   "name": "Iwate Grulla Morioka",
+   "title": "Iwate Grulla Morioka",
+   "inter": null,
+   "cap": 9892,
+   "ko": "이와테 그루자 모리오카"
+  },
+  {
+   "name": "J-Lease",
+   "title": "J-Lease FC",
+   "inter": null,
+   "cap": 15943,
+   "ko": null
+  },
+  {
+   "name": "Maruyasu Okazaki",
+   "title": "FC Maruyasu Okazaki",
+   "inter": null,
+   "cap": 5000,
+   "ko": "FC 마루야스 오카자키"
+  },
+  {
+   "name": "Minebea Mitsumi",
+   "title": "Minebea Mitsumi FC",
+   "inter": null,
+   "cap": 20000,
+   "ko": "미네베아 미쓰미 FC"
+  },
+  {
+   "name": "Okinawa",
+   "title": "Okinawa SV",
+   "inter": null,
+   "cap": 12270,
+   "ko": null
+  },
+  {
+   "name": "ReinMeer Aomori",
+   "title": "ReinMeer Aomori",
+   "inter": null,
+   "cap": 20809,
+   "ko": "라인미어 아오모리"
+  },
+  {
+   "name": "Tiamo Hirakata",
+   "title": "FC Tiamo Hirakata",
+   "inter": null,
+   "cap": 2500,
+   "ko": null
+  },
+  {
+   "name": "Veertien Mie",
+   "title": "Veertien Mie",
+   "inter": null,
+   "cap": 5077,
+   "ko": "비아틴 미에"
+  },
+  {
+   "name": "Verspah Oita",
+   "title": "Verspah Oita",
+   "inter": null,
+   "cap": 4700,
+   "ko": null
+  },
+  {
+   "name": "Vonds Ichihara",
+   "title": "Vonds Ichihara",
+   "inter": null,
+   "cap": 14051,
+   "ko": null
+  },
+  {
+   "name": "Yokogawa Musashino",
+   "title": "Yokogawa Musashino FC",
+   "inter": null,
+   "cap": 5188,
+   "ko": "요코가와 무사시노 FC"
+  },
+  {
+   "name": "YSCC Yokohama",
+   "title": "YSCC Yokohama",
+   "inter": null,
+   "cap": 15454,
+   "ko": "YSCC 요코하마"
+  }
+ ]
+}

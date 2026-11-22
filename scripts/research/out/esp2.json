@@ -1,0 +1,162 @@
+{
+ "id": "esp2",
+ "lang": "en",
+ "page": "2026–27 Segunda División",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "Albacete",
+   "title": "Albacete Balompié",
+   "inter": null,
+   "cap": null,
+   "ko": "알바세테 발롬피에"
+  },
+  {
+   "name": "Almería",
+   "title": "UD Almería",
+   "inter": null,
+   "cap": null,
+   "ko": "UD 알메리아"
+  },
+  {
+   "name": "Andorra",
+   "title": "FC Andorra",
+   "inter": null,
+   "cap": null,
+   "ko": "FC 안도라"
+  },
+  {
+   "name": "Burgos",
+   "title": "Burgos CF",
+   "inter": null,
+   "cap": null,
+   "ko": "부르고스 CF"
+  },
+  {
+   "name": "Cádiz",
+   "title": "Cádiz CF",
+   "inter": null,
+   "cap": null,
+   "ko": "카디스 CF"
+  },
+  {
+   "name": "Castellón",
+   "title": "CD Castellón",
+   "inter": null,
+   "cap": null,
+   "ko": "CD 카스테욘"
+  },
+  {
+   "name": "Celta Fortuna",
+   "title": "RC Celta Fortuna",
+   "inter": null,
+   "cap": 24870,
+   "ko": "RC 셀타 포르투나"
+  },
+  {
+   "name": "Ceuta",
+   "title": "AD Ceuta FC",
+   "inter": null,
+   "cap": null,
+   "ko": "AD 세우타 FC"
+  },
+  {
+   "name": "Córdoba",
+   "title": "Córdoba CF",
+   "inter": null,
+   "cap": null,
+   "ko": "코르도바 CF"
+  },
+  {
+   "name": "Eibar",
+   "title": "SD Eibar",
+   "inter": null,
+   "cap": null,
+   "ko": "SD 에이바르"
+  },
+  {
+   "name": "Eldense",
+   "title": "CD Eldense",
+   "inter": null,
+   "cap": 5776,
+   "ko": "CD 엘덴세"
+  },
+  {
+   "name": "Girona",
+   "title": "Girona FC",
+   "inter": null,
+   "cap": 14624,
+   "ko": "지로나 FC"
+  },
+  {
+   "name": "Granada",
+   "title": "Granada CF",
+   "inter": null,
+   "cap": null,
+   "ko": "그라나다 CF"
+  },
+  {
+   "name": "Las Palmas",
+   "title": "UD Las Palmas",
+   "inter": null,
+   "cap": null,
+   "ko": "UD 라스팔마스"
+  },
+  {
+   "name": "Leganés",
+   "title": "CD Leganés",
+   "inter": null,
+   "cap": null,
+   "ko": "CD 레가네스"
+  },
+  {
+   "name": "Mallorca",
+   "title": "RCD Mallorca",
+   "inter": null,
+   "cap": null,
+   "ko": "RCD 마요르카"
+  },
+  {
+   "name": "Oviedo",
+   "title": "Real Oviedo",
+   "inter": null,
+   "cap": null,
+   "ko": "레알 오비에도"
+  },
+  {
+   "name": "Real Sociedad B",
+   "title": "Real Sociedad B",
+   "inter": null,
+   "cap": null,
+   "ko": "레알 소시에다드 B"
+  },
+  {
+   "name": "Sabadell",
+   "title": "CE Sabadell FC",
+   "inter": null,
+   "cap": null,
+   "ko": "CE 사바델 FC"
+  },
+  {
+   "name": "Sporting Gijón",
+   "title": "Sporting de Gijón",
+   "inter": null,
+   "cap": null,
+   "ko": "스포르팅 히혼"
+  },
+  {
+   "name": "Tenerife",
+   "title": "CD Tenerife",
+   "inter": null,
+   "cap": null,
+   "ko": "CD 테네리페"
+  },
+  {
+   "name": "Valladolid",
+   "title": "Real Valladolid",
+   "inter": null,
+   "cap": null,
+   "ko": "레알 바야돌리드"
+  }
+ ]
+}

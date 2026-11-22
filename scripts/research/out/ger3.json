@@ -1,0 +1,148 @@
+{
+ "id": "ger3",
+ "lang": "en",
+ "page": "2026–27 3. Liga",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "Alemannia Aachen",
+   "title": "Alemannia Aachen",
+   "inter": null,
+   "cap": 32960,
+   "ko": "알레마니아 아헨"
+  },
+  {
+   "name": "MSV Duisburg",
+   "title": "MSV Duisburg",
+   "inter": null,
+   "cap": 31514,
+   "ko": "MSV 뒤스부르크"
+  },
+  {
+   "name": "Fortuna Düsseldorf",
+   "title": "Fortuna Düsseldorf",
+   "inter": null,
+   "cap": 54600,
+   "ko": "포르투나 뒤셀도르프"
+  },
+  {
+   "name": "Rot-Weiss Essen",
+   "title": "Rot-Weiss Essen",
+   "inter": null,
+   "cap": 19962,
+   "ko": "로트바이스 에센"
+  },
+  {
+   "name": "Sonnenhof Großaspach",
+   "title": "SG Sonnenhof Großaspach",
+   "inter": null,
+   "cap": 10001,
+   "ko": "SG 소넨호프 그로스아스파흐"
+  },
+  {
+   "name": "TSV Havelse",
+   "title": "TSV Havelse",
+   "inter": null,
+   "cap": 49000,
+   "ko": null
+  },
+  {
+   "name": "TSG Hoffenheim II",
+   "title": "TSG 1899 Hoffenheim II",
+   "inter": null,
+   "cap": 6350,
+   "ko": null
+  },
+  {
+   "name": "FC Ingolstadt",
+   "title": "FC Ingolstadt 04",
+   "inter": null,
+   "cap": 15200,
+   "ko": "FC 잉골슈타트 04"
+  },
+  {
+   "name": "Fortuna Köln",
+   "title": "SC Fortuna Köln",
+   "inter": null,
+   "cap": 11748,
+   "ko": "SC 포르투나 쾰른"
+  },
+  {
+   "name": "Viktoria Köln",
+   "title": "FC Viktoria Köln",
+   "inter": null,
+   "cap": 8343,
+   "ko": null
+  },
+  {
+   "name": "Waldhof Mannheim",
+   "title": "SV Waldhof Mannheim",
+   "inter": null,
+   "cap": 24302,
+   "ko": "SV 발트호프 만하임"
+  },
+  {
+   "name": "SV Meppen",
+   "title": "SV Meppen",
+   "inter": null,
+   "cap": 13241,
+   "ko": null
+  },
+  {
+   "name": "Preußen Münster",
+   "title": "SC Preußen Münster",
+   "inter": null,
+   "cap": 14300,
+   "ko": "SC 프로이센 뮌스터"
+  },
+  {
+   "name": "Jahn Regensburg",
+   "title": "SSV Jahn Regensburg",
+   "inter": null,
+   "cap": 15210,
+   "ko": "SSV 얀 레겐스부르크"
+  },
+  {
+   "name": "Hansa Rostock",
+   "title": "FC Hansa Rostock",
+   "inter": null,
+   "cap": 29000,
+   "ko": "FC 한자 로스토크"
+  },
+  {
+   "name": "1. FC Saarbrücken",
+   "title": "1. FC Saarbrücken",
+   "inter": null,
+   "cap": 16003,
+   "ko": "1. FC 자르브뤼켄"
+  },
+  {
+   "name": "VfB Stuttgart II",
+   "title": "VfB Stuttgart II",
+   "inter": null,
+   "cap": 10001,
+   "ko": "VfB 슈투트가르트 II"
+  },
+  {
+   "name": "SC Verl",
+   "title": "SC Verl",
+   "inter": null,
+   "cap": 5207,
+   "ko": null
+  },
+  {
+   "name": "Wehen Wiesbaden",
+   "title": "SV Wehen Wiesbaden",
+   "inter": null,
+   "cap": 15295,
+   "ko": "SV 베헨 비스바덴"
+  },
+  {
+   "name": "Würzburger Kickers",
+   "title": "FC Würzburger Kickers",
+   "inter": null,
+   "cap": 13090,
+   "ko": "뷔르츠부르거 키커스"
+  }
+ ]
+}

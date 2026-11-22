@@ -1,0 +1,148 @@
+{
+ "id": "jpn1",
+ "lang": "en",
+ "page": "2026–27 J1 League",
+ "section": "Clubs",
+ "clubs": [
+  {
+   "name": "Kashima Antlers",
+   "title": "Kashima Antlers",
+   "inter": null,
+   "cap": 39095,
+   "ko": "가시마 앤틀러스"
+  },
+  {
+   "name": "Mito HollyHock",
+   "title": "Mito HollyHock",
+   "inter": null,
+   "cap": 17034,
+   "ko": "미토 홀리호크"
+  },
+  {
+   "name": "Urawa Red Diamonds",
+   "title": "Urawa Red Diamonds",
+   "inter": null,
+   "cap": 62040,
+   "ko": "우라와 레드 다이아몬즈"
+  },
+  {
+   "name": "JEF United Chiba",
+   "title": "JEF United Chiba",
+   "inter": null,
+   "cap": 19470,
+   "ko": "제프 유나이티드 이치하라 지바"
+  },
+  {
+   "name": "Kashiwa Reysol",
+   "title": "Kashiwa Reysol",
+   "inter": null,
+   "cap": 15109,
+   "ko": "가시와 레이솔"
+  },
+  {
+   "name": "FC Tokyo",
+   "title": "FC Tokyo",
+   "inter": null,
+   "cap": 47851,
+   "ko": "FC 도쿄"
+  },
+  {
+   "name": "Tokyo Verdy",
+   "title": "Tokyo Verdy",
+   "inter": null,
+   "cap": null,
+   "ko": "도쿄 베르디"
+  },
+  {
+   "name": "Machida Zelvia",
+   "title": "FC Machida Zelvia",
+   "inter": null,
+   "cap": 15320,
+   "ko": "FC 마치다 젤비아"
+  },
+  {
+   "name": "Kawasaki Frontale",
+   "title": "Kawasaki Frontale",
+   "inter": null,
+   "cap": 26827,
+   "ko": "가와사키 프론탈레"
+  },
+  {
+   "name": "Yokohama F. Marinos",
+   "title": "Yokohama F. Marinos",
+   "inter": null,
+   "cap": 71624,
+   "ko": "요코하마 F. 마리노스"
+  },
+  {
+   "name": "Shimizu S-Pulse",
+   "title": "Shimizu S-Pulse",
+   "inter": null,
+   "cap": 19594,
+   "ko": "시미즈 에스펄스"
+  },
+  {
+   "name": "Nagoya Grampus",
+   "title": "Nagoya Grampus",
+   "inter": null,
+   "cap": 42753,
+   "ko": "나고야 그램퍼스"
+  },
+  {
+   "name": "Kyoto Sanga",
+   "title": "Kyoto Sanga FC",
+   "inter": null,
+   "cap": 21269,
+   "ko": "교토 상가 FC"
+  },
+  {
+   "name": "Gamba Osaka",
+   "title": "Gamba Osaka",
+   "inter": null,
+   "cap": 39694,
+   "ko": "감바 오사카"
+  },
+  {
+   "name": "Cerezo Osaka",
+   "title": "Cerezo Osaka",
+   "inter": null,
+   "cap": 24481,
+   "ko": "세레소 오사카"
+  },
+  {
+   "name": "Vissel Kobe",
+   "title": "Vissel Kobe",
+   "inter": null,
+   "cap": 27974,
+   "ko": "비셀 고베"
+  },
+  {
+   "name": "Fagiano Okayama",
+   "title": "Fagiano Okayama",
+   "inter": null,
+   "cap": 15479,
+   "ko": "파지아노 오카야마"
+  },
+  {
+   "name": "Sanfrecce Hiroshima",
+   "title": "Sanfrecce Hiroshima",
+   "inter": null,
+   "cap": 28407,
+   "ko": "산프레체 히로시마"
+  },
+  {
+   "name": "Avispa Fukuoka",
+   "title": "Avispa Fukuoka",
+   "inter": null,
+   "cap": 21546,
+   "ko": "아비스파 후쿠오카"
+  },
+  {
+   "name": "V-Varen Nagasaki",
+   "title": "V-Varen Nagasaki",
+   "inter": null,
+   "cap": 20268,
+   "ko": "V-파렌 나가사키"
+  }
+ ]
+}

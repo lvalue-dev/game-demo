@@ -1,0 +1,78 @@
+{
+ "id": "jpn5",
+ "lang": "en",
+ "page": "Kantō Soccer League",
+ "section": "Division 1",
+ "clubs": [
+  {
+   "name": "Aries Toshima FC",
+   "title": null,
+   "inter": "ja",
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Edo All United",
+   "title": null,
+   "inter": "ja",
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Nankatsu SC",
+   "title": "Nankatsu SC",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Nihon University FC",
+   "title": null,
+   "inter": "ja",
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "RKD Ryugasaki",
+   "title": "Ryutsu Keizai Dragons Ryugasaki",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Shibuya City",
+   "title": null,
+   "inter": "ja",
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Toho Titanium SC",
+   "title": "Toho Titanium SC",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Toin University of Yokohama",
+   "title": null,
+   "inter": "ja",
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Tokyo 23",
+   "title": "Tokyo 23 FC",
+   "inter": null,
+   "cap": null,
+   "ko": null
+  },
+  {
+   "name": "Tokyo United",
+   "title": "Tokyo United FC",
+   "inter": null,
+   "cap": null,
+   "ko": "도쿄 유나이티드 FC"
+  }
+ ]
+}

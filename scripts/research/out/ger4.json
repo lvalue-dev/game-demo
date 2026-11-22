@@ -1,0 +1,116 @@
+{
+ "id": "ger4",
+ "lang": "en",
+ "page": "2026–27 Regionalliga",
+ "section": "Regionalliga West",
+ "clubs": [
+  {
+   "name": "Rot-Weiß Oberhausen",
+   "title": "Rot-Weiß Oberhausen",
+   "inter": null,
+   "ko": "로트바이스 오버하우젠"
+  },
+  {
+   "name": "Borussia Dortmund II",
+   "title": "Borussia Dortmund II",
+   "inter": null,
+   "ko": "보루시아 도르트문트 II"
+  },
+  {
+   "name": "Borussia Mönchengladbach II",
+   "title": "Borussia Mönchengladbach II",
+   "inter": null,
+   "ko": "보루시아 묀헨글라트바흐 II"
+  },
+  {
+   "name": "FC Gütersloh",
+   "title": "FC Gütersloh",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Sportfreunde Siegen",
+   "title": "Sportfreunde Siegen",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Bonner SC",
+   "title": "Bonner SC",
+   "inter": null,
+   "ko": "보너 SC"
+  },
+  {
+   "name": "1. FC Köln II",
+   "title": "1. FC Köln II",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Westfalia Rhynern",
+   "title": "Westfalia Rhynern",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "1. FC Bocholt",
+   "title": "1. FC Bocholt",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Schalke 04 II",
+   "title": "FC Schalke 04 II",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "VfB Hilden",
+   "title": "VfB 03 Hilden",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "SC Paderborn II",
+   "title": "SC Paderborn 07 II",
+   "inter": null,
+   "ko": "SC 파더보른 07"
+  },
+  {
+   "name": "VfL Bochum II",
+   "title": "VfL Bochum II",
+   "inter": null,
+   "ko": "VfL 보훔 II"
+  },
+  {
+   "name": "SV Bergisch Gladbach",
+   "title": "SV Bergisch Gladbach 09",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "SV Rödinghausen",
+   "title": "SV Rödinghausen",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "SG Wattenscheid",
+   "title": "SG Wattenscheid 09",
+   "inter": null,
+   "ko": "SG 바텐샤이트 09"
+  },
+  {
+   "name": "SC Wiedenbrück",
+   "title": "SC Wiedenbrück",
+   "inter": null,
+   "ko": null
+  },
+  {
+   "name": "Sportfreunde Lotte",
+   "title": "Sportfreunde Lotte",
+   "inter": null,
+   "ko": null
+  }
+ ]
+}

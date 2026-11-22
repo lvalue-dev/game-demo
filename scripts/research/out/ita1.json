@@ -1,0 +1,148 @@
+{
+ "id": "ita1",
+ "lang": "en",
+ "page": "2026–27 Serie A",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "Atalanta",
+   "title": "Atalanta BC",
+   "inter": null,
+   "cap": null,
+   "ko": "아탈란타 BC"
+  },
+  {
+   "name": "Bologna",
+   "title": "Bologna FC 1909",
+   "inter": null,
+   "cap": null,
+   "ko": "볼로냐 FC 1909"
+  },
+  {
+   "name": "Cagliari",
+   "title": "Cagliari Calcio",
+   "inter": null,
+   "cap": null,
+   "ko": "칼리아리 칼초"
+  },
+  {
+   "name": "Como",
+   "title": "Como 1907",
+   "inter": null,
+   "cap": null,
+   "ko": "코모 1907"
+  },
+  {
+   "name": "Fiorentina",
+   "title": "ACF Fiorentina",
+   "inter": null,
+   "cap": null,
+   "ko": "ACF 피오렌티나"
+  },
+  {
+   "name": "Frosinone",
+   "title": "Frosinone Calcio",
+   "inter": null,
+   "cap": null,
+   "ko": "프로시노네 칼초"
+  },
+  {
+   "name": "Genoa",
+   "title": "Genoa CFC",
+   "inter": null,
+   "cap": null,
+   "ko": "제노아 CFC"
+  },
+  {
+   "name": "Inter Milan",
+   "title": "Inter Milan",
+   "inter": null,
+   "cap": null,
+   "ko": "FC 인테르나치오날레 밀라노"
+  },
+  {
+   "name": "Juventus",
+   "title": "Juventus FC",
+   "inter": null,
+   "cap": null,
+   "ko": "유벤투스 FC"
+  },
+  {
+   "name": "Lazio",
+   "title": "SS Lazio",
+   "inter": null,
+   "cap": null,
+   "ko": "SS 라치오"
+  },
+  {
+   "name": "Lecce",
+   "title": "US Lecce",
+   "inter": null,
+   "cap": null,
+   "ko": "US 레체"
+  },
+  {
+   "name": "AC Milan",
+   "title": "AC Milan",
+   "inter": null,
+   "cap": null,
+   "ko": "AC 밀란"
+  },
+  {
+   "name": "Monza",
+   "title": "AC Monza",
+   "inter": null,
+   "cap": null,
+   "ko": "AC 몬차"
+  },
+  {
+   "name": "Napoli",
+   "title": "SSC Napoli",
+   "inter": null,
+   "cap": null,
+   "ko": "SSC 나폴리"
+  },
+  {
+   "name": "Parma",
+   "title": "Parma Calcio 1913",
+   "inter": null,
+   "cap": null,
+   "ko": "파르마 칼초 1913"
+  },
+  {
+   "name": "Roma",
+   "title": "AS Roma",
+   "inter": null,
+   "cap": null,
+   "ko": "AS 로마"
+  },
+  {
+   "name": "Sassuolo",
+   "title": "US Sassuolo Calcio",
+   "inter": null,
+   "cap": null,
+   "ko": "US 사수올로 칼초"
+  },
+  {
+   "name": "Torino",
+   "title": "Torino FC",
+   "inter": null,
+   "cap": null,
+   "ko": "토리노 FC"
+  },
+  {
+   "name": "Udinese",
+   "title": "Udinese Calcio",
+   "inter": null,
+   "cap": null,
+   "ko": "우디네세 칼초"
+  },
+  {
+   "name": "Venezia",
+   "title": "Venezia FC",
+   "inter": null,
+   "cap": null,
+   "ko": "베네치아 FC"
+  }
+ ]
+}

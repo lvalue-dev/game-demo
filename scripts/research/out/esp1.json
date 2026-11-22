@@ -1,0 +1,148 @@
+{
+ "id": "esp1",
+ "lang": "en",
+ "page": "2026–27 La Liga",
+ "section": "Stadiums and locations",
+ "clubs": [
+  {
+   "name": "Alavés",
+   "title": "Deportivo Alavés",
+   "inter": null,
+   "cap": null,
+   "ko": "데포르티보 알라베스"
+  },
+  {
+   "name": "Athletic Bilbao",
+   "title": "Athletic Bilbao",
+   "inter": null,
+   "cap": null,
+   "ko": "아틀레틱 빌바오"
+  },
+  {
+   "name": "Atlético Madrid",
+   "title": "Atlético Madrid",
+   "inter": null,
+   "cap": null,
+   "ko": "아틀레티코 마드리드"
+  },
+  {
+   "name": "Barcelona",
+   "title": "FC Barcelona",
+   "inter": null,
+   "cap": null,
+   "ko": "FC 바르셀로나"
+  },
+  {
+   "name": "Celta Vigo",
+   "title": "RC Celta de Vigo",
+   "inter": null,
+   "cap": null,
+   "ko": "셀타 비고"
+  },
+  {
+   "name": "Deportivo A Coruña",
+   "title": "Deportivo de A Coruña",
+   "inter": null,
+   "cap": null,
+   "ko": "데포르티보 라코루냐"
+  },
+  {
+   "name": "Elche",
+   "title": "Elche CF",
+   "inter": null,
+   "cap": null,
+   "ko": "엘체 CF"
+  },
+  {
+   "name": "Espanyol",
+   "title": "RCD Espanyol",
+   "inter": null,
+   "cap": null,
+   "ko": "RCD 에스파뇰"
+  },
+  {
+   "name": "Getafe",
+   "title": "Getafe CF",
+   "inter": null,
+   "cap": null,
+   "ko": "헤타페 CF"
+  },
+  {
+   "name": "Levante",
+   "title": "Levante UD",
+   "inter": null,
+   "cap": null,
+   "ko": "레반테 UD"
+  },
+  {
+   "name": "Málaga",
+   "title": "Málaga CF",
+   "inter": null,
+   "cap": null,
+   "ko": "말라가 CF"
+  },
+  {
+   "name": "Osasuna",
+   "title": "CA Osasuna",
+   "inter": null,
+   "cap": null,
+   "ko": "CA 오사수나"
+  },
+  {
+   "name": "Racing Santander",
+   "title": "Racing de Santander",
+   "inter": null,
+   "cap": null,
+   "ko": "라싱 산탄데르"
+  },
+  {
+   "name": "Rayo Vallecano",
+   "title": "Rayo Vallecano",
+   "inter": null,
+   "cap": 14708,
+   "ko": "라요 바예카노"
+  },
+  {
+   "name": "Real Betis",
+   "title": "Real Betis",
+   "inter": null,
+   "cap": null,
+   "ko": "레알 베티스"
+  },
+  {
+   "name": "Real Madrid",
+   "title": "Real Madrid CF",
+   "inter": null,
+   "cap": null,
+   "ko": "레알 마드리드 CF"
+  },
+  {
+   "name": "Real Sociedad",
+   "title": "Real Sociedad",
+   "inter": null,
+   "cap": null,
+   "ko": "레알 소시에다드"
+  },
+  {
+   "name": "Sevilla",
+   "title": "Sevilla FC",
+   "inter": null,
+   "cap": null,
+   "ko": "세비야 FC"
+  },
+  {
+   "name": "Valencia",
+   "title": "Valencia CF",
+   "inter": null,
+   "cap": null,
+   "ko": "발렌시아 CF"
+  },
+  {
+   "name": "Villarreal",
+   "title": "Villarreal CF",
+   "inter": null,
+   "cap": null,
+   "ko": "비야레알 CF"
+  }
+ ]
+}
