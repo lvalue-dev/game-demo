@@ -23,7 +23,7 @@ import type { Mood } from './talk.ts';
 import { actMatch, beginMatch } from './match.ts';
 import { autoSide } from './power.ts';
 import type { Side } from './power.ts';
-import { usualShape } from './tactics.ts';
+import { NEUTRAL, usualShape } from './tactics.ts';
 import {
   addLeagues, applyMoves, applyResult, createClubs, dropCount, evolveClubs, playRound, playTie, positionOf, sortTable, startGroup, startLeagues, zone,
 } from './world.ts';
@@ -47,7 +47,7 @@ function blankSeason(): SeasonState {
   };
 }
 
-export const SAVE_VERSION = 10;
+export const SAVE_VERSION = 11;
 
 /**
  * 새 커리어. 감독은 출신에 따라 자격증을 가지고(없을 수도 있다) 구직부터 시작한다.
@@ -362,6 +362,11 @@ export function migrate(g: Game): boolean {
     // 라이벌 상대 전적이 생겼다. 진행 중인 시즌의 라이벌(g.season.rival)은 그대로 두고, 전적은 다음 시즌 라이벌부터 센다.
     g.version = 10;
     if (g.job) g.job.rivalry = null;
+  }
+  if (g.version === 10) {
+    // 전술 개편: 압박, 패스, 공격 방향 지시가 생겼다. 진행 중인 경기의 지시에 보통 값을 채운다.
+    g.version = 11;
+    if (g.match) g.match.dials = { ...NEUTRAL, ...g.match.dials };
   }
   // 구단 유니폼 색이 새로 생기거나 바뀌었으면 저장된 구단에도 입힌다.
   const seeds = new Map(CLUB_LEAGUES.flatMap((l) => CLUB_SEEDS[l] ?? []).filter((x) => x.colors).map((x) => [x.name, x]));

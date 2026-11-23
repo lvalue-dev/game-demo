@@ -3,15 +3,16 @@
 // 규칙의 근거는 TACTICS.md에 있다.
 import { ko } from './josa.ts';
 import { STYLES, STYLE_IDS } from './data.ts';
-import { HALF, PER_MIN, TICKS, createLive, lineup, reshape, slotsOf, stepLive } from './live.ts';
-import type { Entrant, LiveEnv, LiveEvent } from './live.ts';
+import { HALF, PER_MIN, TICKS, createLive, lineup, movedSlot, reshape, slotSpot, slotsOf, stepLive } from './live.ts';
+import type { Entrant, LiveEnv, LiveEvent, Slot } from './live.ts';
 import { LINE_SPOT, makeDetail } from './player.ts';
 import { foreignCount, isForeign, quota } from './contract.ts';
 import { baseSide, drilled, skill } from './power.ts';
 import { chance, int, pick, poisson, rand, spread } from './rng.ts';
 import { customSlots, effOvr, formationOf, lineAt, makePlayer, myClub, nameFor, randomNat, slotsFor, stage } from './squad.ts';
-import { BASE, ROLES, SHAPES, SHAPE_IDS, advantage, bestCounter, dialEdge, fits, matchup, roleEdge, shapeEdge, tempoCost, usualShape, why } from './tactics.ts';
-import type { Block, Choice, Club, Dials, Game, Pos, LeagueId, LiveHow, LivePlayer, LiveState, LogLine, MatchState, Player, RoleId, ShapeId, StyleId, Tone, WeatherId } from './types.ts';
+import { BASE, DIALS, NEUTRAL, SHAPES, SHAPE_IDS, advantage, attackVs, bestCounter, comboState, dialChanges, dialEdge, fits, flankEdge, matchup, presetDials, roleEdge, roleFits, shapeEdge, shiftCost, tempoCost, usualShape, why } from './tactics.ts';
+import type { ComboState, RoleInput } from './tactics.ts';
+import type { Block, Choice, Club, Dials, Game, Pos, LeagueId, LiveHow, LivePlayer, LiveState, LogLine, MatchState, Player, RoleId, ShapeId, Spot, StyleId, Tone, WeatherId } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 
@@ -27,7 +28,7 @@ export interface MatchSetup {
   intro?: string;
 }
 
-const WEATHER: Record<WeatherId, { name: string; note: string }> = {
+export const WEATHER: Record<WeatherId, { name: string; note: string }> = {
   clear: { name: '맑음', note: '' },
   rain: { name: '비', note: '잔디가 미끄러워 짧은 패스가 끊긴다. 점유에 불리하다.' },
   wind: { name: '강풍', note: '긴 공과 크로스가 바람에 흔들린다. 롱볼과 측면 공격에 불리하다.' },
@@ -88,7 +89,7 @@ function myMidEdge(g: Game, m: MatchState): number {
 }
 
 /** 우리 전술이 상대 전술에 유리한지 한 낱말로. */
-function hint(g: Game, m: MatchState, mine: StyleId, theirs: StyleId): string {
+export function hint(g: Game, m: MatchState, mine: StyleId, theirs: StyleId): string {
   const adv = advantage(mine, theirs, myMidEdge(g, m));
   return adv >= 1.5 ? '유리' : adv <= -1.5 ? '불리' : '비슷';
 }
@@ -107,6 +108,125 @@ function say(m: MatchState, min: number, text: string, tone: Tone): void {
   m.log.push({ min, text, tone });
 }
 
+/** 경기에 나설 수 있는 우리 선수 전부: 선발, 후보, 이 경기만 벤치에 앉힌 2군. */
+const roster = (g: Game, L?: LiveState | null): Player[] => [...g.squad, ...g.reserves, ...(L?.youth ?? [])];
+
+/** 지금 뛰고 있는 선수들 가운데 기본이 아닌 역할을 맡은 선수들. 실시간 경기가 아니면 선발 열한 명을 본다. */
+function roleList(g: Game, m: MatchState, level: number): RoleInput[] {
+  const L = m.live;
+  const on = L ? new Set(L.teams[0].players.filter((p) => !p.off && p.pid !== undefined).map((p) => p.pid as number)) : null;
+  return (on ? roster(g, L) : g.squad)
+    .filter((p) => m.roles[p.id] && m.roles[p.id] !== 'base' && (!on || on.has(p.id)))
+    .map((p) => ({ pos: p.pos, role: m.roles[p.id] as RoleId, scale: clamp(1 + (p.ovr + p.temp - level) / 20, 0.5, 1.5) }));
+}
+
+/** 공격을 몰아 준 쪽 측면 선수들이 반대쪽보다 얼마나 좋은지(OVR 차이). 그쪽에 선 선수가 없으면 크게 밑진다. */
+function flankDiff(g: Game, m: MatchState): number {
+  if (!m.dials.flank) return 0;
+  const L = m.live;
+  const rows = L
+    ? L.teams[0].players.filter((p) => !p.off).map((p) => ({ v: (slotsOf(L, 0, m.me.shape)[p.slot] as Slot).v, ovr: p.ovr }))
+    : slotsFor(g, m.me.shape).flatMap((s, i) => (g.squad[i] ? [{ v: s.v, ovr: effOvr(g.squad[i] as Player, s.line) }] : []));
+  const avg = (list: { ovr: number }[]): number | null => (list.length ? list.reduce((sum, x) => sum + x.ovr, 0) / list.length : null);
+  const left = avg(rows.filter((x) => x.v < 22));
+  const right = avg(rows.filter((x) => x.v > 46));
+  const [here, there] = m.dials.flank === -1 ? [left, right] : [right, left];
+  if (here === null) return -6;
+  return here - (there ?? avg(rows) ?? here);
+}
+
+/** 전술 싸움이 전력에 미치는 크기. 지시 하나, 조합 하나가 경기에서 눈에 띄도록 모든 전술 보정에 곱한다. */
+export const TACTIC_GAIN = 1.4;
+/** 상대가 들고 나온 지시가 상대 전력에 보태는 몫. 우리가 손대지 않아도 경기가 되도록 조금 덜어 낸다. */
+const OPP_SHARE = 0.5;
+
+/** 전술 싸움의 한 갈래가 두 팀 전력에 더하는 값(TACTIC_GAIN을 곱하기 전). */
+export interface Part {
+  id: 'style' | 'shape' | 'dials' | 'duel' | 'combo' | 'roles' | 'opp';
+  label: string;
+  att: number;
+  def: number;
+  oAtt: number;
+  oDef: number;
+  /** 왜 그런지 한 줄씩. */
+  notes: string[];
+}
+
+/**
+ * 전술 싸움을 갈래별로 나눈 것: 전술 상성, 대형, 팀 지시, 두 팀 지시의 맞대결, 조합, 개인 역할, 상대의 지시.
+ * ratingsNow가 이것을 더해 쓰고, 화면은 이것으로 "왜 밀리는지"를 보여 준다.
+ */
+export function tacticParts(g: Game, m: MatchState): Part[] {
+  const edge = myMidEdge(g, m);
+  const od = m.oppDials ?? NEUTRAL;
+  const level = (m.oppAtt + m.oppDef) / 2;
+  const list = roleList(g, m, level);
+  const names = list.map((x) => x.role);
+  const mu = matchup(m.me.style, m.opp.style, edge);
+  const reason = why(m.me.style, m.opp.style, edge);
+  const sa = shapeEdge(m.me.shape, m.opp.shape, m.me.style, m.opp.style);
+  const split = !!m.me.shapeDef && m.me.shapeDef !== m.me.shape;
+  const sd = split ? shapeEdge(m.me.shapeDef as ShapeId, m.opp.shape, m.me.style, m.opp.style) : sa;
+  // 두 대형을 오가는 부담. 잃자마자 달려들라고 하면 수비 자리를 찾느라 더 늦고,
+  // 따낸 뒤에는 공격 자리로 돌아가느라 첫 패스가 늦다(바로 역습을 시키면 더 그렇다).
+  const move = split ? shiftCost(m.me.shape, m.me.shapeDef) : 0;
+  const shift = split ? move + (m.dials.lose === 1 ? 0.5 : 0) : 0;
+  const slow = split ? move * 0.4 + (m.dials.win === 1 ? 0.4 : 0) : 0;
+  const shiftNote = [m.dials.lose === 1 ? '즉시 압박과 겹쳐 수비 자리 찾기가 늦다' : '', m.dials.win === 1 ? '역습 출발이 늦다' : ''].filter(Boolean).join(', ') || '오가는 부담이 있다';
+  const de = dialEdge(m.dials, m.me.style, m.opp.style);
+  const fe = flankEdge(m.dials, flankDiff(g, m), m.me.style);
+  const re = roleEdge(list, m.me.style, m.opp.style, m.dials);
+  const mine = comboState(m.dials, names).on;
+  const ours = attackVs(m.dials, od);
+  const theirs = attackVs(od, m.dials);
+  const ode = dialEdge(od, m.opp.style, m.me.style);
+  const oc = comboState(od, []).on;
+  const sum = (xs: { att: number; def: number }[], key: 'att' | 'def'): number => xs.reduce((a, x) => a + x[key], 0);
+  return [
+    { id: 'style', label: '전술 상성', att: mu.att, def: mu.def, oAtt: 0, oDef: 0, notes: reason ? [reason.text] : [] },
+    {
+      id: 'shape', label: '대형', att: sa.att - slow, def: sd.def - shift, oAtt: 0, oDef: 0,
+      notes: split ? [`공격 ${SHAPES[m.me.shape].name}, 수비 ${SHAPES[m.me.shapeDef as ShapeId].name} · ${shiftNote}`] : [],
+    },
+    { id: 'dials', label: '팀 지시', att: de.att + fe.att, def: de.def, oAtt: 0, oDef: 0, notes: [] },
+    { id: 'duel', label: '지시 맞대결', att: ours.value, def: 0, oAtt: theirs.value, oDef: 0, notes: [...ours.notes, ...theirs.notes.map((x) => `상대: ${x}`)] },
+    { id: 'combo', label: '조합', att: sum(mine, 'att'), def: sum(mine, 'def'), oAtt: 0, oDef: 0, notes: mine.map((c) => c.name) },
+    { id: 'roles', label: '개인 역할', att: re.att, def: re.def, oAtt: re.oAtt, oDef: 0, notes: [] },
+    {
+      id: 'opp', label: '상대 지시', att: 0, def: 0, oAtt: (ode.att + sum(oc, 'att')) * OPP_SHARE, oDef: (ode.def + sum(oc, 'def')) * OPP_SHARE,
+      notes: oc.map((c) => `상대 ${c.name}`),
+    },
+  ];
+}
+
+/** 벤치가 보는 판세. atk는 우리 공격이 상대 수비를 얼마나 앞서는지, dfn은 우리 수비가 상대 공격을 얼마나 앞서는지. */
+export interface Outlook {
+  atk: number;
+  dfn: number;
+  parts: Part[];
+  /** 지금 걸린 조합과, 하나만 더 맞추면 걸리는 조합. */
+  combos: ComboState;
+}
+
+/**
+ * 지금의 판세. patch를 주면 "이렇게 바꾸면"의 판세다(바꾸는 동안의 혼선은 넣지 않는다).
+ * 상대의 지시는 벤치가 읽어 낸 만큼만 넣는다. 아직 읽지 못한 변화는 숫자에 없다.
+ */
+export function outlook(g: Game, patch?: { dials?: Dials; style?: StyleId; shapeDef?: ShapeId | null; roles?: Record<number, RoleId> }): Outlook {
+  const m = g.match as MatchState;
+  const me = { ...m.me };
+  if (patch?.style) me.style = patch.style;
+  if (patch?.shapeDef !== undefined) {
+    if (patch.shapeDef === null || patch.shapeDef === me.shape) delete me.shapeDef;
+    else me.shapeDef = patch.shapeDef;
+  }
+  const seen: MatchState = { ...m, me, dials: patch?.dials ?? m.dials, roles: patch?.roles ?? m.roles, oppDials: m.oppSeen ?? NEUTRAL, confusion: 0 };
+  const minute = m.live ? m.live.tick / PER_MIN : m.seg * 15;
+  const r = ratingsNow(g, seen, minute);
+  const roles = roleList(g, seen, (m.oppAtt + m.oppDef) / 2).map((x) => x.role);
+  return { atk: r.att - r.oDef, dfn: r.def - r.oAtt, parts: tacticParts(g, seen), combos: comboState(seen.dials, roles) };
+}
+
 export interface Ratings {
   att: number;
   def: number;
@@ -121,25 +241,20 @@ export interface Ratings {
 export function ratingsNow(g: Game, m: MatchState, minute: number): Ratings {
   const base = baseSide(g, g.season.half);
   const familiar = m.me.style === g.season.style ? 1 : 0.5;
-  const edge = myMidEdge(g, m);
   const k = skill(g);
   let att = base.att + BASE[m.me.style].att * k * familiar + drilled(g) * familiar;
   let def = base.def + BASE[m.me.style].def * k * familiar + drilled(g) * familiar;
   let oAtt = m.oppAtt;
   let oDef = m.oppDef;
 
-  const mu = matchup(m.me.style, m.opp.style, edge);
-  const se = shapeEdge(m.me.shape, m.opp.shape, m.me.style, m.opp.style);
-  const de = dialEdge(m.dials, m.me.style, m.opp.style);
-  const level = (m.oppAtt + m.oppDef) / 2;
-  const re = roleEdge(
-    g.squad.filter((p) => m.roles[p.id] && m.roles[p.id] !== 'base')
-      .map((p) => ({ pos: p.pos, role: m.roles[p.id] as RoleId, scale: clamp(1 + (p.ovr + p.temp - level) / 20, 0.5, 1.5) })),
-    m.me.style, m.opp.style, m.dials,
-  );
-  att += mu.att + se.att + de.att + re.att + m.subAtt;
-  def += mu.def + se.def + de.def + re.def + m.subDef;
-  oAtt += re.oAtt;
+  for (const p of tacticParts(g, m)) {
+    att += p.att * TACTIC_GAIN;
+    def += p.def * TACTIC_GAIN;
+    oAtt += p.oAtt * TACTIC_GAIN;
+    oDef += p.oDef * TACTIC_GAIN;
+  }
+  att += m.subAtt;
+  def += m.subDef;
 
   // 체력: 지친 팀은 공수가 함께 무너진다. 수비 쪽이 더 크게 무너진다.
   att -= tired(m.me.stamina);
@@ -235,15 +350,77 @@ function playSegment(g: Game, m: MatchState): void {
   m.log.push(...moments);
 
   const hot = m.weather === 'heat' ? 1.3 : 1;
-  m.me.stamina = clamp(m.me.stamina - COST[m.me.style] * hot * tempoCost(m.dials) * (g.season.focus === 'fitness' ? 0.8 : 1), 0, 100);
-  m.opp.stamina = clamp(m.opp.stamina - COST[m.opp.style] * hot, 0, 100);
+  m.me.stamina = clamp(m.me.stamina - COST[m.me.style] * hot * myCost(m) * (g.season.focus === 'fitness' ? 0.8 : 1), 0, 100);
+  m.opp.stamina = clamp(m.opp.stamina - COST[m.opp.style] * hot * tempoCost(m.oppDials ?? NEUTRAL), 0, 100);
   m.seg++;
+}
+
+/** 우리 지시(와 개인 역할)에 드는 체력 배수. 공격과 수비 대형을 따로 쓰면 오가느라 조금 더 든다. */
+const myCost = (m: MatchState): number => tempoCost(m.dials) * (m.me.shapeDef && m.me.shapeDef !== m.me.shape ? 1.04 : 1);
+
+/** 상대의 달라진 지시를 벤치가 알아챘는지. 알아채면 바로 알리고, 못 알아채면 몇 분 뒤에야 읽힌다. */
+function oppNote(g: Game, m: MatchState, minute: number, text: string): void {
+  if (chance(g, readChance(g))) {
+    m.oppSeen = { ...(m.oppDials ?? NEUTRAL) };
+    delete m.oppNews;
+    say(m, minute, `상대 벤치가 움직였다: ${text}.`, 'plain');
+    if (m.live) call(m.live, `상대 벤치: ${text}`, 'plain');
+  } else {
+    m.oppNews = { at: minute + 6, text };
+    say(m, minute, '상대의 움직임이 달라졌다. 무엇을 바꿨는지는 아직 읽히지 않는다.', 'plain');
+    if (m.live) call(m.live, '상대의 움직임이 달라졌다. 벤치가 읽는 중이다', 'plain');
+  }
+}
+
+/** 읽는 중이던 상대의 변화가 드러날 때가 됐으면 알린다. */
+function oppReveal(m: MatchState, minute: number): void {
+  if (!m.oppNews || minute < m.oppNews.at) return;
+  m.oppSeen = { ...(m.oppDials ?? NEUTRAL) };
+  say(m, minute, `상대의 변화가 읽혔다: ${m.oppNews.text}.`, 'plain');
+  if (m.live) call(m.live, `읽혔다. 상대는 ${m.oppNews.text}`, 'plain');
+  delete m.oppNews;
+}
+
+/**
+ * 상대 감독이 우리 지시를 보고 팀 지시 하나를 고친다. 수준 높은 감독일수록 자주, 정확히 고친다.
+ * 지시 하나를 바꿨을 때 판세가 가장 좋아지는 것을 고르고, 나아지는 폭이 작으면 그대로 둔다.
+ */
+function oppThink(g: Game, m: MatchState, minute: number): void {
+  oppReveal(m, minute);
+  if ((m.oppMoves ?? 0) >= 6 || minute - (m.oppMoved ?? -99) < 8 || minute >= 88) return;
+  if (!chance(g, m.oppIq * 0.6)) return;
+  const cur = m.oppDials ?? NEUTRAL;
+  const lead = m.score[1] - m.score[0];
+  const [wa, wd] = lead < 0 ? [1.3, 0.8] : lead > 0 ? [0.8, 1.3] : [1, 1];
+  const value = (d: Dials): number => {
+    const r = ratingsNow(g, { ...m, oppDials: d }, minute);
+    return wa * (r.oAtt - r.def) - wd * (r.att - r.oDef);
+  };
+  const base = value(cur);
+  let best: Dials | null = null;
+  let top = base + 0.7;
+  const tryOne = (d: Dials): void => {
+    const v = value(d);
+    if (v > top) {
+      top = v;
+      best = d;
+    }
+  };
+  for (const x of DIALS) for (const lv of [-1, 0, 1] as const) if (cur[x.id] !== lv) tryOne({ ...cur, [x.id]: lv });
+  tryOne({ ...cur, overlap: !cur.overlap });
+  if (!best) return;
+  const text = dialChanges(cur, best).join(', ');
+  m.oppDials = best;
+  m.oppMoved = minute;
+  m.oppMoves = (m.oppMoves ?? 0) + 1;
+  oppNote(g, m, minute, text);
 }
 
 /** 상대 감독의 결정. 우리 전술에 밀리면 맞춤 전술로 바꾸고, 막판에는 점수에 따라 태세를 바꾼다. */
 function opponentMoves(g: Game, m: MatchState): void {
-  const minute = m.seg * 15;
+  const minute = m.live ? Math.round(m.live.tick / PER_MIN) : m.seg * 15;
   const lead = m.score[1] - m.score[0];
+  oppThink(g, m, minute);
   if (minute >= 75) {
     m.opp.push = lead < 0 && chance(g, 0.8) ? 1 : lead > 0 && chance(g, 0.7) ? -1 : 0;
     if (m.opp.push === 1) say(m, minute, '상대가 수비수를 빼고 공격수를 넣었다. 총공세다.', 'plain');
@@ -258,8 +435,11 @@ function opponentMoves(g: Game, m: MatchState): void {
   const next = lead > 0 && minute >= 60 && chance(g, 0.5) ? 'counter' : bestCounter(m.me.style, edge, lead < 0 ? ['park'] : []);
   if (next === m.opp.style) return;
   m.opp.style = next;
+  // 전술을 바꾸면 지시도 그 전술에 맞춰 새로 든다.
+  m.oppDials = presetDials(next, m.oppIq);
   if (minute >= 45 && chance(g, 0.4)) m.opp.shape = usualShape(next, int(g, 0, 5));
   m.read = chance(g, readChance(g));
+  if (m.read) m.oppSeen = { ...m.oppDials };
   say(m, minute, m.read ? ko`상대 벤치가 움직였다. ${STYLES[next].name}으로 바꿨다.` : '상대의 움직임이 달라졌다. 무엇을 바꿨는지는 아직 읽히지 않는다.', 'plain');
 }
 
@@ -279,11 +459,26 @@ export function beginMatch(g: Game, setup: MatchSetup): void {
     me: { style: g.season.style, shape: usualShape(g.season.style, 0), stamina: 100, push: 0, red: false },
     opp: { style, shape: surprise ? usualShape(style, int(g, 0, 5)) : setup.opp.shape, stamina: 100, push: 0, red: false },
     read: false, subs: 3, talk: 0, confusion: 0, subAtt: 0, subDef: 0, log: [], logStart: 0, pens: null, auto: false,
-    dials: { line: 0, width: 0, tempo: 0, overlap: false }, roles: {}, live: null,
+    dials: { ...NEUTRAL, ...g.plan?.dials }, oppDials: presetDials(style, iq), roles: {}, live: null,
   };
+  applyPlan(g, g.match);
   if (setup.intro) g.match.intro = setup.intro;
   g.phase = 'match';
   scene(g);
+}
+
+/**
+ * 평소 지시와 개인 역할(g.plan)을 경기에 들고 나간다. 경기 전 준비 화면에서 선발이나 지시를 바꿀 수 있으므로
+ * 킥오프 직전에 한 번 더 부른다. 역할은 지금 선발이 선 자리에 맞는 것만 가져간다.
+ */
+export function applyPlan(g: Game, m: MatchState): void {
+  m.dials = { ...NEUTRAL, ...g.plan?.dials };
+  m.roles = {};
+  for (const [i, p] of g.squad.entries()) {
+    const role = g.plan?.roles[p.id];
+    const slot = slotsFor(g, m.me.shape)[i];
+    if (role && role !== 'base' && slot && roleFits(slotSpot(slot), role)) m.roles[p.id] = role;
+  }
 }
 
 function scoreBlock(g: Game, m: MatchState): Block {
@@ -467,6 +662,7 @@ function teamTalk(g: Game, m: MatchState, id: string): void {
 function autoplay(g: Game, m: MatchState): void {
   m.auto = true;
   m.read = false;
+  applyPlan(g, m);
   while (m.seg < 6) {
     if (m.seg === 5) {
       const lead = m.score[0] - m.score[1];
@@ -497,10 +693,12 @@ export function actMatch(g: Game, id: string): boolean {
     case 'plan':
       m.me.style = id as StyleId;
       m.read = chance(g, readChance(g));
+      if (m.read) m.oppSeen = { ...(m.oppDials ?? NEUTRAL) };
       if (m.opp.style !== m.oppUsual && m.read) say(m, 0, ko`킥오프 직후 알아챘다. 상대가 평소와 달리 ${STYLES[m.opp.style].name}으로 나왔다. 우리를 분석하고 온 것이다.`, 'plain');
       m.step = 'mode';
       break;
     case 'mode':
+      if (id === 'live' || id === 'text') applyPlan(g, m);
       if (id === 'live') {
         startLive(g, m);
         m.step = 'live';
@@ -592,7 +790,6 @@ export function actMatch(g: Game, id: string): boolean {
 // ---------- 실시간 경기 ----------
 // 선수들의 움직임과 판정은 live.ts가, 전력 계산과 감독의 지시와 기록은 여기서 맡는다.
 
-const NEUTRAL: Dials = { line: 0, width: 0, tempo: 0, overlap: false };
 
 const LIVE_GOAL: Record<LiveHow, ((name: string) => string)[]> = {
   pass: [(n) => ko`패스 연결 끝에 수비가 벌어졌다. ${n}이 침착하게 마무리했다.`, (n) => ko`수비 사이로 들어온 패스를 ${n}이 낮게 깔아 찼다.`],
@@ -651,6 +848,29 @@ function startLive(g: Game, m: MatchState): void {
   });
   m.live = createLive(mine, theirs, [m.me.shape, m.opp.shape], customSlots(g));
   callYouth(g, m.live);
+  dropRoles(m, m.live);
+  if (m.read) m.oppSeen = { ...(m.oppDials ?? NEUTRAL) };
+}
+
+/** 경기장의 우리 선수가 지금 서 있는 세부 자리(LB, CDM 같은). */
+export function actingSpot(m: MatchState, L: LiveState, lp: LivePlayer): Spot {
+  return slotSpot(slotsOf(L, 0, m.me.shape)[lp.slot] as Slot);
+}
+
+/** 자리가 바뀌어 더는 맞지 않는 역할과, 경기장을 떠난 선수의 역할을 지운다. */
+function dropRoles(m: MatchState, L: LiveState): void {
+  const spots = new Map(L.teams[0].players.filter((p) => !p.off && p.pid !== undefined).map((p) => [p.pid as number, actingSpot(m, L, p)]));
+  for (const key of Object.keys(m.roles)) {
+    const spot = spots.get(Number(key));
+    if (!spot || !roleFits(spot, m.roles[Number(key)] as RoleId)) delete m.roles[Number(key)];
+  }
+}
+
+/** 선수가 선 줄이 바뀌었으면 그 줄에서의 OVR로 다시 잰다(자기 포지션 밖이면 깎인다). */
+function retune(g: Game, L: LiveState, lp: LivePlayer, from: Pos, to: Pos): void {
+  if (from === to) return;
+  const p = roster(g, L).find((x) => x.id === lp.pid);
+  if (p) lp.ovr = effOvr(p, to);
 }
 
 /** 교체로 들어갈 후보. 경기장에 없는 같은 포지션 후보 중 가장 좋은 선수, 없으면 2군 선수. */
@@ -775,7 +995,7 @@ function narrate(L: LiveState, events: LiveEvent[]): void {
     else if (e.kind === 'steal') call(L, ko`${who(L, e.team, e.by)}이 높은 곳에서 공을 빼앗았다`, e.team === 0 ? 'good' : 'plain');
     else if (e.kind === 'corner' && !shotCorner) call(L, e.team === 0 ? '우리 코너킥' : '상대 코너킥', 'plain');
     else if (e.kind === 'red') call(L, ko`레드카드! ${who(L, e.team, e.by)} 퇴장`, e.team === 0 ? 'bad' : 'good');
-    else if (e.kind === 'half') call(L, '전반 종료', 'plain');
+    else if (e.kind === 'half') call(L, '전반 종료. 후반은 진영을 바꿔 시작한다', 'plain');
     else if (e.kind === 'full') call(L, '경기 종료', 'plain');
   }
 }
@@ -792,13 +1012,13 @@ function liveEnv(g: Game, m: MatchState, L: LiveState): LiveEnv {
   const theirs = m.venue === 'home' ? 1.15 : m.venue === 'away' ? 1.5 : 1.3;
   const roles: Record<number, RoleId> = {};
   L.teams[0].players.forEach((p, i) => {
-    const role = p.key >= 0 ? m.roles[p.key] : undefined;
+    const role = p.pid !== undefined && !p.off ? m.roles[p.pid] : undefined;
     if (role && role !== 'base') roles[i] = role;
   });
   return {
     sides: [
-      { style: m.me.style, shape: m.me.shape, push: m.me.push, red: m.me.red, tired: m.me.stamina < 45, dials: m.dials, roles, edge: r.att - r.oDef, venue: mine / 1.3 },
-      { style: m.opp.style, shape: m.opp.shape, push: m.opp.push, red: m.opp.red, tired: m.opp.stamina < 45, dials: NEUTRAL, roles: {}, edge: r.oAtt - r.def, venue: theirs / 1.3 },
+      { style: m.me.style, shape: m.me.shape, ...(m.me.shapeDef ? { shapeDef: m.me.shapeDef } : {}), push: m.me.push, red: m.me.red, tired: m.me.stamina < 45, dials: m.dials, roles, edge: r.att - r.oDef, venue: mine / 1.3 },
+      { style: m.opp.style, shape: m.opp.shape, push: m.opp.push, red: m.opp.red, tired: m.opp.stamina < 45, dials: m.oppDials ?? NEUTRAL, roles: {}, edge: r.oAtt - r.def, venue: theirs / 1.3 },
     ],
   };
 }
@@ -808,6 +1028,8 @@ function benchMoves(g: Game, m: MatchState, L: LiveState): void {
   const shape = m.opp.shape;
   opponentMoves(g, m);
   m.read = m.read || chance(g, readChance(g));
+  // 상대 전술이 읽혔으면 그 지시도 함께 읽힌다(따로 읽는 중인 변화가 없을 때).
+  if (m.read && !m.oppNews) m.oppSeen = { ...(m.oppDials ?? NEUTRAL) };
   if (m.opp.shape !== shape) reshape(L.teams[1], m.opp.shape);
 }
 
@@ -824,8 +1046,8 @@ export function liveTick(g: Game): void {
   const minute = Math.min(90, Math.ceil(L.tick / PER_MIN));
   const hot = m.weather === 'heat' ? 1.3 : 1;
   const perTick = 1 / (15 * PER_MIN);
-  m.me.stamina = clamp(m.me.stamina - COST[m.me.style] * perTick * hot * tempoCost(m.dials) * (g.season.focus === 'fitness' ? 0.8 : 1), 0, 100);
-  m.opp.stamina = clamp(m.opp.stamina - COST[m.opp.style] * perTick * hot, 0, 100);
+  m.me.stamina = clamp(m.me.stamina - COST[m.me.style] * perTick * hot * myCost(m) * (g.season.focus === 'fitness' ? 0.8 : 1), 0, 100);
+  m.opp.stamina = clamp(m.opp.stamina - COST[m.opp.style] * perTick * hot * tempoCost(m.oppDials ?? NEUTRAL), 0, 100);
   if (!L.over) m.seg = Math.min(5, Math.floor(L.tick / (15 * PER_MIN)));
 
   for (const e of events) {
@@ -852,8 +1074,16 @@ export function liveTick(g: Game): void {
       scene(g);
     }
   }
-  // 상대 감독은 30분, 60분, 75분에 판단한다. 하프타임의 판단은 위에서 했다.
-  if (!L.over && (L.tick === 30 * PER_MIN || L.tick === 60 * PER_MIN || L.tick === 75 * PER_MIN)) benchMoves(g, m, L);
+  if (L.over) return;
+  // 킥오프 5분이면 상대가 어떻게 나왔는지 벤치가 읽어 낸다.
+  if (L.tick === 5 * PER_MIN && !m.oppSeen) {
+    m.oppSeen = { ...(m.oppDials ?? NEUTRAL) };
+    const list = dialChanges(NEUTRAL, m.oppSeen);
+    if (list.length) call(L, `상대 운영이 읽혔다: ${list.join(', ')}`, 'plain');
+  }
+  // 상대 감독은 30분, 60분, 75분에 크게 판단한다(하프타임의 판단은 위에서 했다). 그 사이에도 5분마다 우리 지시를 보고 지시를 고친다.
+  if (L.tick === 30 * PER_MIN || L.tick === 60 * PER_MIN || L.tick === 75 * PER_MIN) benchMoves(g, m, L);
+  else if (L.tick >= 10 * PER_MIN && L.tick % (5 * PER_MIN) === 0 && L.tick !== HALF) oppThink(g, m, Math.round(L.tick / PER_MIN));
 }
 
 /**
@@ -864,7 +1094,36 @@ export function liveCommand(g: Game, cmd: string): void {
   const m = g.match;
   const L = m?.live;
   if (!m || !L || m.step !== 'live') return;
-  const [verb, a = '', b = ''] = cmd.split(':');
+  const before = { dials: m.dials, style: m.me.style, shape: m.me.shape, shapeDef: m.me.shapeDef, push: m.me.push, roles: JSON.stringify(m.roles), subs: m.subs, custom: L.custom };
+  runCommand(g, m, L, cmd);
+  // 무엇을 바꿨는지 적어 둔다. 바꾼 뒤의 경기가 어떻게 달라졌는지 견줄 수 있게.
+  const what: string[] = [];
+  if (m.me.style !== before.style) what.push(STYLES[m.me.style].name);
+  if (m.me.shape !== before.shape) what.push(SHAPES[m.me.shape].name);
+  if (m.me.shapeDef !== before.shapeDef) what.push(m.me.shapeDef ? `수비 대형 ${SHAPES[m.me.shapeDef].name}` : '수비 대형 같게');
+  what.push(...dialChanges(before.dials, m.dials));
+  if (m.me.push !== before.push) what.push(m.me.push === 1 ? '총공세' : m.me.push === -1 ? '잠그기' : '평소 태세');
+  if (JSON.stringify(m.roles) !== before.roles) what.push('역할 변경');
+  if (m.subs < before.subs && m.me.shape === before.shape) what.push('교체');
+  if (L.custom !== before.custom && what.length === 0) what.push('자리 조정');
+  if (what.length) mark(L, m, what.join(', '));
+}
+
+/** 지시를 바꾼 순간을 적는다. 같은 때 잇달아 바꾼 것은 한 줄로 묶고, 최근 넷만 남긴다. */
+function mark(L: LiveState, m: MatchState, text: string): void {
+  const marks = (L.marks ??= []);
+  const last = marks[marks.length - 1];
+  if (last && L.tick - last.tick < 2 * PER_MIN) {
+    if (!last.text.split(', ').includes(text)) last.text = [...last.text.split(', '), ...text.split(', ')].slice(-4).join(', ');
+    return;
+  }
+  const [a, b] = L.teams;
+  marks.push({ tick: L.tick, text, shots: [a.shots, b.shots], xg: [a.xg, b.xg], poss: [a.possession, b.possession], score: [m.score[0], m.score[1]] });
+  if (marks.length > 4) marks.shift();
+}
+
+function runCommand(g: Game, m: MatchState, L: LiveState, cmd: string): void {
+  const [verb, a = '', b = '', c = ''] = cmd.split(':');
   const minute = Math.min(90, Math.ceil(L.tick / PER_MIN));
   // 지시를 바꾸면 선수들이 익히는 동안 잠깐 흐트러진다.
   const confuse = (minutes: number): void => {
@@ -891,29 +1150,110 @@ export function liveCommand(g: Game, cmd: string): void {
     case 'shape':
       if (!SHAPE_IDS.includes(a as ShapeId) || a === m.me.shape || m.subs < 1) return;
       m.me.shape = a as ShapeId;
+      if (m.me.shapeDef === m.me.shape) delete m.me.shapeDef;
       m.subs--;
       reshape(L.teams[0], m.me.shape, slotsOf(L, 0, m.me.shape));
+      dropRoles(m, L);
       confuse(8);
       say(m, minute, ko`교체 카드를 써서 대형을 ${SHAPES[m.me.shape].name}으로 바꿨다.`, 'plain');
       return;
     case 'line':
     case 'width':
     case 'tempo':
-      if (m.dials[verb] === level) return;
+    case 'press':
+    case 'pass':
+    case 'flank':
+    case 'final':
+    case 'lose':
+    case 'win':
+    case 'block':
+      if ((a !== '-1' && a !== '0' && a !== '1') || m.dials[verb] === level) return;
       m.dials = { ...m.dials, [verb]: level };
       confuse(4);
       return;
+    case 'dials': {
+      // dials:preset — 지금 전술에 어울리는 지시를 코치가 한 번에 잡아 준다. dials:reset — 모두 보통으로.
+      const next = a === 'preset' ? presetDials(m.me.style, 1) : a === 'reset' ? { ...NEUTRAL } : null;
+      if (!next || dialChanges(m.dials, next).length === 0) return;
+      m.dials = next;
+      confuse(6);
+      return;
+    }
+    case 'shapedef': {
+      // 공이 없을 때 서는 대형. 교체 카드는 들지 않지만, 공격 대형과 다르면 오가는 부담이 생긴다.
+      const next = a === 'same' || a === m.me.shape ? undefined : SHAPE_IDS.includes(a as ShapeId) ? (a as ShapeId) : null;
+      if (next === null || next === m.me.shapeDef) return;
+      if (next) m.me.shapeDef = next;
+      else delete m.me.shapeDef;
+      confuse(6);
+      say(m, minute, next ? ko`공이 없을 때는 ${SHAPES[next].name}으로 서게 했다.` : '공이 없을 때도 같은 대형으로 서게 했다.', 'plain');
+      return;
+    }
     case 'overlap':
-      if (m.dials.overlap === (a === '1')) return;
+      if ((a !== '0' && a !== '1') || m.dials.overlap === (a === '1')) return;
       m.dials = { ...m.dials, overlap: a === '1' };
       confuse(4);
       return;
     case 'role': {
-      const p = g.squad.find((x) => x.id === Number(a));
-      if (!p || !ROLES[p.pos].some((r) => r.id === b) || (m.roles[p.id] ?? 'base') === b) return;
-      if (b === 'base') delete m.roles[p.id];
-      else m.roles[p.id] = b as RoleId;
+      // 역할은 선수가 지금 선 자리에 따라 정해진다. 교체로 들어온 선수에게도 줄 수 있다.
+      const id = Number(a);
+      const lp = L.teams[0].players.find((x) => x.pid === id && !x.off);
+      if (!lp || !roleFits(actingSpot(m, L, lp), b) || (m.roles[id] ?? 'base') === b) return;
+      if (b === 'base') delete m.roles[id];
+      else m.roles[id] = b;
       confuse(3);
+      return;
+    }
+    case 'move': {
+      // 선수 한 명의 자리를 옮긴다. 조금 옮기는 것은 바로 먹히고, 크게 옮기거나 줄이 바뀌면 잠깐 흐트러진다.
+      const shape = m.me.shape;
+      if (a === 'reset') {
+        if (!L.custom?.[shape]) return;
+        const before = slotsOf(L, 0, shape);
+        const base = customSlots(g)?.[shape];
+        // 경기 전에 손본 자리 그대로면 되돌릴 것이 없다.
+        if (base && JSON.stringify(base) === JSON.stringify(before)) return;
+        const custom = { ...L.custom };
+        if (base) custom[shape] = base;
+        else delete custom[shape];
+        L.custom = custom;
+        const now = slotsOf(L, 0, shape);
+        for (const lp of L.teams[0].players) retune(g, L, lp, (before[lp.slot] as Slot).line, (now[lp.slot] as Slot).line);
+        dropRoles(m, L);
+        confuse(2);
+        return;
+      }
+      const lp = L.teams[0].players[Number(a)];
+      const u = Number(b);
+      const v = Number(c);
+      if (!lp || lp.off || a === '' || b === '' || c === '' || !Number.isFinite(u) || !Number.isFinite(v)) return;
+      const slots = [...slotsOf(L, 0, shape)];
+      const base = slots[lp.slot] as Slot;
+      if (base.line === 'GK') return;
+      const next = movedSlot(base, u, v, false);
+      const dist = Math.hypot(next.u - base.u, next.v - base.v);
+      if (dist < 0.5) return;
+      slots[lp.slot] = next;
+      L.custom = { ...L.custom, [shape]: slots };
+      retune(g, L, lp, base.line, next.line);
+      dropRoles(m, L);
+      if (dist >= 10 || next.line !== base.line) confuse(2);
+      return;
+    }
+    case 'trade': {
+      // 경기장의 두 선수가 자리를 맞바꾼다.
+      const x = L.teams[0].players[Number(a)];
+      const y = L.teams[0].players[Number(b)];
+      const slots = slotsOf(L, 0, m.me.shape);
+      if (!x || !y || x === y || x.off || y.off || a === '' || b === '') return;
+      const sx = slots[x.slot] as Slot;
+      const sy = slots[y.slot] as Slot;
+      if (sx.line === 'GK' || sy.line === 'GK') return;
+      [x.slot, y.slot] = [y.slot, x.slot];
+      retune(g, L, x, sx.line, sy.line);
+      retune(g, L, y, sy.line, sx.line);
+      dropRoles(m, L);
+      confuse(2);
       return;
     }
     case 'push':
@@ -925,15 +1265,24 @@ export function liveCommand(g: Game, cmd: string): void {
       const lp = L.teams[0].players[i];
       const r = benchPlayers(g, L).find((p) => p.id === Number(b));
       if (!lp || lp.off || !r || m.subs < 1) return;
+      // swap:자리:후보:대형 — 교체하면서 대형도 함께 바꾼다. 카드는 한 장만 든다.
+      const shape = SHAPE_IDS.includes(c as ShapeId) && c !== m.me.shape ? (c as ShapeId) : null;
+      if (shape) {
+        m.me.shape = shape;
+        if (m.me.shapeDef === shape) delete m.me.shapeDef;
+        reshape(L.teams[0], shape, slotsOf(L, 0, shape));
+        confuse(8);
+      }
       const line = (slotsOf(L, 0, m.me.shape)[lp.slot] as { line: Pos }).line;
       const fresh = clamp((100 - m.me.stamina) / 30, 0.25, 1) * (minute >= 70 ? 0.7 : 1);
       const diff = effOvr(r, line) - lp.ovr;
       m.subs--;
       const out = swapIn(L, i, r, line);
+      dropRoles(m, L);
       m.me.stamina = clamp(m.me.stamina + 11 * fresh, 0, 100);
       m.subAtt += diff * 0.12 * (line === 'FW' ? 1 : line === 'MF' ? 0.5 : 0) + (line === 'FW' ? 0.5 * fresh : 0);
       m.subDef += diff * 0.12 * (line === 'DF' || line === 'GK' ? 1 : line === 'MF' ? 0.5 : 0) + (line === 'DF' ? 0.5 * fresh : 0);
-      say(m, minute, ko`${out.n}번 ${out.name}을 빼고 ${r.no}번 ${r.name}을 넣었다.`, 'plain');
+      say(m, minute, shape ? ko`${out.n}번 ${out.name}을 빼고 ${r.no}번 ${r.name}을 넣으면서 대형을 ${SHAPES[shape].name}으로 바꿨다.` : ko`${out.n}번 ${out.name}을 빼고 ${r.no}번 ${r.name}을 넣었다.`, 'plain');
       return;
     }
     case 'sub': {

@@ -56,11 +56,29 @@ export const SLOTS: Record<ShapeId, Slot[]> = {
     at('MF', 39, 27), at('MF', 39, 41), at('MF', 60, 10, 'w'), at('MF', 60, 58, 'w'), at('MF', 60, 34),
     at('FW', 74, 34),
   ],
+  '4141': [
+    at('GK', 5, 34),
+    at('DF', 22, 27), at('DF', 22, 41), at('DF', 26, 9, 'fb'), at('DF', 26, 59, 'fb'),
+    at('MF', 37, 34), at('MF', 54, 25), at('MF', 54, 43), at('MF', 58, 9, 'w'), at('MF', 58, 59, 'w'),
+    at('FW', 73, 34),
+  ],
+  '4312': [
+    at('GK', 5, 34),
+    at('DF', 22, 27), at('DF', 22, 41), at('DF', 26, 9, 'fb'), at('DF', 26, 59, 'fb'),
+    at('MF', 37, 34), at('MF', 47, 22), at('MF', 47, 46), at('MF', 59, 34),
+    at('FW', 70, 27), at('FW', 70, 41),
+  ],
   '352': [
     at('GK', 5, 34),
     at('DF', 20, 34), at('DF', 22, 21), at('DF', 22, 47),
     at('MF', 40, 34), at('MF', 46, 24), at('MF', 46, 44), at('MF', 42, 6, 'wb'), at('MF', 42, 62, 'wb'),
     at('FW', 68, 28), at('FW', 68, 40),
+  ],
+  '343': [
+    at('GK', 5, 34),
+    at('DF', 20, 34), at('DF', 22, 21), at('DF', 22, 47),
+    at('MF', 44, 27), at('MF', 44, 41), at('MF', 43, 6, 'wb'), at('MF', 43, 62, 'wb'),
+    at('FW', 68, 15, 'w'), at('FW', 68, 53, 'w'), at('FW', 72, 34),
   ],
   '541': [
     at('GK', 5, 34),
@@ -222,6 +240,8 @@ export interface LiveSide {
   /** 체력이 바닥나 발이 느려졌는지. */
   tired: boolean;
   dials: Dials;
+  /** 공이 없을 때 서는 대형. 없으면 공격 대형 그대로 선다. */
+  shapeDef?: ShapeId;
   /** 선수 번호(배열 위치)별 개인 역할. 없으면 기본 역할이다. */
   roles: Record<number, RoleId>;
   /** 공격 우위: 이 팀의 공격력에서 상대 수비력을 뺀 값. */
@@ -255,7 +275,8 @@ const SCALE = 1;
 // 전술의 강약은 ratingsNow의 상성표가 정하므로, 움직임에서 나오는 차이는 여기서 0으로 되돌린다.
 // 행은 우리 전술(대형), 열은 상대 전술(대형). scripts/calibrate-live.ts가 계산해 live-tuning.ts에 적는다.
 const STYLE_ORDER: StyleId[] = ['press', 'possess', 'counter', 'direct', 'wide', 'park'];
-const SHAPE_ORDER: ShapeId[] = ['442', '433', '4231', '352', '541'];
+/** 보정표의 대형 순서. 새 대형은 뒤에 붙인다(앞의 다섯은 처음 맞춘 값을 그대로 쓴다). */
+export const SHAPE_ORDER: ShapeId[] = ['442', '433', '4231', '352', '541', '4141', '4312', '343'];
 /** 한 팀에 걸려 있는 지시들의 이름. 보정표(tuning.extra)의 열쇠다. */
 export function settings(side: LiveSide): string[] {
   const d = side.dials;
@@ -264,6 +285,13 @@ export function settings(side: LiveSide): string[] {
   if (d.width) keys.push(`width${d.width}`);
   if (d.tempo) keys.push(`tempo${d.tempo}`);
   if (d.overlap) keys.push('overlap');
+  if (d.press) keys.push(`press${d.press}`);
+  if (d.pass) keys.push(`pass${d.pass}`);
+  if (d.flank) keys.push('flank');
+  if (d.final) keys.push(`final${d.final}`);
+  if (d.lose) keys.push(`lose${d.lose}`);
+  if (d.win) keys.push(`win${d.win}`);
+  if (d.block) keys.push(`block${d.block}`);
   if (side.push) keys.push(`push${side.push}`);
   for (const i in side.roles) if (side.roles[i] !== 'base') keys.push(side.roles[i] as string);
   return keys;
@@ -277,7 +305,8 @@ function compensation(env: LiveEnv, t: 0 | 1): number {
   const a = env.sides[t];
   const b = env.sides[1 - t] as LiveSide;
   const style = (tuning.style[STYLE_ORDER.indexOf(a.style)] as number[])[STYLE_ORDER.indexOf(b.style)] as number;
-  const shape = (tuning.shape[SHAPE_ORDER.indexOf(a.shape)] as number[])[SHAPE_ORDER.indexOf(b.shape)] as number;
+  // 상대가 공 없을 때 다른 대형으로 서면, 우리 공격은 그 수비 대형을 상대하는 것으로 본다.
+  const shape = tuning.shape[SHAPE_ORDER.indexOf(a.shape)]?.[SHAPE_ORDER.indexOf(b.shapeDef ?? b.shape)] ?? 1;
   let extra = 1;
   for (const key of settings(a)) extra *= tuning.extra[key]?.[0] ?? 1;
   for (const key of settings(b)) extra *= tuning.extra[key]?.[1] ?? 1;
@@ -299,6 +328,39 @@ const ux = (t: number, u: number): number => (t === 0 ? u : W - u);
 const vy = (t: number, v: number): number => (t === 0 ? v : H - v);
 
 const slotOf = (L: LiveState, env: LiveEnv, t: number, p: LivePlayer): Slot => slotsOf(L, t, (env.sides[t] as LiveSide).shape)[p.slot] as Slot;
+
+const pairCache = new WeakMap<Slot[], WeakMap<Slot[], number[]>>();
+/**
+ * 공격 대형의 자리마다, 수비 대형으로 바꿔 설 때 맡는 자리. 골키퍼는 골키퍼로, 나머지는 가까운 자리끼리 짝짓는다
+ * (좌우가 뒤바뀌지 않게 좌우 거리를 더 크게 본다). 자리 배열이 같으면 계산해 둔 것을 쓴다.
+ */
+export function pairSlots(from: Slot[], to: Slot[]): number[] {
+  let inner = pairCache.get(from);
+  if (!inner) pairCache.set(from, (inner = new WeakMap()));
+  const known = inner.get(to);
+  if (known) return known;
+  const out = from.map(() => -1);
+  const used = new Set<number>();
+  const gf = Math.max(0, from.findIndex((x) => x.line === 'GK'));
+  const gt = Math.max(0, to.findIndex((x) => x.line === 'GK'));
+  out[gf] = gt;
+  used.add(gt);
+  const pairs: { i: number; j: number; d: number }[] = [];
+  from.forEach((a, i) => {
+    if (i === gf) return;
+    to.forEach((b, j) => {
+      if (j !== gt) pairs.push({ i, j, d: Math.hypot((a.u - b.u) * 0.6, a.v - b.v) });
+    });
+  });
+  pairs.sort((x, y) => x.d - y.d || x.i - y.i || x.j - y.j);
+  for (const { i, j } of pairs) {
+    if ((out[i] as number) >= 0 || used.has(j)) continue;
+    out[i] = j;
+    used.add(j);
+  }
+  inner.set(to, out);
+  return out;
+}
 const keeper = (team: LiveTeam): number => Math.max(0, team.players.findIndex((p) => p.line === 'GK' && !p.off));
 
 function holder(L: LiveState): 0 | 1 {
@@ -385,18 +447,31 @@ function desire(L: LiveState, env: LiveEnv, t: 0 | 1): (Aim | null)[] {
   const offU = offsideLine(L, t);
   const dead = L.wait > 0;
   const shot = L.flight?.kind === 'shot';
+  // 전환의 순간: 공을 막 잃었는지, 막 따냈는지.
+  const lost = !has && L.sinceWin < 8;
+  const won = has && L.sinceWin < 12;
+  // 공이 없을 때 서는 대형이 따로 있으면 그 자리로 선다.
+  const defSlots = !has && side.shapeDef && side.shapeDef !== side.shape ? slotsOf(L, t, side.shapeDef) : null;
+  const pair = defSlots ? pairSlots(slotsOf(L, t, side.shape), defSlots) : null;
 
   // 공 쪽으로 달려드는 선수들. 전방 압박은 셋, 밀집 수비는 하나다.
   const chase = new Map<number, number>();
   if (!has && !dead && !shot) {
     const fx = L.flight ? L.flight.toX : L.ball.x;
     const fy = L.flight ? L.flight.toY : L.ball.y;
-    const count = Math.max(st === 'press' ? 3 : st === 'park' ? 1 : 2, ux(t, fx) < 35 ? 2 : 0);
-    team.players
+    // 잃은 직후: 즉시 압박이면 둘이 더 달려들고, 물러서면 하나만 남는다.
+    const swarm = lost ? (d.lose === 1 ? 2 : d.lose === -1 ? -1 : 0) : 0;
+    const count = Math.max((st === 'press' ? 3 : st === 'park' ? 1 : 2) + d.press + swarm, 1, ux(t, fx) < 35 ? 2 : 0);
+    const near = team.players
       .map((p, i) => ({ i, dist: p.off || p.line === 'GK' ? 1e9 : Math.hypot(p.x - fx, p.y - fy) }))
-      .sort((a, b) => a.dist - b.dist)
-      .slice(0, count)
-      .forEach((e, order) => chase.set(e.i, order));
+      .sort((a, b) => a.dist - b.dist);
+    near.slice(0, count).forEach((e, order) => chase.set(e.i, order));
+    // 볼 위너는 가까이 온 공을, 압박 공격수는 상대 진영의 공을 지시 없이도 쫓는다.
+    for (const e of near) {
+      const role = side.roles[e.i];
+      if (chase.has(e.i) || e.dist > 1e8) continue;
+      if ((role === 'hunter' && e.dist < 22) || (role === 'harry' && ux(t, fx) > 48 && e.dist < 30)) chase.set(e.i, 2);
+    }
   }
   // 대인 마크가 따라다닐 상대 에이스.
   let ace: LivePlayer | null = null;
@@ -404,7 +479,7 @@ function desire(L: LiveState, env: LiveEnv, t: 0 | 1): (Aim | null)[] {
 
   return team.players.map((p, i): Aim | null => {
     if (p.off) return null;
-    const s = slotOf(L, env, t, p);
+    const s = (defSlots && pair ? defSlots[pair[p.slot] as number] : undefined) ?? slotOf(L, env, t, p);
     const role = side.roles[i] ?? 'base';
     const pace = side.tired ? 0.88 : 1;
     let u: number;
@@ -438,23 +513,51 @@ function desire(L: LiveState, env: LiveEnv, t: 0 | 1): (Aim | null)[] {
 
     const k = RANK[s.line] - 1;
     if (has) {
+      const sgn = s.v < CY ? -1 : 1;
       u = s.u + (bu - 50) * ([0.62, 0.6, 0.5][k] as number) + ([4, 7, 8][k] as number);
       if (st === 'possess' || st === 'press') u += 2;
       else if (st === 'park') u -= k === 2 ? 2 : 6;
       else if (st === 'counter') u += k === 2 ? 4 : -3;
       else if (st === 'direct') u += k === 2 ? 3 : 0;
       u += side.push * 5 + (k < 2 ? d.line * 3 : 0);
+      // 따낸 직후: 바로 역습이면 앞선이 먼저 뛰고, 지키면 모두 한 박자 늦춘다.
+      if (won && d.win === 1) u += k === 2 ? 7 : s.wide && !s.fb ? 4 : 0;
+      else if (won && d.win === -1) u -= k === 2 ? 4 : 2;
+      // 보이면 쏘는 팀은 중원이 박스 앞까지 따라 올라간다.
+      if (d.final === 1 && k === 1 && bu > 60) u += 3;
       const w = 1.08 + (st === 'wide' ? 0.12 : st === 'park' ? -0.1 : 0) + d.width * 0.14;
       v = CY + (s.v - CY) * w;
+      // 한쪽으로 몰면 가운데 선수들이 그쪽으로 기운다.
+      if (d.flank && !s.wide) v += d.flank * 4;
       if (s.wide && !s.fb) {
         // 측면 선수는 공격에 가담하고, 공이 문전에 가까워지면 반대편 선수가 안으로 좁혀 들어온다.
         if (k === 1) u += 6;
-        if (bu > 62) v = CY + (v - CY) * ((v < CY) === (bv < CY) ? 0.9 : 0.55);
+        if (bu > 62 && role !== 'hug') v = CY + (v - CY) * ((v < CY) === (bv < CY) ? 0.9 : 0.55);
       }
       // 풀백이 올라간다. 측면 공격은 지시가 없어도 조금 올라간다.
       if (s.wb) u += 8;
-      if (s.fb && bu > 40 && (d.overlap || st === 'wide')) u += d.overlap ? (s.wb ? 9 : 15) : 7;
+      if (s.fb && bu > 40 && (d.overlap || st === 'wide') && role !== 'stay') u += d.overlap ? (s.wb ? 9 : 15) : 7;
       if (role === 'link') u -= 10;
+      else if (role === 'libero') u += bu > 30 ? 11 : 0;
+      else if (role === 'wing') u += bu > 35 ? 11 : 3;
+      else if (role === 'invert') {
+        u += 6;
+        v = CY + sgn * 9;
+      } else if (role === 'stay') u = Math.min(u - 5, 46);
+      else if (role === 'shadow') {
+        if (bu > 42) u = Math.max(u, offU - 5);
+        v = CY + (v - CY) * 0.6;
+      } else if (role === 'inside') {
+        if (bu > 45) {
+          v = CY + sgn * 11;
+          u += 4;
+        }
+      } else if (role === 'hug') v = CY + sgn * 30;
+      else if (role === 'track') u -= 4;
+      else if (role === 'poach') {
+        if (bu > 34) u = Math.max(u, offU - 1);
+        v = CY + (v - CY) * 0.5;
+      }
       else if (role === 'drift') v += v < CY || (v === CY && bv < CY) ? -14 : 14;
       else if (role === 'target') u = Math.max(u, offU - 4);
       else if (role === 'hold') u = Math.min(u - 7, bu - 6);
@@ -471,12 +574,20 @@ function desire(L: LiveState, env: LiveEnv, t: 0 | 1): (Aim | null)[] {
       u = s.u + (bu - 50) * ([0.7, 0.66, 0.5][k] as number) - ([3, 4, 3][k] as number);
       const block = st === 'press' ? 7 : st === 'possess' ? 3 : st === 'counter' ? -7 : st === 'park' ? -13 : 0;
       u += k === 2 && block < 0 ? block * 0.4 : block;
-      u += d.line * ([7, 4, 1][k] as number) + side.push * 6;
-      const w = 0.8 + (st === 'park' ? -0.1 : st === 'press' ? 0.05 : 0) + d.width * 0.08;
+      u += d.line * ([7, 4, 1][k] as number) + side.push * 6 + d.press * ([1, 3, 4][k] as number);
+      // 잃은 직후: 즉시 압박이면 대형째 밀고 올라가고, 물러서면 먼저 자리부터 잡는다.
+      if (lost && d.lose === 1) u += [2, 4, 4][k] as number;
+      else if (lost && d.lose === -1) u -= [4, 6, 6][k] as number;
+      const w = 0.8 + (st === 'park' ? -0.1 : st === 'press' ? 0.05 : 0) + d.block * 0.11;
       v = CY + (s.v - CY) * w + (bv - CY) * 0.3;
       if (role === 'stopper' && Math.hypot(p.x - L.ball.x, p.y - L.ball.y) < 24) u += 5;
       else if (role === 'hold') u -= 5;
       else if (role === 'link') u -= 6;
+      else if (role === 'track') u -= 9;
+      else if (role === 'stay') u -= 3;
+      else if (role === 'wing') u += 3;
+      else if (role === 'poach') u += 9;
+      else if (role === 'shadow') u += 4;
       u = clamp(u, [8, 13, 22][k] as number, [62, 80, 95][k] as number);
       v = clamp(v, 3, 65);
       if (role === 'mark' && ace) {
@@ -491,7 +602,7 @@ function desire(L: LiveState, env: LiveEnv, t: 0 | 1): (Aim | null)[] {
         // 첫째는 공으로, 둘째는 골문 쪽을 막고, 셋째는 안쪽 패스 길을 막는다.
         const cu = ux(t, fx) - (order === 1 ? 3 : 0);
         const cv = vy(t, fy) + (order === 2 ? Math.sign(CY - vy(t, fy)) * 3 : 0);
-        return { x: ux(t, cu), y: vy(t, cv), speed: 3.3 * pace };
+        return { x: ux(t, cu), y: vy(t, cv), speed: (lost && d.lose === 1 ? 3.8 : 3.3) * pace };
       }
     }
     return { x: ux(t, u), y: vy(t, v), speed: (dead ? 3.6 : speed) * pace };
@@ -647,11 +758,16 @@ function pass(L: LiveState, env: LiveEnv, r: Rng, t: 0 | 1, i: number, pressed: 
   const u = ux(t, p.x);
   const offU = offsideLine(L, t);
   const st = side.style;
-  const fast = st === 'counter' && L.sinceWin < 12;
+  // 공을 따낸 직후. 역습 전술이거나 "바로 역습" 지시면 곧장 앞을 보고, "지킨다" 지시면 돌리고 본다.
+  const won = L.sinceWin < 12;
+  const fast = won && side.dials.win !== -1 && (st === 'counter' || side.dials.win === 1);
   // 앞으로 보내려는 마음의 크기. 점유는 옆으로 돌리고, 롱볼과 역습은 앞을 본다.
   let forward = st === 'possess' ? 0.25 : st === 'direct' ? 0.8 : st === 'park' ? 0.5 : fast ? 0.9 : 0.4;
-  forward += side.dials.tempo * 0.1;
+  if (fast) forward = Math.max(forward, 0.9);
+  else if (won && side.dials.win === -1) forward = Math.min(forward, 0.15);
+  forward += side.dials.tempo * 0.1 + side.dials.pass * (side.dials.pass > 0 ? 0.12 : 0.06);
   if (far) forward = 1.2;
+  const flank = side.dials.flank;
 
   let best = -1;
   let bestScore = -1e9;
@@ -663,7 +779,12 @@ function pass(L: LiveState, env: LiveEnv, r: Rng, t: 0 | 1, i: number, pressed: 
     if (c.line === 'GK' && !(pressed && u < 40)) return;
     const open = Math.min(10, nearestFoe(L, t, c.x, c.y, true).d);
     let score = (cu - u) * forward + open * 1.2 - Math.abs(dist - 16) * 0.25 + rand(r) * 8;
-    if (dist > 38) score -= st === 'direct' || fast || far ? 4 : 14;
+    if (dist > 38) score -= st === 'direct' || fast || far || side.dials.pass === 1 ? 4 : 14;
+    if (side.dials.pass === -1 && dist > 26) score -= 3;
+    else if (side.dials.pass === 1 && dist > 24 && cu > u) score += 2;
+    if (flank && (vy(t, c.y) - CY) * flank > 10) score += 5;
+    // 만들어 넣는 팀은 박스 안의 동료를 한 번 더 찾는다.
+    if (side.dials.final === -1 && cu > 86 && Math.abs(vy(t, c.y) - CY) < 16) score += 4;
     if (dist < 5) score -= 10;
     if (c.line === 'GK') score -= 8;
     const s = slotOf(L, env, t, c);
@@ -671,6 +792,7 @@ function pass(L: LiveState, env: LiveEnv, r: Rng, t: 0 | 1, i: number, pressed: 
     const role = side.roles[j];
     if (role === 'maker') score += 3.5;
     if (role === 'target' && dist > 25) score += 6;
+    else if ((role === 'poach' || role === 'shadow') && cu > u) score += 2;
     score += (c.ovr - p.ovr) * 0.15;
     // 오프사이드 자리에 있는 선수에게는 거의 주지 않는다.
     if (cu > offU + 0.3 && cu > u) {
@@ -706,7 +828,7 @@ function pass(L: LiveState, env: LiveEnv, r: Rng, t: 0 | 1, i: number, pressed: 
   let toY = c.y;
   const space = W - offU;
   const acting = slotOf(L, env, t, c).line;
-  if ((acting === 'FW' || side.roles[best] === 'runner') && space > 16 && offU - cu < 8 && cu > u && side.roles[best] !== 'link') {
+  if ((acting === 'FW' || side.roles[best] === 'runner' || side.roles[best] === 'shadow') && space > 16 && offU - cu < 8 && cu > u && side.roles[best] !== 'link') {
     const lead = Math.min(10, space * 0.4);
     toX = ux(t, Math.min(cu + lead, 99));
     toY = c.y + (H / 2 - c.y) * 0.15;
@@ -768,6 +890,8 @@ function act(L: LiveState, env: LiveEnv, r: Rng, events: LiveEvent[]): void {
   // 태클. 붙은 수비가 공을 뺏거나 반칙을 한다.
   if (near.d < 2.4) {
     let lose = 0.3 * Math.exp(-PROG * side.edge - 0.02 * skill(team, i, 3) + 0.02 * skill(L.teams[other] as LiveTeam, near.i, 4)) * (foe.style === 'press' ? 1.08 : 1) * (side.style === 'possess' ? 0.9 : 1) * (1 + side.dials.tempo * 0.06);
+    // 잃자마자 달려드는 팀은 방금 공을 따낸 선수를 더 잘 덮친다.
+    if (foe.dials.lose === 1 && L.sinceWin < 8) lose *= 1.25;
     if (L.held <= 1) lose *= 0.5;
     if (rand(r) < lose) {
       const box = u > 88.5 && Math.abs(v - CY) < 20;
@@ -794,6 +918,10 @@ function act(L: LiveState, env: LiveEnv, r: Rng, events: LiveEvent[]): void {
   if (dist < 30) {
     let want = dist < 9 ? 0.75 : dist < 14 ? 0.45 : dist < 20 ? 0.2 : dist < 26 ? 0.07 : 0.02;
     if (u > 88 && Math.abs(v - CY) > 16) want *= 0.3;
+    // 마무리 지시: 보이면 쏘는 팀은 먼 거리에서도 차고, 만들어 넣는 팀은 가까워질 때까지 참는다.
+    const fin = side.dials.final;
+    if (fin === 1 && dist >= 14) want *= 1.8;
+    else if (fin === -1) want *= dist >= 20 ? 0.35 : dist >= 14 ? 0.7 : 1.1;
     if (rand(r) < Math.min(0.95, want * compensation(env, t))) return shoot(L, env, r, t, i, null);
   }
   if (u > 80 && Math.abs(v - CY) > 14) {
@@ -809,6 +937,8 @@ function act(L: LiveState, env: LiveEnv, r: Rng, events: LiveEvent[]): void {
   if (side.style === 'possess') want += 0.08;
   else if (side.style === 'direct') want += 0.05;
   else if (side.style === 'counter' && L.sinceWin < 10) want += 0.15;
+  if (side.dials.win === 1 && L.sinceWin < 10 && side.style !== 'counter') want += 0.15;
+  if (side.dials.final === -1 && u > 72) want += 0.1;
   if (rand(r) < want) pass(L, env, r, t, i, pressed, false);
 }
 

@@ -8,7 +8,7 @@ import { ko } from './josa.ts';
 import { LEAGUES, won } from './data.ts';
 import { COUNTRIES, EU, ITALY_NON_EU_SIGNINGS, countryOf, quotaOf } from './countries.ts';
 import type { Quota } from './countries.ts';
-import { fillSlot, lineAt, makePlayer, myClub, stage, valueOf } from './squad.ts';
+import { fillSlot, lineAt, lineupLocked, makePlayer, myClub, stage, valueOf } from './squad.ts';
 import { int, spread } from './rng.ts';
 import type { ClubLeagueId, Contract, Deal, Game, Player, PromiseId, Spot, Terms } from './types.ts';
 
@@ -249,7 +249,7 @@ export function swapLineup(g: Game, inId: number, outId: number): boolean {
  * 후보면 그 자리의 선발과 맞바꾼다. 포지션이 달라도 되지만 OVR이 깎인다. 안 되면 이유를 돌려준다.
  */
 export function placeAt(g: Game, id: number, at: number): string | null {
-  if (g.phase === 'match') return '경기 중에는 바꿀 수 없다';
+  if (lineupLocked(g)) return '경기 중에는 바꿀 수 없다';
   if (at < 0 || at >= g.squad.length) return '없는 자리다';
   const from = g.squad.findIndex((p) => p.id === id);
   if (from === at) return null;
