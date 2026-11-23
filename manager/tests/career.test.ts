@@ -1218,7 +1218,10 @@ test('라이벌전 뒤 전반기 결산에서 시즌 중 경질되어도 전적�
       assert.notEqual(g.phase, 'retired', '은퇴했다');
       act(g, firstChoice(g));
     }
-    assert.deepEqual(g.job!.rivalry, { club: g.season.rival, w: 0, d: 0, l: 0, last: null });
+    // 루프 조건 때문에 TS가 g.job을 never로 좁힌다(act가 g.job을 바꾸는 것을 모른다). 다시 넓혀서 읽는다.
+    const hired = g.job as Game['job'];
+    assert.ok(hired, '재취업했다');
+    assert.deepEqual(hired.rivalry, { club: g.season.rival, w: 0, d: 0, l: 0, last: null });
   }
 });
 
