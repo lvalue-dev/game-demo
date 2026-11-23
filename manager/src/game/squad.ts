@@ -58,7 +58,7 @@ function makeRaw(g: Game, pos: Pos, ovr: number, age: number, where: string, loc
   const value = Math.round(ovr);
   return {
     id: g.nextId++, name, pos, age, ovr: value, pot: Math.min(99, value + room),
-    trait: chance(g, 0.35) ? pick(g, TRAIT_IDS) : null, years: 0, goals: 0, apps: 0, temp: 0, homegrown: false,
+    trait: chance(g, 0.35) ? pick(g, TRAIT_IDS) : null, years: 0, goals: 0, apps: 0, career: { apps: 0, goals: 0, titles: 0 }, temp: 0, homegrown: false,
     ...makeDetail(g, pos, spot), no: 0, contract: null, unhappy: false, loan: null,
     nat,
     hg: false, esc: false,
@@ -261,4 +261,38 @@ export function shareGoals(g: Game, total: number): void {
       }
     }
   }
+}
+
+/** 통산 이정표 경계. 큰 것부터 찾는다. */
+const GOAL_MARKS = [100, 50, 25];
+const APP_MARKS = [200, 100, 50];
+
+/**
+ * 클럽 시즌 결산: 선발과 후보의 이번 시즌 리그 기록을 이 구단 통산에 더하고 0으로 돌린다.
+ * won이면(리그·컵·대륙 대회 중 하나라도 우승) 이번 시즌 리그에 한 번이라도 나온 선수의 우승 횟수가 1 오른다.
+ * 임대 보낸 선수는 더하지 않고 기록만 비운다(겨울에 보냈다가 돌아온 선수의 전반기 기록이 남지 않게).
+ * 이정표 문구를 돌려준다: 한 선수는 가장 큰 경계 하나(골이 출전보다 먼저), 골 먼저·큰 경계 먼저로 세 줄까지, 남는 사람은 마지막 줄에 "외 N명".
+ */
+export function bankCareer(g: Game, won: boolean): string[] {
+  const hits: { goal: boolean; mark: number; name: string }[] = [];
+  for (const p of [...g.squad, ...g.reserves]) {
+    const c = p.career;
+    const goal = GOAL_MARKS.find((m) => c.goals < m && m <= c.goals + p.goals);
+    const app = APP_MARKS.find((m) => c.apps < m && m <= c.apps + p.apps);
+    if (goal !== undefined) hits.push({ goal: true, mark: goal, name: p.name });
+    else if (app !== undefined) hits.push({ goal: false, mark: app, name: p.name });
+    if (won && p.apps >= 1) c.titles++;
+    c.apps += p.apps;
+    c.goals += p.goals;
+    p.apps = 0;
+    p.goals = 0;
+  }
+  for (const p of g.loaned) {
+    p.apps = 0;
+    p.goals = 0;
+  }
+  hits.sort((a, b) => Number(b.goal) - Number(a.goal) || b.mark - a.mark);
+  const lines = hits.slice(0, 3).map((h) => `${h.name}, 구단 통산 ${h.mark}${h.goal ? '골' : '경기'}`);
+  if (hits.length > 3) lines[2] = `${lines[2]} 외 ${hits.length - 3}명`;
+  return lines;
 }
