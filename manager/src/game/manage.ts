@@ -2,13 +2,14 @@
 // 그리고 이적시장에서만 할 수 있는 일(재계약, 판매, 들어온 제안)로 곧장 가기.
 // 할 일 목록(agenda.ts)의 버튼이 여기 있는 동작을 부른다.
 import { ko } from './josa.ts';
-import { effOvr, formationOf, lineAt, linesOf, slotsFor } from './squad.ts';
+import { STYLES } from './data.ts';
+import { effOvr, formationOf, lineAt, linesOf, lineupLocked, slotsFor, spotAt } from './squad.ts';
 import { SLOTS, slotSpot } from './live.ts';
 import { posPenalty } from './player.ts';
 import { enforceQuota, isForeign, placeAt, promiseKept, quota } from './contract.ts';
 import { windowScene } from './transfer.ts';
-import { SHAPES, SHAPE_IDS } from './tactics.ts';
-import type { Game, Player, ShapeId } from './types.ts';
+import { DIALS, NEUTRAL, ROLES, SHAPES, SHAPE_IDS, presetDials, roleFits } from './tactics.ts';
+import type { Dials, Game, Level, Plan, Player, RoleId, ShapeId } from './types.ts';
 
 /** 시장이 열려 있는지(여름·겨울 이적시장 화면). */
 export const marketOpen = (g: Game): boolean => (g.phase === 'market' || g.phase === 'winter') && !!g.window;
@@ -21,7 +22,7 @@ const promiseBonus = (p: Player): number => (p.contract?.promise === 'star' ? 4 
  * 외국인 선발 한도를 지킨다. 골키퍼 자리부터, 고를 사람이 적은 자리부터 채운 뒤, 두 자리씩 맞바꿔 더 나아지면 바꾼다.
  */
 export function autoLineup(g: Game): string {
-  if (g.phase === 'match') return '경기 중에는 바꿀 수 없다.';
+  if (lineupLocked(g)) return '경기 중에는 바꿀 수 없다.';
   const pool = [...g.squad, ...g.reserves].filter((p) => !p.loan || p.loan.dir === 'in');
   const limit = quota(g).pitch;
   const score = (p: Player, i: number): number => effOvr(p, lineAt(g, i)) + p.temp + promiseBonus(p);
@@ -116,13 +117,28 @@ export interface ManageResult {
   tab?: string;
 }
 
+/** 평소 팀 지시와 개인 역할. 없으면 만든다. */
+export function planOf(g: Game): Plan {
+  return (g.plan ??= { dials: { ...NEUTRAL }, roles: {} });
+}
+
+/** 평소 지시(읽기 전용). */
+export const planDials = (g: Game): Dials => g.plan?.dials ?? NEUTRAL;
+
+/** 선발 i번 자리의 선수가 평소 맡는 역할. 지금 선 자리에 맞지 않는 역할은 기본으로 본다. */
+export function planRole(g: Game, i: number): RoleId {
+  const p = g.squad[i];
+  const role = p ? g.plan?.roles[p.id] : undefined;
+  return role && roleFits(spotAt(g, i), role) ? role : (ROLES[spotAt(g, i)][0]!.id);
+}
+
 /** 할 일 버튼과 스쿼드 편집 버튼의 동작. 모르는 동작이면 아무 일도 하지 않는다. */
 export function manage(g: Game, id: string): ManageResult {
   const [verb, arg = ''] = id.split(':');
   switch (verb) {
     case 'auto': return { msg: autoLineup(g), go: false };
     case 'formation': {
-      if (!SHAPE_IDS.includes(arg as ShapeId) || g.phase === 'match') return { msg: null, go: false };
+      if (!SHAPE_IDS.includes(arg as ShapeId) || lineupLocked(g)) return { msg: null, go: false };
       g.formation = arg as ShapeId;
       // 자리가 바뀌었으니 가장 강한 배치로 다시 세운다.
       autoLineup(g);
@@ -141,7 +157,7 @@ export function manage(g: Game, id: string): ManageResult {
     case 'move': {
       // move:자리.u.v — 선발 한 자리를 경기장의 다른 곳으로 옮긴다(손으로 짜는 대형). 골키퍼 자리는 옮기지 않는다.
       const [i, u, v] = arg.split('.').map(Number) as [number, number, number];
-      if (g.phase === 'match' || !(i > 0 && i < g.squad.length) || !Number.isFinite(u) || !Number.isFinite(v)) return { msg: null, go: false };
+      if (lineupLocked(g) || !(i > 0 && i < g.squad.length) || !Number.isFinite(u) || !Number.isFinite(v)) return { msg: null, go: false };
       const shape = formationOf(g);
       const tweak = (g.tweaks ??= {})[shape] ?? SLOTS[shape].map((x) => ({ u: x.u, v: x.v }));
       const before = slotsFor(g)[i]!.line;
@@ -153,6 +169,7 @@ export function manage(g: Game, id: string): ManageResult {
       return { msg: ko`${p.name}의 자리를 옮겼다: ${slotSpot(after)}${after.line !== before ? `(${before}에서 ${after.line} 줄로)` : ''}.${posPenalty(p.spot, after.line) ? ` 포지션 밖이라 OVR -${posPenalty(p.spot, after.line)}.` : ''}`, go: false };
     }
     case 'reset': {
+      if (lineupLocked(g)) return { msg: null, go: false };
       if (g.tweaks) delete g.tweaks[formationOf(g)];
       refresh(g);
       return { msg: `${SHAPES[formationOf(g)].name} 기본 자리로 되돌렸다.`, go: false };
@@ -161,13 +178,46 @@ export function manage(g: Game, id: string): ManageResult {
       // bench:자리 — 선발을 후보로 내리고, 그 줄에 가장 잘 맞는 후보를 올린다.
       const i = Number(arg);
       const out = g.squad[i];
-      if (!out || g.phase === 'match') return { msg: null, go: false };
+      if (!out || lineupLocked(g)) return { msg: null, go: false };
       const line = lineAt(g, i);
       const best = g.reserves.filter((p) => !p.loan || p.loan.dir === 'in').sort((a, b) => effOvr(b, line) - effOvr(a, line))[0];
       if (!best) return { msg: '올릴 후보가 없다.', go: false };
       const why = placeAt(g, best.id, i);
       refresh(g);
       return { msg: why ?? ko`${out.name}을 후보로 내리고 ${best.name}을 ${line} 자리에 세웠다.`, go: false };
+    }
+    case 'dial': {
+      // dial:이름.값 — 평소 팀 지시. 경기를 시작할 때 이대로 들고 나간다. dial:reset은 전부 보통으로, dial:preset은 몸에 밴 전술에 맞춘 코치의 추천으로.
+      if (lineupLocked(g)) return { msg: null, go: false };
+      const plan = planOf(g);
+      if (arg === 'reset') {
+        plan.dials = { ...NEUTRAL };
+        return { msg: '팀 지시를 모두 보통으로 되돌렸다.', go: false };
+      }
+      if (arg === 'preset') {
+        plan.dials = presetDials(g.season.style, 1);
+        return { msg: ko`코치가 ${STYLES[g.season.style].name}에 맞춰 팀 지시를 짰다.`, go: false };
+      }
+      const [name = '', raw = '', more] = arg.split('.');
+      const value = Number(raw);
+      if (name === 'overlap') {
+        if (more === undefined && (raw === '0' || raw === '1')) plan.dials.overlap = raw === '1';
+        return { msg: null, go: false };
+      }
+      const dial = DIALS.find((x) => x.id === name);
+      if (!dial || more !== undefined || !['-1', '0', '1'].includes(raw)) return { msg: null, go: false };
+      plan.dials[dial.id] = value as Level;
+      return { msg: null, go: false };
+    }
+    case 'role': {
+      // role:선수.역할 — 선발 선수의 평소 역할. 그 선수가 선 자리에서 맡을 수 있는 역할이어야 한다.
+      const [pid = '', role = ''] = arg.split('.');
+      const i = g.squad.findIndex((p) => p.id === Number(pid));
+      if (lineupLocked(g) || i < 0 || !roleFits(spotAt(g, i), role)) return { msg: null, go: false };
+      const plan = planOf(g);
+      if (role === 'base') delete plan.roles[Number(pid)];
+      else plan.roles[Number(pid)] = role;
+      return { msg: null, go: false };
     }
     case 'place': {
       // place:선수:자리 — 탭으로 고른 두 자리를 맞바꾼다.

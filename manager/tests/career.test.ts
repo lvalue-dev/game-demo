@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { act, createGame, legacyScore } from '../src/game/career.ts';
 import { CLUB_LEAGUES, CLUB_SEEDS, LEAGUES } from '../src/game/data.ts';
 import { rand } from '../src/game/rng.ts';
+import { NEUTRAL } from '../src/game/tactics.ts';
 import { roundRobin, sortTable } from '../src/game/world.ts';
 import type { Game } from '../src/game/types.ts';
 
@@ -260,7 +261,12 @@ test('실시간 경기: 같은 시드와 같은 지시면 같은 경기가 나�
   const play = async (): Promise<string> => {
     const { g, liveTick, liveCommand } = await liveGame(2718);
     liveCommand(g, 'line:1');
-    liveCommand(g, 'role:' + g.squad.find((p) => p.pos === 'FW')!.id + ':target');
+    // 타깃은 최전방(ST) 자리의 역할이다. 윙어로 선 공격수에게는 줄 수 없으므로 지금 ST에 선 선수를 고른다.
+    const { actingSpot } = await import('../src/game/match.ts');
+    const m = g.match!;
+    const striker = m.live!.teams[0].players.find((p) => actingSpot(m, m.live!, p) === 'ST')!;
+    liveCommand(g, `role:${striker.pid}:target`);
+    assert.equal(m.roles[striker.pid!], 'target');
     for (let k = 0; k < 2000 && g.match!.step === 'live'; k++) {
       if (g.match!.live!.halfTimeDone && !g.match!.live!.talked) liveCommand(g, 'talk:praise');
       liveTick(g);
@@ -279,7 +285,7 @@ test('실시간 경기: 지시가 상태에 반영되고, 교체 카드가 모�
   assert.equal(m.confusion, 1, '전술을 바꾸면 혼선이 생긴다');
   liveCommand(g, 'tempo:1');
   liveCommand(g, 'overlap:1');
-  assert.deepEqual(m.dials, { line: 0, width: 0, tempo: 1, overlap: true });
+  assert.deepEqual(m.dials, { ...NEUTRAL, tempo: 1, overlap: true });
   const mf = g.squad.find((p) => p.pos === 'MF')!;
   liveCommand(g, `role:${mf.id}:hold`);
   assert.equal(m.roles[mf.id], 'hold');
@@ -569,7 +575,7 @@ test('이전 버전(3)의 저장도 불러와 이어 할 수 있다', async () =
   delete (old as unknown as Record<string, unknown>).window;
   (old as unknown as Record<string, unknown>).market = [];
   assert.ok(migrate(old));
-  assert.equal(old.version, 10);
+  assert.equal(old.version, 11);
   assert.ok(old.squad.every((p) => typeof p.nat === 'string'), '국적이 생긴다');
   assert.ok(old.squad.every((p) => p.no > 0), '등번호가 생긴다');
   assert.ok(old.squad.every((p) => p.spot && p.dev.length === 6));
@@ -656,9 +662,9 @@ test('이전 버전(6)의 저장도 불러오면 홈그로운과 ESC 표시가 �
     delete (p as unknown as Record<string, unknown>).esc;
   }
   assert.ok(migrate(old));
-  assert.equal(old.version, 10);
+  assert.equal(old.version, 11);
   assert.ok(old.squad.every((p) => typeof p.hg === 'boolean' && p.esc === false));
-  assert.equal(old.version, 10);
+  assert.equal(old.version, 11);
   assert.equal(old.squad.length, 11, '예전 저장의 선발 일곱 명이 열한 명이 된다');
 });
 
@@ -816,7 +822,7 @@ test('이전 버전(7)의 저장: 잉글랜드 리그 이름이 바뀌고 새 �
   for (const k of ['license', 'licensed', 'course', 'idle', 'countries']) delete (old.manager as unknown as Record<string, unknown>)[k];
   delete (old as unknown as Record<string, unknown>).hiring;
   assert.ok(migrate(old));
-  assert.equal(old.version, 10);
+  assert.equal(old.version, 11);
   assert.equal(old.clubs[old.job!.club]!.league, 'eng1');
   for (const id of CLUB_LEAGUES) assert.ok(old.leagues[id]!.length > 0, `${id}가 생긴다`);
   assert.equal(old.manager.license, 4, '프리미어리그 감독은 Pro를 가진 것으로 본다');
@@ -931,7 +937,7 @@ test('선발은 열한 명이고 대형을 따른다. 예전(8) 저장의 선발
   old.reserves = [...old.squad.filter((p) => !keep.includes(p)).slice(0, 2), ...old.reserves].slice(0, 6);
   old.squad = keep;
   assert.ok(migrate(old));
-  assert.equal(old.version, 10);
+  assert.equal(old.version, 11);
   assert.ok(old.formation);
   assert.equal(old.squad.length, 11);
   assert.equal(old.squad[0]!.pos, 'GK');
@@ -1168,7 +1174,7 @@ test('국가대표: 조 최강팀이 라이벌이고 job.rivalry는 읽지도 �
   assert.deepEqual(job.rivalry, marker, '국가대표는 rivalry를 건드리지 않는다');
 });
 
-test('버전 9 저장을 불러오면 버전 10이 되고 rivalry는 비어 있으며, 진행 중인 라이벌은 그대로다', async () => {
+test('버전 9 저장을 불러오면 최신 버전(11)이 되고 rivalry는 비어 있으며, 진행 중인 라이벌은 그대로다', async () => {
   const { migrate } = await import('../src/game/career.ts');
   const g = toMarket(9090, false);
   const old = JSON.parse(JSON.stringify(g)) as Game;
@@ -1176,7 +1182,7 @@ test('버전 9 저장을 불러오면 버전 10이 되고 rivalry는 비어 있�
   delete (old.job as unknown as Record<string, unknown>).rivalry;
   const rival = old.season.rival;
   assert.equal(migrate(old), true);
-  assert.equal(old.version, 10);
+  assert.equal(old.version, 11);
   assert.equal(old.job!.rivalry, null);
   assert.equal(old.season.rival, rival);
   act(old, 'done');

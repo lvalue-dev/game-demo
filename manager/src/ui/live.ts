@@ -1,15 +1,25 @@
-// 실시간 경기 화면. 위에서 내려다본 경기장을 캔버스에 그리고, 배속에 맞춰 liveTick을 부른다.
-// 경기장은 한 번만 만들고, 점수, 시계, 기록, 지시 패널만 바꿔 그린다.
+// 실시간 경기 화면. 터치라인에 선 감독의 전술판이다.
+// 화면 한 장에 점수 막대, 경기장, 지시 시트가 모두 들어가고 페이지는 스크롤하지 않는다.
+// 세로로 긴 화면(휴대폰)에서는 경기장을 세워 우리 팀이 위로 공격하고, 넓은 화면에서는 눕혀서 옆에 지시 패널을 둔다.
 //
 // 움직임: 엔진은 3초(1틱)마다 선수의 위치를 정한다. 화면은 그 위치를 그대로 잇지 않고, 선수마다 감쇠 스프링으로 따라가게 해서
 // 가속과 감속이 생기고 재개 위치로의 순간이동도 짧은 달리기로 보이게 한다. 공은 가진 선수의 발밑에 붙고, 날아갈 때는 감속하며 뜬다.
+//
+// 지시: 선수 말을 누르면 그 선수의 시트(역할, 위치, 교체)가 열린다. 말을 끌어 옮기면 기준 자리가 바뀌고, 다른 선수 위에 놓으면 자리를 맞바꾼다.
 import { STYLES, STYLE_IDS } from '../game/data.ts';
-import { PER_MIN, SLOTS, slotSpot } from '../game/live.ts';
+import { PER_MIN, movedSlot, slotSpot, slotsOf } from '../game/live.ts';
+import type { Slot } from '../game/live.ts';
 import { FOOT_NAME, posPenalty, statNames, statsOf } from '../game/player.ts';
-import { benchPlayers, liveAdvice, liveCommand, liveTick, staminaText } from '../game/match.ts';
-import { ROLES, SHAPES, SHAPE_IDS } from '../game/tactics.ts';
-import type { Club, Game, LivePlayer, LiveState, MatchState, Player, Pos } from '../game/types.ts';
-import { face, hashName } from './face.ts';
+import { TACTIC_GAIN, actingSpot, benchPlayers, liveAdvice, liveCommand, liveTick, outlook, staminaText } from '../game/match.ts';
+import type { Outlook } from '../game/match.ts';
+import { DIALS, NEUTRAL, PHASES, ROLES, SHAPES, SHAPE_IDS, dialChanges, presetDials, roleName } from '../game/tactics.ts';
+import type { DialId, DialPhase } from '../game/tactics.ts';
+import type { Club, Game, Level, LiveMark, LivePlayer, LiveState, MatchState, Player, ShapeId } from '../game/types.ts';
+import { face, hashName, tones } from './face.ts';
+import { PICK, drawBall, drawFigure, drawFlag, drawNetHit, drawParty, drawRain, drawWind, startParty } from './figures.ts';
+import type { Kit, Party } from './figures.ts';
+import { TURF, light, margins, paintStadium, rgb } from './stadium.ts';
+import type { Look, Scene } from './stadium.ts';
 
 export interface LiveHost {
   /** 진행 상황을 저장한다. */
@@ -18,28 +28,62 @@ export interface LiveHost {
   done(): void;
 }
 
-type Panel = 'squad' | 'team' | 'mood';
+/** 아래에서 올라오는 지시 시트. 넓은 화면에서는 옆 패널이라 늘 하나가 열려 있다. */
+type Sheet = 'none' | 'squad' | 'player' | 'tactic' | 'orders' | 'match' | 'talk';
+const TABS: [Sheet, string][] = [['squad', '선수'], ['tactic', '전술'], ['orders', '지시'], ['match', '경기']];
 
 /** 1배속에서 1초에 진행하는 틱 수. 1틱은 경기 시간 3초이고, 1배속이면 선수가 실제 달리기 속도로 보인다(한 경기 약 12분). */
 const BASE_TPS = 2.5;
 const SPEEDS = [1, 2, 4, 8];
+/** 위치 버튼 한 번에 옮기는 거리(m). */
+const NUDGE = 4;
 
 let game: Game | null = null;
 let host: LiveHost | null = null;
 let raf = 0;
 let paused = true;
 let speed = 1;
-let panel: Panel = 'squad';
+let sheet: Sheet = 'none';
 /** 고른 우리 선수(경기장 자리 번호)와 고른 후보(선수 번호). 둘 다 고르면 교체를 확정할 수 있다. */
 let selected = -1;
 let benchPick = -1;
+/** 교체하면서 함께 바꿀 대형. 빈 문자열이면 지금 대형 그대로. */
+let subShape: ShapeId | '' = '';
+/** 전술 시트의 작은 탭: 판세, 전술, 대형. */
+type TacTab = 'read' | 'plan' | 'shape';
+let tacTab: TacTab = 'read';
+/** 지시 시트에서 보고 있는 국면. */
+let phase: DialPhase = 'att';
+/** 방금 만진 지시. 그 지시의 설명을 시트 아래에 보여 준다. */
+let lastDial: DialId | '' = '';
+/** 방금 한 지시로 판세가 움직인 폭. 점수 막대 아래에 잠깐 보여 준다. */
+let swing: { atk: number; dfn: number; until: number } | null = null;
 let acc = 0;
 let last = 0;
 let lastSave = 0;
 let seenLog = 0;
-let flash: { text: string; until: number; good: boolean } | null = null;
+/** 골이 들어가면 경기장 위에 띄우는 띠. */
+let flash: { text: string; sub: string; until: number; good: boolean } | null = null;
+let flashKey = '';
+/** 화면에 보여 준 점수. 달라지면 골이다. */
+let shown: [number, number] = [0, 0];
+/** 방금 한 지시를 중계 줄에 잠깐 보여 준다. */
+let note: { text: string; until: number } | null = null;
+/** 시트를 마지막으로 누른 때. 누르는 도중에 시트를 다시 그려 버튼이 사라지지 않게 한다. */
+let touchedAt = 0;
 let canvas: HTMLCanvasElement | null = null;
 let kit: Kits = defaultKits();
+/** 오늘의 구장과, 한 번 그려 둔 배경. 화면 크기가 바뀌면 다시 그린다. */
+let look: Look | null = null;
+let scene: Scene | null = null;
+let sceneKey = '';
+/** 골 뒤풀이: 뛰는 관중과 출렁이는 그물(side는 엔진 기준 골대, 1이 우리가 넣는 쪽). */
+let party: Party | null = null;
+let netHit: { side: 0 | 1; start: number } | null = null;
+/** 선수의 살색과 머리색. 키는 "팀:자리:이름". */
+const toneOf = new Map<string, [string, string]>();
+/** 움직임을 줄여 달라는 설정이면 비와 종이, 걸음을 그리지 않는다. */
+let calm = false;
 
 /** 이름표에 쓰는 짧은 이름. 외국 이름은 성만 쓴다(일본 이름은 성이 앞이라 앞을 쓴다). */
 const short = (name: string, nat?: string): string => (name.includes(' ') ? (nat === '일본' ? name.split(' ')[0] as string : name.split(' ').pop() as string) : name);
@@ -50,14 +94,11 @@ const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.m
 
 export const isLive = (g: Game | null): boolean => !!g && g.phase === 'match' && g.match?.step === 'live' && !!g.match.live;
 
-// ---------- 색과 유니폼 ----------
+const wide = (): boolean => window.matchMedia('(min-width: 900px)').matches;
+/** 세로로 긴 좁은 화면이면 경기장을 세운다. */
+const upright = (): boolean => !wide() && window.innerHeight > window.innerWidth;
 
-function rgb(hex: string): [number, number, number] {
-  const h = hex.replace('#', '');
-  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
-  const n = parseInt(full, 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
+// ---------- 색과 유니폼 ----------
 
 /** sRGB를 CIE Lab으로. 사람 눈에 비슷한 색인지 재는 데 쓴다. */
 function lab(hex: string): [number, number, number] {
@@ -79,21 +120,6 @@ const dE = (a: string, b: string): number => {
   return Math.hypot(l1 - l2, a1 - a2, b1 - b2);
 };
 
-const light = (hex: string): boolean => {
-  const [r, g, b] = rgb(hex);
-  return r * 0.299 + g * 0.587 + b * 0.114 > 150;
-};
-
-const GRASS = '#2f8a52';
-
-interface Kit {
-  body: string;
-  trim: string;
-  /** 0 단색, 1 반반, 2 세로 줄무늬, 3 가로 줄무늬, 4 사선 띠. */
-  pattern: number;
-  keeper: string;
-}
-
 type Kits = [Kit, Kit];
 
 function defaultKits(): Kits {
@@ -108,7 +134,7 @@ function kits(g: Game, m: MatchState): Kits {
   const mine = g.clubs[g.job!.club] as Club;
   const theirs = g.clubs[m.oppId] as Club | undefined;
   const home: Kit = { body: mine.colors[0], trim: mine.colors[1], pattern: mine.pattern % 5, keeper: '' };
-  const okHome = (k: Kit): boolean => dE(k.body, GRASS) > 28;
+  const okHome = (k: Kit): boolean => dE(k.body, TURF) > 28;
   const a = okHome(home) ? home : { body: mine.colors[1], trim: mine.colors[0], pattern: 0, keeper: '' };
   const awayOptions = (c: Club | undefined): Kit[] => {
     const base: Kit[] = c
@@ -119,50 +145,70 @@ function kits(g: Game, m: MatchState): Kits {
   };
   // 상대와 겹치는지는 바탕색과 무늬 색을 함께 본다.
   const clash = (x: Kit, y: Kit): number => Math.min(dE(x.body, y.body), x.pattern ? dE(x.trim, y.body) + 12 : 99, y.pattern ? dE(x.body, y.trim) + 12 : 99);
-  const b = awayOptions(theirs).find((k) => dE(k.body, GRASS) > 28 && clash(k, a) > 38) ?? (light(a.body) ? { body: '#1d1d1d', trim: '#ffffff', pattern: 0, keeper: '' } : { body: '#ffffff', trim: '#1d1d1d', pattern: 0, keeper: '' });
+  const b = awayOptions(theirs).find((k) => dE(k.body, TURF) > 28 && clash(k, a) > 38) ?? (light(a.body) ? { body: '#1d1d1d', trim: '#ffffff', pattern: 0, keeper: '' } : { body: '#ffffff', trim: '#1d1d1d', pattern: 0, keeper: '' });
   const keepers = ['#f2c230', '#b78cf0', '#ff7a1a', '#22c4d6', '#e64aa0', '#8bd346', '#111111', '#ffffff'];
   const far = (avoid: string[]): string => [...keepers].sort((x, y) => Math.min(...avoid.map((c) => dE(y, c))) - Math.min(...avoid.map((c) => dE(x, c))))[0] as string;
-  const outfield = [a.body, a.trim, b.body, b.trim, GRASS];
+  const outfield = [a.body, a.trim, b.body, b.trim, TURF];
   a.keeper = far(outfield);
   b.keeper = far([...outfield, a.keeper]);
   return [a, b];
 }
 
-// ---------- 그리기 ----------
+/**
+ * 오늘의 구장. 홈이면 우리 구장, 원정이면 상대 구장이고 규모는 구장 주인의 전력을 따른다.
+ * 중립 경기와 대표팀 경기는 큰 구장에서, 토너먼트는 야간에 치른다.
+ */
+function lookOf(g: Game, m: MatchState): Look {
+  const mine = g.clubs[g.job!.club] as Club;
+  const theirs = g.clubs[m.oppId] as Club | undefined;
+  const owner = m.venue === 'home' ? mine : m.venue === 'away' ? theirs : undefined;
+  const level = owner ? (owner.att + owner.def) / 2 : 99;
+  return {
+    tier: !owner || owner.nation ? 3 : level < 40 ? 0 : level < 55 ? 1 : level < 70 ? 2 : 3,
+    owner: owner ? [owner.colors[0], owner.colors[1]] : ['#3d4f63', '#d9d6cc'],
+    fans: [[mine.colors[0], mine.colors[1]], theirs ? [theirs.colors[0], theirs.colors[1]] : ['#d43a2f', '#ffffff']],
+    kits: [kit[0].body, kit[1].body],
+    venue: m.venue,
+    weather: m.weather,
+    night: m.kind === 'knockout',
+    seed: (owner?.id ?? 7) * 7919 + 13,
+  };
+}
+
+// ---------- 화면 틀 ----------
 
 export function renderLive(g: Game): string {
   const m = g.match as MatchState;
   const mine = (g.clubs[g.job!.club] as Club).name;
   return `
-    <section class="live" aria-label="실시간 경기">
-      <p class="eyebrow">${esc(m.label)}</p>
-      <div class="live__stick">
-      <div class="live__score score" role="group" aria-label="점수">
-        <span class="score__team is-mine"><span class="kitdot" id="kit-a"></span>${esc(mine)}</span>
-        <span class="score__num" id="live-score"></span>
-        <span class="score__team score__team--away">${esc(m.oppName)}<span class="kitdot" id="kit-b"></span></span>
-        <span class="score__minute" id="live-clock"></span>
+    <section class="lv" id="lv" aria-label="실시간 경기">
+      <header class="lv__bar">
+        <div class="lv__teams" role="group" aria-label="점수">
+          <span class="lv__team"><span class="lv__kit" id="lv-kit-a"></span><span class="lv__name">${esc(mine)}</span></span>
+          <span class="lv__score" id="lv-score"></span>
+          <span class="lv__team lv__team--away"><span class="lv__name">${esc(m.oppName)}</span><span class="lv__kit" id="lv-kit-b"></span></span>
+        </div>
+        <div class="lv__poss" id="lv-poss" aria-hidden="true"><i></i><i></i></div>
+        <div class="lv__meta">
+          <span class="lv__stam" id="lv-stam"></span>
+          <span class="lv__clock" id="lv-clock"></span>
+          <span class="lv__subs" id="lv-subs"></span>
+        </div>
+        <button type="button" class="lv__edge" id="lv-edge" data-live-do="edge" aria-label="판세. 누르면 이유를 본다"></button>
+      </header>
+      <div class="lv__stage" id="lv-stage">
+        <canvas class="lv__pitch" id="lv-pitch" role="img" aria-label="경기장. 우리 선수를 누르면 고르고, 끌면 자리를 옮긴다"></canvas>
+        <p class="lv__flash" id="lv-flash" aria-live="assertive"></p>
       </div>
-      <div class="live__field">
-        <canvas class="live__pitch" id="live-pitch" role="img" aria-label="경기장. 우리 팀은 오른쪽으로 공격한다. 선수를 누르면 고를 수 있다"></canvas>
-        <p class="live__flash" id="live-flash" aria-live="assertive"></p>
-      </div>
-      <p class="live__call" id="live-call" aria-live="polite"></p>
-      </div>
-      <div class="live__controls">
-        <button type="button" class="live__play" data-live-do="play" id="live-play"></button>
-        <div class="live__speeds" role="group" aria-label="배속">
-          ${SPEEDS.map((s) => `<button type="button" class="chip" data-live-do="speed:${s}" aria-pressed="false">${s}×</button>`).join('')}
+      <p class="lv__call" id="lv-call" aria-live="polite"></p>
+      <div class="lv__sheet" id="lv-sheet" hidden></div>
+      <div class="lv__dock">
+        <button type="button" class="lv__play" data-live-do="play" id="lv-play"></button>
+        <button type="button" class="lv__speed" data-live-do="speed" id="lv-speed" aria-label="배속 바꾸기"></button>
+        <div class="lv__tabs" role="tablist" aria-label="지시">
+          ${TABS.map(([id, label]) => `<button type="button" role="tab" class="lv__tab" data-live-do="sheet:${id}" aria-selected="false">${label}</button>`).join('')}
         </div>
       </div>
-      <dl class="live__stats" id="live-stats"></dl>
-      <details class="live__tickerbox"><summary class="live__label">중계 기록</summary><ol class="log live__ticker" id="live-ticker"></ol></details>
-      <div class="live__tabs" role="tablist" aria-label="지시">
-        ${([['squad', '선수 · 교체'], ['team', '팀 전술'], ['mood', '태세']] as [Panel, string][]).map(([id, label]) =>
-          `<button type="button" role="tab" class="live__tab" data-live-do="panel:${id}" aria-selected="false">${label}</button>`).join('')}
-      </div>
-      <div class="live__panel" id="live-panel"></div>
-      <button type="button" class="link" data-act="skip">남은 경기를 지금 지시대로 건너뛴다</button>
     </section>`;
 }
 
@@ -170,23 +216,48 @@ export function mountLive(g: Game, h: LiveHost): void {
   unmountLive();
   game = g;
   host = h;
-  canvas = $<HTMLCanvasElement>('#live-pitch');
+  canvas = $<HTMLCanvasElement>('#lv-pitch');
   const m = g.match as MatchState;
   kit = kits(g, m);
+  look = lookOf(g, m);
+  scene = null;
+  sceneKey = '';
+  party = null;
+  netHit = null;
+  flash = null;
+  shown = [m.score[0], m.score[1]];
+  toneOf.clear();
+  calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   vis.clear();
   trail.length = 0;
   seenLog = m.log.length;
   paused = true;
   acc = 0;
+  selected = -1;
+  benchPick = -1;
+  subShape = '';
+  tacTab = 'read';
+  phase = 'att';
+  lastDial = '';
+  swing = null;
+  drag = null;
+  note = null;
+  sheet = halftime(g) ? 'talk' : 'none';
   last = performance.now();
   lastSave = last;
-  const dotA = $('#kit-a');
-  const dotB = $('#kit-b');
+  const dotA = $('#lv-kit-a');
+  const dotB = $('#lv-kit-b');
   if (dotA) dotA.style.cssText = `--kit:${kit[0].body};--trim:${kit[0].trim}`;
   if (dotB) dotB.style.cssText = `--kit:${kit[1].body};--trim:${kit[1].trim}`;
-  canvas?.addEventListener('click', onPitchClick);
+  canvas?.addEventListener('pointerdown', onPitchDown);
+  canvas?.addEventListener('pointermove', onPitchMove);
+  canvas?.addEventListener('pointerup', onPitchUp);
+  canvas?.addEventListener('pointercancel', onPitchCancel);
+  $('#lv-sheet')?.addEventListener('pointerdown', onSheetTouch);
+  window.addEventListener('resize', onResize);
+  window.addEventListener('keydown', onKey);
   updateHud(true);
-  updatePanel();
+  updateSheet();
   raf = requestAnimationFrame(frame);
 }
 
@@ -194,10 +265,17 @@ export function unmountLive(): void {
   if (raf) cancelAnimationFrame(raf);
   raf = 0;
   if (game && host && isLive(game)) host.save();
-  canvas?.removeEventListener('click', onPitchClick);
+  canvas?.removeEventListener('pointerdown', onPitchDown);
+  canvas?.removeEventListener('pointermove', onPitchMove);
+  canvas?.removeEventListener('pointerup', onPitchUp);
+  canvas?.removeEventListener('pointercancel', onPitchCancel);
+  window.removeEventListener('resize', onResize);
+  window.removeEventListener('keydown', onKey);
   game = null;
   host = null;
   canvas = null;
+  scene = null;
+  party = null;
 }
 
 /** 페이지가 가려지면 멈춘다. */
@@ -208,32 +286,73 @@ export function pauseLive(): void {
   updateControls();
 }
 
-/** 경기장을 누르면 가장 가까운 우리 선수를 고른다. */
-function onPitchClick(e: MouseEvent): void {
+const onSheetTouch = (): void => {
+  touchedAt = performance.now();
+};
+
+const onResize = (): void => updateSheet();
+
+/** 스페이스바로 재생과 일시정지. */
+function onKey(e: KeyboardEvent): void {
+  const t = e.target as HTMLElement | null;
+  if (e.code !== 'Space' || !game || (t && /^(BUTTON|INPUT|TEXTAREA|SELECT|A|SUMMARY)$/.test(t.tagName))) return;
+  e.preventDefault();
+  togglePlay();
+}
+
+function togglePlay(): void {
   const g = game;
-  if (!g || !canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const px = e.clientX - rect.left;
-  const py = e.clientY - rect.top;
-  let best = -1;
-  let bestD = Infinity;
-  const L = g.match!.live as LiveState;
-  L.teams[0].players.forEach((p, i) => {
-    if (p.off) return;
-    const v = vis.get(`0:${i}`);
-    if (!v) return;
-    const d = Math.hypot(v.sx - px, v.sy - py);
-    if (d < bestD) {
-      bestD = d;
-      best = i;
-    }
-  });
-  if (best >= 0 && bestD < 40) {
-    selected = selected === best ? -1 : best;
-    panel = 'squad';
-    updatePanel();
-    draw(0, true);
+  if (!g) return;
+  if (halftime(g)) {
+    sheet = 'talk';
+    updateSheet();
+    return;
   }
+  paused = !paused;
+  if (paused) host?.save();
+  last = performance.now();
+  updateControls();
+}
+
+/** 감독의 지시를 엔진에 넘기고 화면을 맞춘다. */
+function command(cmd: string): void {
+  const g = game;
+  if (!g) return;
+  const wasHalf = halftime(g);
+  const before = outlook(g);
+  liveCommand(g, cmd);
+  const after = outlook(g);
+  const [da, dd] = [after.atk - before.atk, after.dfn - before.dfn];
+  if (Math.abs(da) >= 0.05 || Math.abs(dd) >= 0.05) swing = { atk: da, dfn: dd, until: performance.now() + 4500 };
+  if (wasHalf && !halftime(g)) {
+    // 라커룸 대화가 끝나면 후반을 바로 시작한다.
+    paused = false;
+    last = performance.now();
+    sheet = 'none';
+  }
+  host?.save();
+  updateHud(true);
+  updateSheet();
+}
+
+function say(text: string): void {
+  note = { text, until: performance.now() + 2600 };
+  updateCall();
+}
+
+function pick(i: number): void {
+  const g = game;
+  if (!g) return;
+  const p = (g.match!.live as LiveState).teams[0].players[i];
+  benchPick = -1;
+  if (!p || p.off || selected === i) {
+    selected = -1;
+    if (sheet === 'player') sheet = 'none';
+  } else {
+    selected = i;
+    sheet = 'player';
+  }
+  updateSheet();
 }
 
 /** data-live-do(화면 조작)와 data-live(감독의 지시)를 처리한다. 처리했으면 true. */
@@ -244,63 +363,53 @@ export function onLiveClick(el: HTMLElement): boolean {
   const cmd = el.dataset.live;
   if (local) {
     const [what, value = ''] = local.split(':');
-    if (what === 'play') {
-      if (halftime(g)) return true;
-      paused = !paused;
-      if (paused) host?.save();
-      last = performance.now();
+    if (what === 'play') togglePlay();
+    else if (what === 'speed') {
+      speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length] ?? 1;
       updateControls();
-    } else if (what === 'speed') {
-      speed = Number(value) || 2;
-      updateControls();
-    } else if (what === 'panel') {
-      panel = value as Panel;
-      updatePanel();
-    } else if (what === 'pick') {
-      selected = selected === Number(value) ? -1 : Number(value);
-      updatePanel();
-      draw(0, true);
-    } else if (what === 'bench') {
+    } else if (what === 'sheet') {
+      // 좁은 화면에서는 같은 탭을 다시 누르면 시트를 접는다.
+      sheet = sheet === value && !wide() ? 'none' : value as Sheet;
+      updateSheet();
+    } else if (what === 'pick') pick(Number(value));
+    else if (what === 'bench') {
       benchPick = benchPick === Number(value) ? -1 : Number(value);
-      updatePanel();
-    } else if (what === 'clear') {
+      updateSheet();
+    } else if (what === 'edge') {
+      // 판세 띠를 누르면 이유를 보여 준다. 좁은 화면에서 이미 보고 있었으면 접는다.
+      sheet = sheet === 'tactic' && tacTab === 'read' && !wide() ? 'none' : 'tactic';
+      tacTab = 'read';
+      updateSheet();
+    } else if (what === 'ttab') {
+      tacTab = value === 'plan' || value === 'shape' ? value : 'read';
+      updateSheet();
+    } else if (what === 'phase') {
+      phase = PHASES.find((x) => x.id === value)?.id ?? 'att';
+      lastDial = '';
+      updateSheet();
+    } else if (what === 'with') {
+      subShape = SHAPE_IDS.includes(value as ShapeId) ? (value as ShapeId) : '';
+      updateSheet();
+    } else if (what === 'close') {
       selected = -1;
       benchPick = -1;
-      updatePanel();
-      draw(0, true);
+      sheet = 'none';
+      updateSheet();
     }
     return true;
   }
   if (cmd) {
-    const wasHalf = halftime(g);
-    // 교체를 하면 고른 표시를 지운다(나간 선수 자리에 들어온 선수를 다시 고르기 쉽게 자리 선택은 남긴다).
-    if (cmd.startsWith('swap:')) benchPick = -1;
-    liveCommand(g, cmd);
-    if (wasHalf && !halftime(g)) {
-      // 라커룸 대화가 끝나면 후반을 바로 시작한다.
-      paused = false;
-      last = performance.now();
+    // 교체를 하면 후보 선택을 지운다(들어온 선수에게 바로 역할을 줄 수 있게 자리 선택은 남긴다).
+    if (cmd.startsWith('swap:')) {
+      benchPick = -1;
+      subShape = '';
     }
-    host?.save();
-    updateHud(true);
-    updatePanel();
+    const dial = DIALS.find((x) => cmd.startsWith(`${x.id}:`));
+    if (dial) lastDial = dial.id;
+    command(cmd);
     return true;
   }
   return false;
-}
-
-/** 끌어다 놓기로 한 교체(app.ts가 부른다). */
-export function liveDrop(cmd: string): void {
-  const g = game;
-  if (!g || !cmd.startsWith('swap:')) return;
-  const [, i] = cmd.split(':');
-  benchPick = -1;
-  selected = Number(i);
-  liveCommand(g, cmd);
-  host?.save();
-  updateHud(true);
-  updatePanel();
-  draw(0, true);
 }
 
 const halftime = (g: Game): boolean => {
@@ -324,16 +433,26 @@ function frame(now: number): void {
       if (halftime(g)) {
         paused = true;
         acc = 0;
+        sheet = 'talk';
         host?.save();
-        updatePanel();
+        updateSheet();
         break;
       }
     }
   }
   if (ticked) {
     updateHud(false);
-    // 선수 상태(체력, 평점, 기록)는 몇 틱마다 다시 그린다. 버튼을 누르는 중에 목록이 흔들리지 않게 너무 자주는 하지 않는다.
-    if (panel === 'squad' && (m.live as LiveState).tick % 10 === 0) updatePanel();
+    // 선수 상태(체력, 평점, 기록)는 몇 틱마다 다시 그린다. 버튼을 누르는 중에는 건드리지 않는다.
+    const L = m.live as LiveState;
+    if ((sheet === 'squad' || sheet === 'player' || sheet === 'match') && L.tick % 10 === 0 && now - touchedAt > 900) updateSheet();
+  }
+  if (note && now > note.until) {
+    note = null;
+    updateCall();
+  }
+  if (swing && now > swing.until) {
+    swing = null;
+    updateEdge();
   }
   if (m.step !== 'live') {
     // 경기 끝. 마지막 장면을 잠깐 보여 준 뒤 결과 화면으로 간다.
@@ -351,6 +470,8 @@ function frame(now: number): void {
   raf = requestAnimationFrame(frame);
 }
 
+const minuteOf = (tick: number): number => Math.max(1, Math.ceil(tick / PER_MIN));
+
 function clockText(L: LiveState): string {
   if (L.halfTimeDone && !L.talked) return '하프타임';
   if (L.over) return '경기 종료';
@@ -361,68 +482,103 @@ function clockText(L: LiveState): string {
   return `${min}'`;
 }
 
+function updateCall(): void {
+  const g = game;
+  const el = $('#lv-call');
+  if (!g || !el) return;
+  const L = g.match!.live as LiveState;
+  const lastCall = L.calls[L.calls.length - 1];
+  if (note) {
+    el.textContent = note.text;
+    el.className = 'lv__call lv__call--note';
+  } else if (lastCall) {
+    el.textContent = `${minuteOf(lastCall.tick)}' ${lastCall.text}`;
+    el.className = `lv__call lv__call--${lastCall.tone}`;
+  } else {
+    el.textContent = L.tick === 0 ? '▶ 킥오프. 선수를 누르면 역할과 교체, 끌면 자리를 옮긴다.' : '';
+    el.className = 'lv__call';
+  }
+}
+
 function updateHud(full: boolean): void {
   const g = game;
   if (!g) return;
   const m = g.match as MatchState;
   const L = m.live as LiveState;
-  const score = $('#live-score');
-  if (score) score.innerHTML = `${m.score[0]}<span class="score__sep">:</span>${m.score[1]}`;
-  const clock = $('#live-clock');
+  const score = $('#lv-score');
+  if (score) score.innerHTML = `${m.score[0]}<i>:</i>${m.score[1]}`;
+  const clock = $('#lv-clock');
   if (clock) clock.textContent = `${clockText(L)}${m.venue === 'away' ? ' · 원정' : m.venue === 'home' ? ' · 홈' : ''}`;
   const [a, b] = L.teams;
-  const total = Math.max(1, a.possession + b.possession);
-  const stats = $('#live-stats');
-  if (stats) {
-    const pa = Math.round((a.possession / total) * 100);
-    stats.innerHTML = `
-      <div class="live__poss"><dt>점유율</dt><dd><span class="split" aria-hidden="true"><span style="width:${pa}%;background:${kit[0].body}"></span><span style="width:${100 - pa}%;background:${kit[1].body}"></span></span>${pa}<span class="muted"> : ${100 - pa}</span></dd></div>
-      <div><dt>슈팅(유효)</dt><dd>${a.shots}(${a.onTarget})<span class="muted"> : ${b.shots}(${b.onTarget})</span></dd></div>
-      <div><dt>기대 득점(xG)</dt><dd>${a.xg.toFixed(1)}<span class="muted"> : ${b.xg.toFixed(1)}</span></dd></div>
-      <div><dt>팀 체력</dt><dd class="${m.me.stamina < 45 ? 'is-bad' : ''}"><span class="meter" aria-hidden="true"><span class="meter__fill" style="width:${Math.round(m.me.stamina)}%"></span></span>${Math.round(m.me.stamina)}</dd></div>
-      <div><dt>교체 카드</dt><dd>${m.subs}장</dd></div>`;
+  const pa = Math.round((a.possession / Math.max(1, a.possession + b.possession)) * 100);
+  const poss = $('#lv-poss');
+  if (poss) {
+    const [x, y] = [poss.children[0] as HTMLElement, poss.children[1] as HTMLElement];
+    x.style.cssText = `width:${L.tick ? pa : 50}%;background:${kit[0].body}`;
+    y.style.cssText = `width:${L.tick ? 100 - pa : 50}%;background:${kit[1].body}`;
   }
-  // 새 기록이 생겼으면 위로 쌓고, 골이면 경기장 위에 크게 띄운다.
-  if (m.log.length > seenLog || full) {
-    for (const line of m.log.slice(seenLog)) {
-      if (line.tone !== 'plain' && /골|득점|실점|성공시켰|넣었|마무리|흔들었|헤더/.test(line.text)) {
-        flash = { text: line.tone === 'good' ? '골!' : '실점', until: performance.now() + 1600, good: line.tone === 'good' };
-      }
+  const stam = $('#lv-stam');
+  if (stam) {
+    const v = Math.round(m.me.stamina);
+    stam.innerHTML = `체력 <span class="lv-meter${v < 45 ? ' is-low' : ''}"><i style="width:${v}%"></i></span> <b>${v}</b>`;
+  }
+  const subs = $('#lv-subs');
+  if (subs) subs.innerHTML = `교체 카드 <b>${m.subs}</b>`;
+  // 점수가 달라졌으면 골이다. 경기장 위에 띠를 띄우고, 그물이 출렁이고, 넣은 팀 관중이 뛴다.
+  if (m.score[0] !== shown[0] || m.score[1] !== shown[1]) {
+    const good = m.score[0] > shown[0];
+    const now = performance.now();
+    const line = m.log.slice(seenLog).reverse().find((l) => l.tone === (good ? 'good' : 'bad'));
+    flash = { text: good ? '골!' : '실점', sub: line?.text ?? '', until: now + 2400, good };
+    netHit = { side: good ? 1 : 0, start: now };
+    if (scene && look && canvas) party = startParty(now, scene.fans.filter((f) => f.team === (good ? 0 : 1)), scene.dot, look.fans[good ? 0 : 1], canvas.clientWidth, canvas.clientHeight);
+    shown = [m.score[0], m.score[1]];
+    if (score) {
+      score.classList.remove('is-pop');
+      void score.offsetWidth;
+      score.classList.add('is-pop');
     }
-    seenLog = m.log.length;
   }
-  const lastCall = L.calls[L.calls.length - 1];
-  const callEl = $('#live-call');
-  if (callEl) {
-    callEl.textContent = lastCall ? `${Math.max(1, Math.ceil(lastCall.tick / PER_MIN))}' ${lastCall.text}` : (L.tick === 0 ? '재생 버튼을 누르면 킥오프. 언제든 멈추고 지시할 수 있다. 경기장의 선수를 누르면 그 선수를 고른다.' : '');
-    callEl.className = `live__call${lastCall ? ` live__call--${lastCall.tone}` : ''}`;
-  }
-  const ticker = $('#live-ticker');
-  if (ticker && (full || ticker.dataset.n !== String(L.calls.length) + ':' + (lastCall?.tick ?? 0))) {
-    ticker.dataset.n = String(L.calls.length) + ':' + (lastCall?.tick ?? 0);
-    const recent = [...L.calls].reverse().slice(0, 6);
-    ticker.innerHTML = recent.length === 0
-      ? '<li class="log__row"><span class="log__min">시작</span><span class="log__text muted">슈팅, 선방, 파울, 오프사이드, 교체가 여기에 쌓인다.</span></li>'
-      : recent.map((c) => `<li class="log__row log__row--${c.tone}"><span class="log__min">${Math.max(1, Math.ceil(c.tick / PER_MIN))}'</span><span class="log__text">${esc(c.text)}</span></li>`).join('');
-  }
+  seenLog = m.log.length;
+  if (full || L.tick % 10 === 0) updateEdge();
+  updateCall();
   updateControls();
+}
+
+const signed = (v: number): string => (Math.abs(v) < 0.05 ? '0.0' : `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}`);
+
+/** 0을 가운데 둔 작은 막대. 오른쪽으로 뻗으면 우세, 왼쪽이면 열세. */
+const gauge = (v: number): string =>
+  `<span class="lv-gauge" aria-hidden="true"><i class="${v >= 0 ? 'is-up' : 'is-down'}" style="width:${Math.min(50, (Math.abs(v) / 8) * 50).toFixed(1)}%"></i></span>`;
+
+const edgeCell = (name: string, v: number): string => `<span class="lv__edgecell">${name} ${gauge(v)} <b>${signed(v)}</b></span>`;
+
+/** 점수 막대 아래의 판세 띠. 방금 지시로 움직인 폭이 있으면 가운데에 잠깐 보여 준다. */
+function updateEdge(): void {
+  const g = game;
+  const el = $('#lv-edge');
+  if (!g || !el || !g.match?.live) return;
+  const o = outlook(g);
+  const moved = swing
+    ? [Math.abs(swing.atk) >= 0.05 ? `공격 ${signed(swing.atk)}` : '', Math.abs(swing.dfn) >= 0.05 ? `수비 ${signed(swing.dfn)}` : ''].filter(Boolean).join(' · ')
+    : '';
+  const good = !!swing && swing.atk + swing.dfn >= 0;
+  el.innerHTML = `${edgeCell('공격', o.atk)}<span class="lv__edgemid${moved ? (good ? ' is-good' : ' is-bad') : ''}">${moved || '판세'}</span>${edgeCell('수비', o.dfn)}`;
 }
 
 function updateControls(): void {
   const g = game;
   if (!g) return;
-  const play = $('#live-play');
+  const play = $('#lv-play');
   const L = g.match?.live;
   if (play) {
-    const label = halftime(g) ? '하프타임' : paused ? (L && L.tick === 0 ? '킥오프' : '재생') : '일시정지';
-    play.innerHTML = `<span aria-hidden="true">${paused ? '▶' : '❚❚'}</span> ${label}`;
-    play.toggleAttribute('disabled', halftime(g));
+    const half = halftime(g);
+    const label = half ? '라커룸' : paused ? (L && L.tick === 0 ? '킥오프' : '재생') : '멈춤';
+    play.innerHTML = `<span class="lv__playicon${paused ? '' : ' is-pause'}" aria-hidden="true"></span><span class="lv__playtext">${label}</span>`;
+    play.classList.toggle('is-running', !paused);
   }
-  document.querySelectorAll<HTMLElement>('[data-live-do^="speed:"]').forEach((el) => {
-    const on = el.dataset.liveDo === `speed:${speed}`;
-    el.classList.toggle('is-on', on);
-    el.setAttribute('aria-pressed', String(on));
-  });
+  const sp = $('#lv-speed');
+  if (sp) sp.innerHTML = `${speed}<small>배속</small>`;
 }
 
 // ---------- 선수 상태 ----------
@@ -451,157 +607,334 @@ function playerOf(g: Game, p: LivePlayer): Player | undefined {
   return id >= 0 ? [...g.squad, ...g.reserves, ...(g.match?.live?.youth ?? [])].find((x) => x.id === id) : undefined;
 }
 
-const faceOf = (p: LivePlayer, team: 0 | 1, size: number): string =>
-  face(p.pid ?? hashName(p.name), p.nat ?? '', size, [kit[team].body, kit[team].trim], p.name);
+const myKit = (): [string, string] => [kit[0].body, kit[0].trim];
+const noStyle = (): string => `--kit:${kit[0].body};--ink:${light(kit[0].body) ? '#111' : '#fff'}`;
 
-// ---------- 지시 패널 ----------
+// ---------- 지시 시트 ----------
 
-const chip = (cmd: string, label: string, on: boolean, disabled = false, extra = ''): string =>
-  `<button type="button" class="chip${on ? ' is-on' : ''}" data-live="${esc(cmd)}" aria-pressed="${on}"${disabled ? ' disabled' : ''}>${esc(label)}${extra}</button>`;
+const opt = (cmd: string, label: string, on: boolean, disabled = false, extra = ''): string =>
+  `<button type="button" class="lv-opt${on ? ' is-on' : ''}" data-live="${esc(cmd)}" aria-pressed="${on}"${disabled ? ' disabled' : ''}>${esc(label)}${extra}</button>`;
 
-function row(title: string, body: string, note = ''): string {
-  return `<div class="live__row"><p class="live__label">${esc(title)}${note ? ` <span class="muted">${esc(note)}</span>` : ''}</p><div class="chips">${body}</div></div>`;
+/** 화면만 바꾸는 단추(지시를 내리지 않는다). */
+const localOpt = (what: string, text: string, on: boolean, extra = ''): string =>
+  `<button type="button" class="lv-opt${on ? ' is-on' : ''}" data-live-do="${esc(what)}" aria-pressed="${on}">${esc(text)}${extra}</button>`;
+
+/** 시트 안의 작은 탭 줄. */
+const subtabs = (name: string, items: [string, string, boolean, number?][]): string =>
+  `<div class="lv-sub2" role="tablist" aria-label="${esc(name)}">${items.map(([what, text, on, n]) =>
+    `<button type="button" role="tab" class="lv-sub2__tab${on ? ' is-on' : ''}" data-live-do="${esc(what)}" aria-selected="${on}">${esc(text)}${n ? `<i>${n}</i>` : ''}</button>`).join('')}</div>`;
+
+/**
+ * 이것을 고르면 판세가 얼마나 달라지는지. 달라지지 않으면 빈 문자열.
+ * 좁은 단추(pair)에는 이름표 없이 숫자 둘만 쓴다. 왼쪽이 공격, 오른쪽이 수비로 판세 띠와 같은 순서다.
+ */
+function preview(base: Outlook, next: Outlook, pair = false): string {
+  const [a, d] = [next.atk - base.atk, next.dfn - base.dfn];
+  if (Math.abs(a) < 0.05 && Math.abs(d) < 0.05) return '';
+  const tone = (v: number): string => (Math.abs(v) < 0.05 ? '' : v > 0 ? ' class="is-up"' : ' class="is-down"');
+  if (pair) return `<span class="lv-pv lv-pv--pair" aria-label="공격 ${signed(a)}, 수비 ${signed(d)}"><i${tone(a)}>${Math.abs(a) < 0.05 ? '0' : signed(a)}</i><i${tone(d)}>${Math.abs(d) < 0.05 ? '0' : signed(d)}</i></span>`;
+  const bit = (name: string, v: number): string => (Math.abs(v) < 0.05 ? '' : `<i${tone(v)}>${name}${signed(v)}</i>`);
+  return `<span class="lv-pv">${bit('공', a)}${bit('수', d)}</span>`;
 }
 
-const LINE_NAME: Record<Pos, string> = { GK: '골키퍼', DF: '수비', MF: '미드필드', FW: '공격' };
+const label = (title: string, hint = ''): string => `<p class="lv-label">${esc(title)}${hint ? `<small>${esc(hint)}</small>` : ''}</p>`;
 
-function squadPanel(g: Game, m: MatchState, L: LiveState): string {
+/** 셋 중 하나를 고르는 지시(붙은 단추 세 개). */
+const seg = (title: string, body: string, hint = ''): string =>
+  `<div class="lv-seg">${label(title, hint)}<div class="lv-seg__opts" role="group" aria-label="${esc(title)}">${body}</div></div>`;
+
+function confusedNote(m: MatchState, L: LiveState): string {
+  return m.confusion > 0 && L.tick < L.confusedUntil
+    ? `<p class="lv-note lv-note--bad">새 지시를 익히는 중. ${Math.ceil((L.confusedUntil - L.tick) / PER_MIN)}분쯤 손발이 맞지 않는다.</p>` : '';
+}
+
+function sheetSquad(g: Game, m: MatchState, L: LiveState): string {
   const team = L.teams[0];
-  const slots = SLOTS[m.me.shape];
-  const benchList = benchPlayers(g, L).sort((a, b) => ['GK', 'DF', 'MF', 'FW'].indexOf(a.pos) - ['GK', 'DF', 'MF', 'FW'].indexOf(b.pos) || b.ovr - a.ovr);
-  const pickedIn = benchList.find((p) => p.id === benchPick);
-  const sel = team.players[selected];
-  const canSub = m.subs > 0;
-  // 교체 확정 막대: 나갈 선수와 들어올 선수를 둘 다 골랐을 때.
-  let confirm = '';
-  if (sel && pickedIn && !sel.off) {
-    const line = (slots[sel.slot] as { line: Pos }).line;
-    const pen = posPenalty(pickedIn.spot, line);
-    confirm = `<div class="subbar">
-      <p class="subbar__text"><span class="subbar__out">OUT ${sel.n} ${esc(sel.name)}</span> <span aria-hidden="true">⇄</span> <span class="subbar__in">IN ${pickedIn.no} ${esc(pickedIn.name)}</span>${pen ? ` <span class="muted">(${line} 자리 OVR -${pen})</span>` : ''}</p>
-      <div class="chips">${chip(`swap:${selected}:${pickedIn.id}`, canSub ? '교체 확정' : '교체 카드가 없다', false, !canSub)}<button type="button" class="chip" data-live-do="clear">취소</button></div>
-    </div>`;
-  } else if (sel || pickedIn) {
-    confirm = `<p class="note note--plain">${sel ? `${sel.n}번 ${esc(sel.name)}을 골랐다. 아래 벤치에서 들어갈 선수를 고르면 교체할 수 있다.` : `${pickedIn!.no}번 ${esc(pickedIn!.name)}을 골랐다. 경기장 명단에서 나갈 선수를 고른다.`}</p>`;
-  }
-
-  const order: Pos[] = ['GK', 'DF', 'MF', 'FW'];
-  const onPitch = order.map((line) => {
-    const rows = team.players.map((p, i) => ({ p, i })).filter(({ p }) => (slots[p.slot] as { line: Pos }).line === line);
-    if (!rows.length) return '';
-    return `<li class="lsq__group">${LINE_NAME[line]}</li>${rows.map(({ p, i }) => {
-      const pl = playerOf(g, p);
-      const cond = condition(L, m, p);
-      const rt = rating(L, m, 0, p);
-      const at = slotSpot(slots[p.slot]!);
-      const r = p.rec;
-      const marks = `${r?.goals ? `<span class="lsq__mark" title="골">⚽${r.goals > 1 ? `×${r.goals}` : ''}</span>` : ''}${p.off ? '<span class="lsq__mark lsq__mark--red" title="퇴장">퇴장</span>' : ''}${p.on ? '<span class="lsq__mark" title="교체 투입">IN</span>' : ''}`;
-      const open = i === selected;
-      const role = pl ? (m.roles[pl.id] ?? 'base') : 'base';
-      const roles = pl && p.key >= 0 && g.squad.some((q) => q.id === pl.id) ? ROLES[pl.pos].map((x) => chip(`role:${pl.id}:${x.id}`, x.name, role === x.id, p.off)).join('') : '';
-      const st = pl ? statsOf(pl) : null;
-      const labels = pl ? statNames(pl.spot).short : [];
-      return `<li class="lsq__row${open ? ' is-picked' : ''}${p.off ? ' is-off' : ''}"${p.off ? '' : ` data-drop="lp:${i}" data-drag="lp:${i}"`}>
-        <button type="button" class="lsq__main" data-live-do="pick:${i}" aria-pressed="${open}"${p.off ? ' disabled' : ''}>
-          ${p.off ? '' : '<span class="drag-handle" aria-hidden="true">⠿</span>'}
-          ${faceOf(p, 0, 34)}
-          <span class="lsq__no" style="--kit:${kit[0].body};--ink:${light(kit[0].body) ? '#111' : '#fff'}">${p.n}</span>
-          <span class="lsq__who"><span class="lsq__name">${esc(p.name)} ${marks}</span><span class="lsq__meta">${at}${pl && pl.spot !== at ? ` · 본래 ${pl.spot}` : ''} · OVR ${Math.round(p.ovr)}${pl ? ` · ${FOOT_NAME[pl.foot]}` : ''}</span>
-          <span class="lsq__cond" title="체력 ${cond}"><span class="meter"><span class="meter__fill${cond < 45 ? ' is-low' : ''}" style="width:${cond}%"></span></span></span></span>
-          <span class="lsq__rt lsq__rt--${ratingTone(rt)}" title="경기 평점">${rt.toFixed(1)}</span>
-        </button>
-        ${open ? `<div class="lsq__more">
-          ${roles ? `<p class="live__label">개인 역할</p><div class="chips">${roles}</div><p class="fine">${esc(ROLES[pl!.pos].find((x) => x.id === role)?.desc ?? '')}</p>` : '<p class="fine">후보 출신이라 개인 역할 지시 없이 뛴다.</p>'}
-          ${st ? `<p class="live__statline">${st.map((v, k) => `<span>${labels[k]} <b>${v}</b></span>`).join('')}</p>` : ''}
-          <p class="fine">체력 ${cond} · ${staminaText(cond)}${r ? ` · 슈팅 ${r.shots}(유효 ${r.onTarget}) · 공 뺏기 ${r.steals} · 파울 ${r.fouls}` : ''}</p>
-        </div>` : ''}
-      </li>`;
-    }).join('')}`;
+  const slots = slotsOf(L, 0, m.me.shape);
+  const order = team.players.map((p, i) => ({ p, i })).sort((a, b) => (slots[a.p.slot] as Slot).u - (slots[b.p.slot] as Slot).u || (slots[a.p.slot] as Slot).v - (slots[b.p.slot] as Slot).v);
+  const men = order.map(({ p, i }) => {
+    const at = slotSpot(slots[p.slot] as Slot);
+    const cond = condition(L, m, p);
+    const rt = rating(L, m, 0, p);
+    const role = p.pid !== undefined ? m.roles[p.pid] : undefined;
+    const marks = `${p.rec?.goals ? `<em>${p.rec.goals}골</em>` : ''}${p.off ? '<em class="is-red">퇴장</em>' : ''}${p.on ? '<em>IN</em>' : ''}`;
+    return `<button type="button" class="lv-man${i === selected ? ' is-picked' : ''}${p.off ? ' is-off' : ''}" data-live-do="pick:${i}"${p.off ? ' disabled' : ''}>
+      <span class="lv-no" style="${noStyle()}">${p.n}</span>
+      <span class="lv-man__name">${esc(short(p.name, p.nat))}${marks}</span>
+      <span class="lv-man__spot">${at}${role ? ` · ${esc(roleName(at, role))}` : ''}</span>
+      <span class="lv-meter${cond < 45 ? ' is-low' : ''}" title="체력 ${cond}"><i style="width:${cond}%"></i></span>
+      <span class="lv-rt lv-rt--${ratingTone(rt)}" title="경기 평점">${rt.toFixed(1)}</span>
+    </button>`;
   }).join('');
-
-  const benchRows = benchList.length === 0 ? '<li class="lsq__empty muted">남은 후보가 없다. 빠른 교체를 쓰면 2군 선수가 들어간다.</li>' : benchList.map((p) => {
-    const line = sel ? (slots[sel.slot] as { line: Pos }).line : p.pos;
-    const pen = sel ? posPenalty(p.spot, line) : 0;
-    const on = p.id === benchPick;
-    return `<li class="lsq__row lsq__row--bench${on ? ' is-picked' : ''}" data-drag="lb:${p.id}" data-drop="lb:${p.id}">
-      <button type="button" class="lsq__main" data-live-do="bench:${p.id}" aria-pressed="${on}">
-        <span class="drag-handle" aria-hidden="true">⠿</span>
-        ${face(p.id, p.nat, 34, [kit[0].body, kit[0].trim], p.name)}
-        <span class="lsq__no lsq__no--bench">${p.no}</span>
-        <span class="lsq__who"><span class="lsq__name">${esc(p.name)}${(L.youth ?? []).includes(p) ? ' <span class="lsq__mark">2군</span>' : ''}</span><span class="lsq__meta">${p.spot} · ${p.age}세 · OVR ${p.ovr + p.temp}${sel ? (pen ? ` · ${line} 자리면 -${pen}` : ` · ${line} 자리에 맞다`) : ''}</span></span>
-        <span class="lsq__ovr">${p.ovr + p.temp}</span>
-      </button>
-    </li>`;
-  }).join('');
-  const gone = (L.subbed ?? []).filter((n) => !team.players.some((p) => p.name === n) && !benchList.some((p) => p.name === n));
-
+  const bench = benchPlayers(g, L).length;
   return `
-    ${confirm}
-    <p class="live__label">경기장 <span class="muted">${team.players.filter((p) => !p.off).length}명 · 누르면 역할과 능력치가 펼쳐진다. 벤치 선수를 ⠿로 끌어 경기장 선수 위에 놓으면 교체한다</span></p>
-    <ul class="lsq">${onPitch}</ul>
-    <p class="live__label">벤치 <span class="muted">${benchList.length}명 · 교체 카드 ${m.subs}장</span></p>
-    <ul class="lsq">${benchRows}</ul>
-    ${gone.length ? `<p class="fine">교체로 나간 선수: ${esc(gone.join(', '))}</p>` : ''}`;
+    ${confusedNote(m, L)}
+    ${label('경기장', '누르면 역할 · 위치 · 교체')}
+    <div class="lv-roster">${men}</div>
+    ${label('빠른 교체', `카드 ${m.subs}장 · 벤치 ${bench}명`)}
+    <div class="lv-chips">
+      ${opt('sub:fw', '공격수 투입', false, m.subs < 1)}${opt('sub:mf', '미드필더 투입', false, m.subs < 1)}${opt('sub:df', '수비수 투입', false, m.subs < 1)}${opt('sub:legs', '지친 둘 교체', false, m.subs < 2)}
+    </div>`;
 }
 
-function updatePanel(): void {
+function sheetPlayer(g: Game, m: MatchState, L: LiveState): string {
+  const p = L.teams[0].players[selected] as LivePlayer;
+  const pl = playerOf(g, p);
+  const slot = slotsOf(L, 0, m.me.shape)[p.slot] as Slot;
+  const at = actingSpot(m, L, p);
+  const keeper = slot.line === 'GK';
+  const cond = condition(L, m, p);
+  const rt = rating(L, m, 0, p);
+  const role = p.pid !== undefined ? (m.roles[p.pid] ?? 'base') : 'base';
+  const roles = p.pid === undefined ? '' : ROLES[at].map((x) => opt(`role:${p.pid}:${x.id}`, x.name, role === x.id)).join('');
+  const desc = ROLES[at].find((x) => x.id === role)?.desc ?? '';
+  // 화면에서 앞(공격 방향)이 어느 쪽인지에 따라 화살표를 맞춘다.
+  // 후반에는 진영이 바뀌어 앞이 반대쪽이다. 세운 화면의 왼쪽과 오른쪽은 보이는 대로 움직인다.
+  const up = upright();
+  const flip = secondHalf(L);
+  const side = up && flip ? -NUDGE : NUDGE;
+  const nudge = (text: string, glyph: string, du: number, dv: number): string => {
+    const u = slot.u + du;
+    const v = slot.v + dv;
+    const dead = keeper || u < 12 || u > 76 || v < 3 || v > 65;
+    return `<button type="button" class="lv-nudge" data-live="move:${selected}:${u}:${v}"${dead ? ' disabled' : ''}><span aria-hidden="true">${glyph}</span>${text}</button>`;
+  };
+  const bench = benchPlayers(g, L).map((b) => ({ b, pen: posPenalty(b.spot, slot.line) })).sort((x, y) => x.pen - y.pen || y.b.ovr + y.b.temp - x.b.ovr - x.b.temp);
+  const pickedIn = bench.find(({ b }) => b.id === benchPick)?.b;
+  const cards = bench.length === 0 ? '<p class="lv-fine">남은 후보가 없다.</p>' : bench.map(({ b, pen }) => `
+    <button type="button" class="lv-sub${b.id === benchPick ? ' is-picked' : ''}" data-live-do="bench:${b.id}" aria-pressed="${b.id === benchPick}">
+      ${face(b.id, b.nat, 30, myKit(), b.name)}
+      <span class="lv-sub__name">${esc(short(b.name, b.nat))}</span>
+      <span class="lv-sub__meta">${b.spot} <b>${b.ovr + b.temp}</b>${pen ? `<i>-${pen}</i>` : ''}</span>
+    </button>`).join('');
+  const st = pl ? statsOf(pl) : null;
+  const names = pl ? statNames(pl.spot).short : [];
+  const r = p.rec;
+  return `
+    <header class="lv-who">
+      ${face(p.pid ?? hashName(p.name), p.nat ?? '', 44, myKit(), p.name)}
+      <div class="lv-who__text">
+        <p class="lv-who__name"><span class="lv-no" style="${noStyle()}">${p.n}</span>${esc(p.name)}</p>
+        <p class="lv-who__meta">${at}${pl && pl.spot !== at ? ` (본래 ${pl.spot})` : ''} · OVR ${Math.round(p.ovr)}${pl ? ` · ${FOOT_NAME[pl.foot]}` : ''} · 체력 ${cond} · 평점 <b class="lv-rt--${ratingTone(rt)}">${rt.toFixed(1)}</b></p>
+      </div>
+      <button type="button" class="lv-x" data-live-do="close" aria-label="닫기"></button>
+    </header>
+    ${roles ? `${label('역할', desc)}<div class="lv-chips">${roles}</div>` : ''}
+    ${keeper ? '' : `${label('위치', '경기장에서 끌어도 된다')}
+    <div class="lv-pad">
+      ${nudge('올린다', up ? (flip ? '▼' : '▲') : (flip ? '◀' : '▶'), NUDGE, 0)}${nudge('내린다', up ? (flip ? '▲' : '▼') : (flip ? '▶' : '◀'), -NUDGE, 0)}${nudge('왼쪽', up ? '◀' : (flip ? '▼' : '▲'), 0, -side)}${nudge('오른쪽', up ? '▶' : (flip ? '▲' : '▼'), 0, side)}
+    </div>`}
+    ${label('교체', `카드 ${m.subs}장 · ${slot.line} 자리 기준`)}
+    <div class="lv-bench">${cards}</div>
+    ${pickedIn && m.subs > 0 ? `${label('함께 바꾸기', '같은 카드 한 장으로 대형까지')}
+    <div class="lv-strip">${localOpt('with:', '대형 그대로', subShape === '')}${SHAPE_IDS.filter((id) => id !== m.me.shape).map((id) => localOpt(`with:${id}`, SHAPES[id].name, subShape === id)).join('')}</div>` : ''}
+    ${pickedIn ? `<button type="button" class="lv-go" data-live="swap:${selected}:${pickedIn.id}${subShape ? `:${subShape}` : ''}"${m.subs < 1 ? ' disabled' : ''}>${m.subs < 1 ? '교체 카드가 없다' : `<b>IN</b> ${pickedIn.no} ${esc(short(pickedIn.name, pickedIn.nat))} <span aria-hidden="true">⇄</span> <b>OUT</b> ${p.n} ${esc(short(p.name, p.nat))}${subShape ? ` <b>+ ${SHAPES[subShape].name}</b>` : ''}`}</button>` : ''}
+    <p class="lv-fine">${st ? `${st.map((v, k) => `${names[k]} ${v}`).join(' · ')}<br>` : ''}${esc(staminaText(cond))}${r ? ` · 슈팅 ${r.shots}(유효 ${r.onTarget}) · 공 뺏기 ${r.steals} · 파울 ${r.fouls}` : ''}</p>`;
+}
+
+/** 판세의 이유: 전술 싸움의 갈래마다 공격과 수비에 얼마나 보태는지. */
+function reasons(o: Outlook): string {
+  const rows = o.parts
+    .map((p) => ({ p, a: (p.att - p.oDef) * TACTIC_GAIN, d: (p.def - p.oAtt) * TACTIC_GAIN }))
+    .filter((x) => Math.abs(x.a) >= 0.05 || Math.abs(x.d) >= 0.05)
+    .sort((x, y) => Math.abs(y.a) + Math.abs(y.d) - Math.abs(x.a) - Math.abs(x.d));
+  if (rows.length === 0) return '<p class="lv-fine">전술로는 어느 쪽도 앞서지 않는다. 지금의 차이는 선수 실력과 체력, 사기에서 나온다.</p>';
+  const num = (v: number): string => `<span class="lv-why__n${Math.abs(v) < 0.05 ? '' : v > 0 ? ' is-up' : ' is-down'}">${signed(v)}</span>`;
+  return `<ul class="lv-why">
+    <li class="lv-why__head"><span></span><span>공격</span><span>수비</span></li>
+    ${rows.map(({ p, a, d }) => `<li><span class="lv-why__t"><b>${esc(p.label)}</b>${p.notes.length ? `<small>${esc(p.notes.slice(0, 2).join(' · '))}</small>` : ''}</span>${num(a)}${num(d)}</li>`).join('')}
+  </ul>`;
+}
+
+/** 벤치가 읽어 낸 상대의 운영. */
+function oppLine(m: MatchState): string {
+  const head = `${SHAPES[m.opp.shape].name}${m.read ? ` · ${STYLES[m.opp.style].name}` : ''}`;
+  const seen = m.oppSeen ? dialChanges(NEUTRAL, m.oppSeen) : null;
+  const dials = seen === null ? '지시는 아직 읽는 중' : seen.length ? seen.join(' · ') : '특별한 지시 없음';
+  return `<p class="lv-note${m.oppNews ? ' lv-note--bad' : ''}"><b>상대</b> ${esc(head)} · ${esc(dials)}${m.oppNews ? '<br>상대 벤치가 방금 무언가 바꿨다. 읽는 중이다.' : ''}</p>`;
+}
+
+/** 지시를 바꾼 뒤로 경기가 어떻게 달라졌는지. 바꾸기 전 구간도 한 줄로 견준다. */
+function afterMarks(m: MatchState, L: LiveState): string {
+  const marks = L.marks ?? [];
+  if (marks.length === 0) return '<p class="lv-fine">지시를 바꾸면, 그 뒤로 슈팅과 점유가 어떻게 달라졌는지 여기에 쌓인다.</p>';
+  const [a, b] = L.teams;
+  const now: LiveMark = { tick: L.tick, text: '', shots: [a.shots, b.shots], xg: [a.xg, b.xg], poss: [a.possession, b.possession], score: [m.score[0], m.score[1]] };
+  const zero: LiveMark = { tick: 0, text: '', shots: [0, 0], xg: [0, 0], poss: [0, 0], score: [0, 0] };
+  const row = (from: LiveMark, to: LiveMark, title: string): string => {
+    const mins = Math.max(0, Math.round((to.tick - from.tick) / PER_MIN));
+    const px = to.poss[0] - from.poss[0];
+    const py = to.poss[1] - from.poss[1];
+    const goals: [number, number] = [to.score[0] - from.score[0], to.score[1] - from.score[1]];
+    const stats = mins < 1 ? '방금 바꿨다' : `${mins}분 동안 슈팅 ${to.shots[0] - from.shots[0]}:${to.shots[1] - from.shots[1]} · 기대 득점 ${(to.xg[0] - from.xg[0]).toFixed(1)}:${(to.xg[1] - from.xg[1]).toFixed(1)}${px + py > 0 ? ` · 점유 ${Math.round((px / (px + py)) * 100)}%` : ''}${goals[0] + goals[1] > 0 ? ` · 골 ${goals[0]}:${goals[1]}` : ''}`;
+    return `<li><b>${title}</b><span>${stats}</span></li>`;
+  };
+  const first = marks[0] as LiveMark;
+  const rows = marks.map((mk, k) => row(mk, marks[k + 1] ?? now, `${minuteOf(mk.tick)}' ${esc(mk.text)}`)).reverse();
+  // 남아 있는 가장 오래된 변경 앞의 구간. 킥오프부터가 아닐 수 있어 "그 전"이라고만 부른다.
+  if (first.tick >= PER_MIN) rows.push(row(zero, first, `${minuteOf(first.tick)}' 전까지`));
+  return `<ol class="lv-after">${rows.join('')}</ol>`;
+}
+
+function sheetTactic(g: Game, m: MatchState, L: LiveState): string {
+  const base = outlook(g);
+  const tabs = subtabs('전술', [['ttab:read', '판세', tacTab === 'read'], ['ttab:plan', '전술 · 태세', tacTab === 'plan'], ['ttab:shape', '대형', tacTab === 'shape']]);
+  if (tacTab === 'read') {
+    return `
+      ${tabs}
+      <div class="lv-read">
+        <span>공격 ${gauge(base.atk)} <b>${signed(base.atk)}</b></span>
+        <span>수비 ${gauge(base.dfn)} <b>${signed(base.dfn)}</b></span>
+      </div>
+      ${oppLine(m)}
+      ${confusedNote(m, L)}
+      ${label('왜 이런가', '전술이 보탠 몫')}
+      ${reasons(base)}
+      ${label('바꾼 뒤', '지시를 바꾼 뒤의 경기')}
+      ${afterMarks(m, L)}
+      <p class="lv-fine">공격은 우리 공격과 상대 수비의 차이, 수비는 우리 수비와 상대 공격의 차이다. 1이 오르면 기대 득점이 6%쯤 움직인다. 상대 지시는 벤치가 읽은 만큼만 들어 있다.</p>`;
+  }
+  if (tacTab === 'plan') {
+    const advice = liveAdvice(g);
+    const styles = STYLE_IDS.map((id) => opt(`style:${id}`, STYLES[id].name, m.me.style === id, false, m.me.style === id ? '' : preview(base, outlook(g, { style: id })))).join('');
+    const oppPush = m.opp.push === 1 ? ' · 상대 총공세' : m.opp.push === -1 ? ' · 상대 잠금' : '';
+    return `
+      ${tabs}
+      <p class="lv-note lv-note--${advice.tone}">${esc(advice.text)}</p>
+      ${confusedNote(m, L)}
+      ${seg('태세', opt('push:-1', '잠근다', m.me.push === -1) + opt('push:0', '균형', m.me.push === 0) + opt('push:1', '총공세', m.me.push === 1), `막판의 승부수${oppPush}`)}
+      ${label('전술', m.me.style === g.season.style ? '몸에 밴 전술' : '완성도 절반')}
+      <div class="lv-chips lv-chips--pv">${styles}</div>
+      <p class="lv-fine">숫자는 바꿨을 때 판세가 움직이는 폭(공격, 수비)이다. 전술을 바꾸면 15분쯤 손발이 어긋난다.</p>`;
+  }
+  const shapes = SHAPE_IDS.map((id) => opt(`shape:${id}`, SHAPES[id].name, m.me.shape === id, m.subs < 1 && m.me.shape !== id)).join('');
+  const def = m.me.shapeDef ?? m.me.shape;
+  const defs = opt('shapedef:same', '공격과 같게', def === m.me.shape, false, def === m.me.shape ? '' : preview(base, outlook(g, { shapeDef: null })))
+    + SHAPE_IDS.filter((id) => id !== m.me.shape).map((id) => opt(`shapedef:${id}`, SHAPES[id].name, def === id, false, def === id ? '' : preview(base, outlook(g, { shapeDef: id })))).join('');
+  return `
+    ${tabs}
+    ${confusedNote(m, L)}
+    ${label('공격 대형', `바꾸면 교체 카드 1장(남은 ${m.subs}장) · 상대 ${SHAPES[m.opp.shape].name}`)}
+    <div class="lv-chips">${shapes}</div>
+    ${label('수비 대형', '공이 없을 때 서는 모양 · 카드 없음')}
+    <div class="lv-chips lv-chips--pv">${defs}</div>
+    <p class="lv-fine">공격과 수비 대형이 다르면 공이 넘어갈 때마다 자리를 찾아 뛰어야 한다. 모양이 많이 다를수록, 즉시 압박이나 바로 역습과 겹칠수록 부담이 크다. 선수를 바꾸면서 대형을 함께 바꾸려면 선수 시트의 교체에서 고른다.</p>`;
+}
+
+function sheetOrders(g: Game, m: MatchState, L: LiveState): string {
+  const d = m.dials;
+  const base = outlook(g);
+  const count = (id: DialPhase): number => DIALS.filter((x) => x.phase === id && d[x.id] !== 0).length + (id === 'att' && d.overlap ? 1 : 0);
+  const tabs = subtabs('국면', PHASES.map((x): [string, string, boolean, number] => [`phase:${x.id}`, x.name, phase === x.id, count(x.id)]));
+  const dials = DIALS.filter((x) => x.phase === phase).map((x) => seg(x.name, x.steps.map((text, k) => {
+    const level = (k - 1) as Level;
+    return opt(`${x.id}:${level}`, text, d[x.id] === level, false, d[x.id] === level ? '' : preview(base, outlook(g, { dials: { ...d, [x.id]: level } }), true));
+  }).join(''))).join('');
+  const overlap = phase !== 'att' ? '' : seg('풀백 오버래핑',
+    opt('overlap:0', '자리 지킴', !d.overlap, false, d.overlap ? preview(base, outlook(g, { dials: { ...d, overlap: false } }), true) : '')
+    + opt('overlap:1', '올라간다', d.overlap, false, d.overlap ? '' : preview(base, outlook(g, { dials: { ...d, overlap: true } }), true)));
+  // 조합: 걸린 것은 이름표로, 하나만 더 맞추면 되는 것은 바로 누를 수 있는 단추로.
+  const on = base.combos.on.map((c) => `<span class="lv-combo lv-combo--${c.good ? 'good' : 'bad'}" title="${esc(c.text)}">${c.good ? '' : '주의 '}${esc(c.name)}</span>`).join('');
+  const near = base.combos.near.slice(0, 3).map(({ combo, missing, fix }) => (fix
+    ? `<button type="button" class="lv-combo lv-combo--near" data-live="${fix.dial}:${fix.level}" title="${esc(combo.text)}">${esc(combo.name)}<small>+ ${esc(missing)}</small></button>`
+    : `<span class="lv-combo lv-combo--near" title="${esc(combo.text)}">${esc(combo.name)}<small>+ ${esc(missing)}</small></span>`)).join('');
+  const bad = base.combos.on.filter((c) => !c.good).map((c) => `<p class="lv-note lv-note--bad"><b>${esc(c.name)}</b> ${esc(c.text)}</p>`).join('');
+  const picked = lastDial ? DIALS.find((x) => x.id === lastDial) : undefined;
+  const fine = picked ? `${picked.name}: ${picked.desc}.` : `${(PHASES.find((x) => x.id === phase) as (typeof PHASES)[number]).desc}의 지시다. 숫자 둘은 골랐을 때 판세가 움직이는 폭으로, 왼쪽이 공격이고 오른쪽이 수비다.`;
+  const moved = !!L.custom?.[m.me.shape];
+  const preset = outlook(g, { dials: presetDials(m.me.style, 1) });
+  return `
+    ${tabs}
+    ${confusedNote(m, L)}
+    <div class="lv-combos" aria-label="조합">${on || near ? `${on}${near}` : '<span class="lv-fine">걸린 조합이 없다. 지시를 서로 맞물리면 조합이 걸린다.</span>'}</div>
+    ${bad}
+    <div class="lv-dials">
+      ${dials}
+      ${overlap}
+    </div>
+    <p class="lv-fine">${esc(fine)}</p>
+    <div class="lv-chips lv-chips--pv">
+      ${opt('dials:preset', '코치 추천', false, false, preview(base, preset))}${opt('dials:reset', '모두 보통', false)}<button type="button" class="lv-opt" data-live="move:reset"${moved ? '' : ' disabled'}>옮긴 자리 되돌리기</button>
+    </div>`;
+}
+
+function sheetMatch(m: MatchState, L: LiveState): string {
+  const [a, b] = L.teams;
+  const pa = Math.round((a.possession / Math.max(1, a.possession + b.possession)) * 100);
+  const recent = [...L.calls].reverse().slice(0, 8);
+  const ticker = recent.length === 0
+    ? '<li class="lv-log__row"><span>시작</span><span>슈팅, 선방, 파울, 교체가 여기에 쌓인다.</span></li>'
+    : recent.map((c) => `<li class="lv-log__row lv-log__row--${c.tone}"><span>${minuteOf(c.tick)}'</span><span>${esc(c.text)}</span></li>`).join('');
+  return `
+    <p class="lv-fine">${esc(m.label)}</p>
+    <dl class="lv-stats">
+      <div><dt>점유율</dt><dd>${pa}<i> : ${100 - pa}</i></dd></div>
+      <div><dt>슈팅(유효)</dt><dd>${a.shots}(${a.onTarget})<i> : ${b.shots}(${b.onTarget})</i></dd></div>
+      <div><dt>기대 득점</dt><dd>${a.xg.toFixed(1)}<i> : ${b.xg.toFixed(1)}</i></dd></div>
+      <div><dt>상대 체력</dt><dd class="lv-stats__text">${esc(staminaText(m.opp.stamina))}</dd></div>
+    </dl>
+    <ol class="lv-log">${ticker}</ol>
+    <div class="lv-chips">
+      <button type="button" class="lv-opt" data-act="skip">남은 경기 건너뛰기</button>
+      <button type="button" class="lv-opt" data-tab="table">순위표</button>
+      <button type="button" class="lv-opt" data-tab="squad">구단 관리</button>
+    </div>`;
+}
+
+function sheetTalk(m: MatchState): string {
+  const lead = m.score[0] - m.score[1];
+  const talk = (cmd: string, title: string, detail: string): string =>
+    `<button type="button" class="lv-talk" data-live="talk:${cmd}"><b>${title}</b><span>${detail}</span></button>`;
+  return `
+    ${label('하프타임 라커룸', lead > 0 ? '앞선 채로 들어왔다' : lead < 0 ? '뒤진 채로 들어왔다' : '팽팽한 채로 들어왔다')}
+    <div class="lv-talks">
+      ${talk('praise', '잘하고 있다고 다독인다', '비기거나 한 골 뒤질 때 잘 통한다')}
+      ${talk('blast', '물병을 걷어찬다', '통하면 크게 살아나고, 안 통하면 얼어붙는다')}
+      ${talk('calm', '후반 계획만 짚는다', '확실한 작은 효과. 후반 초반 전술 변경에 혼선이 없다')}
+    </div>
+    <p class="lv-fine">말을 마치면 진영을 바꿔 후반이 시작된다. 교체와 전술은 아래 탭에서 먼저 바꿔 둘 수 있다.</p>`;
+}
+
+function updateSheet(): void {
   const g = game;
-  const box = $('#live-panel');
-  if (!g || !box) return;
+  const box = $('#lv-sheet');
+  const root = $('#lv');
+  if (!g || !box || !root) return;
   const m = g.match as MatchState;
   const L = m.live as LiveState;
-  document.querySelectorAll<HTMLElement>('[data-live-do^="panel:"]').forEach((el) => {
-    const on = el.dataset.liveDo === `panel:${panel}` && !halftime(g);
+  const sel = L.teams[0].players[selected];
+  if (sheet === 'player' && (!sel || sel.off)) {
+    selected = -1;
+    sheet = 'none';
+  }
+  if (sheet === 'talk' && !halftime(g)) sheet = 'none';
+  // 넓은 화면의 옆 패널은 비워 두지 않는다.
+  if (sheet === 'none' && wide()) sheet = halftime(g) ? 'talk' : 'squad';
+  root.dataset.sheet = sheet;
+  box.hidden = sheet === 'none';
+  document.querySelectorAll<HTMLElement>('[data-live-do^="sheet:"]').forEach((el) => {
+    const id = el.dataset.liveDo?.slice(6);
+    const on = id === sheet || (id === 'squad' && sheet === 'player');
     el.classList.toggle('is-on', on);
     el.setAttribute('aria-selected', String(on));
   });
-  const confused = m.confusion > 0 && L.tick < L.confusedUntil
-    ? `<p class="note note--bad">새 지시를 익히는 중이다. ${Math.ceil((L.confusedUntil - L.tick) / PER_MIN)}분쯤 손발이 맞지 않는다.</p>` : '';
-
-  if (halftime(g)) {
-    const lead = m.score[0] - m.score[1];
-    box.innerHTML = `
-      <p class="live__label">하프타임 라커룸</p>
-      <p class="prose">${lead > 0 ? '앞선 채로 들어왔다. 선수들이 감독을 본다.' : lead < 0 ? '뒤진 채로 들어왔다. 라커룸이 조용하다.' : '팽팽한 채로 들어왔다. 선수들이 감독을 본다.'} 말을 마치면 후반이 시작된다. 교체와 전술은 후반 중에도 바꿀 수 있다.</p>
-      <div class="choices">
-        <button type="button" class="choice" data-live="talk:praise"><span class="choice__label">잘하고 있다고 다독인다</span><span class="choice__detail">장악력 판정. 비기거나 한 골 뒤질 때 잘 통한다</span></button>
-        <button type="button" class="choice" data-live="talk:blast"><span class="choice__label">물병을 걷어찬다</span><span class="choice__detail">장악력 판정. 통하면 크게 살아나고, 안 통하면 얼어붙는다</span></button>
-        <button type="button" class="choice" data-live="talk:calm"><span class="choice__label">후반 계획만 짚는다</span><span class="choice__detail">확실한 작은 효과. 후반 초반의 전술 변경에 혼선이 없다</span></button>
-      </div>
-      <details class="live__halfsquad"><summary class="live__label">하프타임에 선수 보기 · 교체</summary>${squadPanel(g, m, L)}</details>`;
-    return;
-  }
-
-  if (panel === 'team') {
-    const advice = liveAdvice(g);
-    const d = m.dials;
-    box.innerHTML = `
-      <p class="note note--${advice.tone}">${esc(advice.text)}</p>
-      ${confused}
-      ${row('전술', STYLE_IDS.map((id) => {
-        const h = advice.hints[id];
-        return chip(`style:${id}`, STYLES[id].name, m.me.style === id, false, h && h !== '비슷' ? `<span class="chip__hint chip__hint--${h === '유리' ? 'good' : 'bad'}">${h}</span>` : '');
-      }).join(''), m.me.style === g.season.style ? '몸에 밴 전술' : '완성도 절반')}
-      ${row('수비 라인', chip('line:-1', '내린다', d.line === -1) + chip('line:0', '보통', d.line === 0) + chip('line:1', '올린다', d.line === 1), '올리면 뒷공간이 빈다')}
-      ${row('폭', chip('width:-1', '좁게', d.width === -1) + chip('width:0', '보통', d.width === 0) + chip('width:1', '넓게', d.width === 1))}
-      ${row('템포', chip('tempo:-1', '느리게', d.tempo === -1) + chip('tempo:0', '보통', d.tempo === 0) + chip('tempo:1', '빠르게', d.tempo === 1), '빠르면 체력이 더 든다')}
-      ${row('풀백 오버래핑', chip('overlap:0', '자리 지킴', !d.overlap) + chip('overlap:1', '올라간다', d.overlap))}
-      ${row('대형', SHAPE_IDS.map((id) => chip(`shape:${id}`, SHAPES[id].name, m.me.shape === id, m.subs < 1 && m.me.shape !== id)).join(''), `교체 카드 1장 · 상대 ${SHAPES[m.opp.shape].name}`)}`;
-  } else if (panel === 'squad') {
-    box.innerHTML = `${confused}${squadPanel(g, m, L)}`;
-  } else {
-    box.innerHTML = `
-      ${confused}
-      ${row('태세', chip('push:-1', '잠근다', m.me.push === -1) + chip('push:0', '균형', m.me.push === 0) + chip('push:1', '총공세', m.me.push === 1), '막판의 승부수')}
-      <p class="fine">상대 감독은 30분, 하프타임, 60분, 75분에 움직인다.${m.opp.push === 1 ? ' 지금 상대는 총공세다.' : m.opp.push === -1 ? ' 지금 상대는 잠그고 있다.' : ''}</p>
-      ${row('빠른 교체', [
-        chip('sub:fw', '공격수 투입', false, m.subs < 1),
-        chip('sub:mf', '미드필더 투입', false, m.subs < 1),
-        chip('sub:df', '수비수 투입', false, m.subs < 1),
-        chip('sub:legs', '지친 선수 둘 교체', false, m.subs < 2),
-      ].join(''), `남은 카드 ${m.subs}장 · 고르기 귀찮을 때`)}
-      <p class="fine">팀 체력 ${Math.round(m.me.stamina)} · ${esc(staminaText(m.me.stamina))}. 상대 체력은 ${esc(staminaText(m.opp.stamina))}. 지친 뒤에 넣을수록 교체 효과가 크고, 70분이 넘으면 효과를 낼 시간이 짧다. 선수를 직접 골라 바꾸려면 "선수 · 교체" 탭을 쓴다.</p>`;
-  }
+  const top = box.scrollTop;
+  const side = box.querySelector('.lv-bench')?.scrollLeft ?? 0;
+  const strip2 = box.querySelector('.lv-strip')?.scrollLeft ?? 0;
+  box.innerHTML = sheet === 'none' ? ''
+    : sheet === 'squad' ? sheetSquad(g, m, L)
+    : sheet === 'player' ? sheetPlayer(g, m, L)
+    : sheet === 'tactic' ? sheetTactic(g, m, L)
+    : sheet === 'orders' ? sheetOrders(g, m, L)
+    : sheet === 'match' ? sheetMatch(m, L)
+    : sheetTalk(m);
+  box.dataset.kind = sheet;
+  box.scrollTop = top;
+  const strip = box.querySelector('.lv-bench');
+  if (strip) strip.scrollLeft = side;
+  const withs = box.querySelector('.lv-strip');
+  if (withs) withs.scrollLeft = strip2;
+  updateControls();
 }
 
 // ---------- 경기장 ----------
@@ -617,12 +950,36 @@ interface Vis {
   /** 화면 좌표(누르기 판정용). */
   sx: number;
   sy: number;
+  /** 걸음의 위상(공은 구른 각도). */
+  ph: number;
 }
 
 /** 화면에 그리는 위치. 엔진 위치를 스프링으로 따라간다. 키는 "팀:자리". */
 const vis = new Map<string, Vis>();
 /** 공이 지나간 자리(빠르게 움직일 때 꼬리). */
 const trail: { x: number; y: number }[] = [];
+
+/**
+ * 경기장 좌표(m)를 화면에 옮기는 법. 세운 경기장은 우리 팀이 전반에 위로, 눕힌 경기장은 오른쪽으로 공격한다.
+ * 엔진은 90분 내내 우리 팀이 x가 커지는 쪽으로 공격한다고 본다. 후반에는 화면만 반 바퀴 돌려(flip) 두 팀이 진영을 바꾼 것으로 보여 준다.
+ */
+const view = { up: false, flip: false, s: 4, ox: 0, oy: 0 };
+const FX = (x: number): number => (view.flip ? 105 - x : x);
+const FY = (y: number): number => (view.flip ? 68 - y : y);
+const PX = (x: number, y: number): number => view.ox + (view.up ? FY(y) : FX(x)) * view.s;
+const PY = (x: number, y: number): number => view.oy + (view.up ? 105 - FX(x) : FY(y)) * view.s;
+/** 화면의 점을 경기장 좌표로. */
+const toPitch = (sx: number, sy: number): [number, number] => {
+  const [x, y] = view.up ? [105 - (sy - view.oy) / view.s, (sx - view.ox) / view.s] : [(sx - view.ox) / view.s, (sy - view.oy) / view.s];
+  return [FX(x), FY(y)];
+};
+/** 경기장의 방향 벡터를 화면 방향으로. */
+const turn = (dx: number, dy: number): [number, number] => {
+  const k = view.flip ? -1 : 1;
+  return view.up ? [dy * k, -dx * k] : [dx * k, dy * k];
+};
+/** 후반이 시작됐는가(라커룸 대화까지 마쳤는가). 이때부터 진영이 바뀐다. */
+const secondHalf = (L: LiveState): boolean => L.halfTimeDone && L.talked;
 
 /** 임계 감쇠 스프링 한 걸음(암시적 오일러라 큰 dt에도 안정적이다). */
 function spring(v: Vis, tx: number, ty: number, dt: number, w: number): void {
@@ -644,7 +1001,7 @@ function spring(v: Vis, tx: number, ty: number, dt: number, w: number): void {
 function visOf(key: string, x: number, y: number, hx: number): Vis {
   let v = vis.get(key);
   if (!v) {
-    v = { x, y, vx: 0, vy: 0, hx, hy: 0, sx: 0, sy: 0 };
+    v = { x, y, vx: 0, vy: 0, hx, hy: 0, sx: 0, sy: 0, ph: 0 };
     vis.set(key, v);
   }
   return v;
@@ -652,29 +1009,130 @@ function visOf(key: string, x: number, y: number, hx: number): Vis {
 
 const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
 
-/** 유니폼 무늬를 원 안에 그린다. */
-function shirt(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, k: Kit, body: string): void {
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fillStyle = body;
-  ctx.fill();
-  if (body === k.body && k.pattern) {
-    ctx.clip();
-    ctx.fillStyle = k.trim;
-    if (k.pattern === 1) ctx.fillRect(x, y - r, r, r * 2);
-    else if (k.pattern === 2) for (let i = -2; i <= 2; i += 2) ctx.fillRect(x + (i - 0.5) * r * 0.4, y - r, r * 0.4, r * 2);
-    else if (k.pattern === 3) for (let i = -2; i <= 2; i += 2) ctx.fillRect(x - r, y + (i - 0.5) * r * 0.4, r * 2, r * 0.4);
-    else if (k.pattern === 4) {
-      ctx.beginPath();
-      ctx.moveTo(x - r, y + r * 0.2);
-      ctx.lineTo(x + r * 0.2, y - r);
-      ctx.lineTo(x + r * 0.75, y - r);
-      ctx.lineTo(x - r, y + r * 0.75);
-      ctx.fill();
+// ----- 누르기와 끌기 -----
+
+interface Drag {
+  id: number;
+  /** 잡은 선수. 빈 곳을 눌렀으면 -1. */
+  i: number;
+  x0: number;
+  y0: number;
+  x: number;
+  y: number;
+  moving: boolean;
+}
+
+let drag: Drag | null = null;
+
+/** 기준 자리(대형의 자리)를 보여 줄 때: 멈췄거나, 선수를 골랐거나, 끄는 중. */
+const boardMode = (): boolean => paused || !!drag?.moving;
+
+/** 화면의 점에서 가장 가까운 우리 선수. 전술판 모드에서는 기준 자리를 잡아도 된다. */
+function ownAt(px: number, py: number, skip = -1): number {
+  const g = game;
+  if (!g) return -1;
+  const m = g.match as MatchState;
+  const L = m.live as LiveState;
+  const slots = slotsOf(L, 0, m.me.shape);
+  let best = -1;
+  let bestD = 30;
+  L.teams[0].players.forEach((p, i) => {
+    if (p.off || i === skip) return;
+    const v = vis.get(`0:${i}`);
+    if (!v) return;
+    let d = Math.hypot(v.sx - px, v.sy - py);
+    const slot = slots[p.slot] as Slot;
+    if (boardMode() && slot.line !== 'GK') d = Math.min(d, Math.hypot(PX(slot.u, slot.v) - px, PY(slot.u, slot.v) - py));
+    if (d < bestD) {
+      bestD = d;
+      best = i;
     }
+  });
+  return best;
+}
+
+function local(e: PointerEvent): [number, number] {
+  const rect = (canvas as HTMLCanvasElement).getBoundingClientRect();
+  return [e.clientX - rect.left, e.clientY - rect.top];
+}
+
+function onPitchDown(e: PointerEvent): void {
+  if (!game || !canvas || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  const [x, y] = local(e);
+  drag = { id: e.pointerId, i: ownAt(x, y), x0: x, y0: y, x, y, moving: false };
+  canvas.setPointerCapture(e.pointerId);
+  e.preventDefault();
+}
+
+function onPitchMove(e: PointerEvent): void {
+  const g = game;
+  if (!g || !drag || drag.id !== e.pointerId || drag.i < 0) return;
+  [drag.x, drag.y] = local(e);
+  if (drag.moving || Math.hypot(drag.x - drag.x0, drag.y - drag.y0) < 9) return;
+  const m = g.match as MatchState;
+  const L = m.live as LiveState;
+  const p = L.teams[0].players[drag.i] as LivePlayer;
+  // 골키퍼는 옮기지 않는다.
+  if ((slotsOf(L, 0, m.me.shape)[p.slot] as Slot).line === 'GK') return;
+  drag.moving = true;
+}
+
+function onPitchUp(e: PointerEvent): void {
+  const g = game;
+  const d = drag;
+  if (!g || !d || d.id !== e.pointerId) return;
+  drag = null;
+  if (!d.moving) {
+    // 그냥 눌렀다: 선수를 고르거나, 빈 곳이면 고른 것을 푼다.
+    if (d.i >= 0) pick(d.i);
+    else if (selected >= 0) pick(selected);
+    return;
   }
-  ctx.restore();
+  const m = g.match as MatchState;
+  const L = m.live as LiveState;
+  const p = L.teams[0].players[d.i] as LivePlayer;
+  const slots = slotsOf(L, 0, m.me.shape);
+  const other = ownAt(d.x, d.y, d.i);
+  const before = actingSpot(m, L, p);
+  selected = d.i;
+  benchPick = -1;
+  sheet = 'player';
+  if (other >= 0 && (slots[(L.teams[0].players[other] as LivePlayer).slot] as Slot).line !== 'GK') {
+    const q = L.teams[0].players[other] as LivePlayer;
+    command(`trade:${d.i}:${other}`);
+    say(`${p.n}번 ${short(p.name, p.nat)}와 ${q.n}번 ${short(q.name, q.nat)}이 자리를 맞바꿨다`);
+    return;
+  }
+  const [x, y] = toPitch(d.x, d.y);
+  command(`move:${d.i}:${clamp(x, 0, 105).toFixed(1)}:${clamp(y, 0, 68).toFixed(1)}`);
+  const after = actingSpot(m, L, p);
+  say(after === before ? `${p.n}번 ${short(p.name, p.nat)}의 자리를 옮겼다` : `${p.n}번 ${short(p.name, p.nat)}: ${before} → ${after}`);
+}
+
+function onPitchCancel(): void {
+  drag = null;
+}
+
+// ----- 그리기 -----
+
+/** 경기장 좌표의 두 모서리로 화면 사각형을 얻는다. */
+function box(x0: number, y0: number, x1: number, y1: number): [number, number, number, number] {
+  const ax = PX(x0, y0);
+  const ay = PY(x0, y0);
+  const bx = PX(x1, y1);
+  const by = PY(x1, y1);
+  return [Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)];
+}
+
+function plate(ctx: CanvasRenderingContext2D, cssW: number, x: number, y: number, text: string, bg: string, ink: string, h: number): void {
+  const tw = ctx.measureText(text).width + 8;
+  const tx = clamp(x, tw / 2 + 2, cssW - tw / 2 - 2);
+  ctx.fillStyle = bg;
+  ctx.beginPath();
+  ctx.roundRect(tx - tw / 2, y - h / 2, tw, h, 3);
+  ctx.fill();
+  ctx.fillStyle = ink;
+  ctx.fillText(text, tx, y + 0.5);
 }
 
 function draw(frac: number, snap = false, dt = 0): void {
@@ -685,66 +1143,57 @@ function draw(frac: number, snap = false, dt = 0): void {
   const L = m.live as LiveState;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const cssW = c.clientWidth || 320;
-  const pad = 3;
-  const s = (cssW - pad * 2) / 105;
-  const cssH = Math.round(68 * s + pad * 2);
+  const cssH = c.clientHeight || 240;
   if (c.width !== Math.round(cssW * dpr) || c.height !== Math.round(cssH * dpr)) {
     c.width = Math.round(cssW * dpr);
     c.height = Math.round(cssH * dpr);
-    c.style.height = `${cssH}px`;
   }
   const ctx = c.getContext('2d');
   if (!ctx) return;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const X = (x: number): number => pad + x * s;
-  const Y = (y: number): number => pad + y * s;
-
-  // 잔디: 줄무늬와 가장자리 그늘.
-  ctx.fillStyle = '#2a7d4a';
-  ctx.fillRect(0, 0, cssW, cssH);
-  for (let k = 0; k < 14; k += 2) {
-    ctx.fillStyle = '#2f8a52';
-    ctx.fillRect(X((105 / 14) * k), Y(0), (105 / 14) * s, 68 * s);
+  view.up = upright();
+  const [pw, ph] = view.up ? [68, 105] : [105, 68];
+  const [padT, padG] = margins(wide());
+  const [padX, padY] = view.up ? [padT, padG] : [padG, padT];
+  view.s = Math.max(1.5, Math.min((cssW - padX * 2) / pw, (cssH - padY * 2) / ph));
+  view.ox = (cssW - pw * view.s) / 2;
+  view.oy = (cssH - ph * view.s) / 2;
+  const s = view.s;
+  const now = performance.now();
+  const sec = now / 1000;
+  // 구장과 벤치는 그대로 두고, 후반에는 선수와 공만 반대 진영으로 옮겨 그린다. 배경은 크기가 바뀔 때만 다시 칠한다.
+  view.flip = false;
+  const key = `${c.width}x${c.height}:${view.up}:${s.toFixed(3)}`;
+  if (look && (!scene || sceneKey !== key)) {
+    scene = paintStadium(scene?.image ?? document.createElement('canvas'), cssW, cssH, dpr, { s, up: view.up, X: PX, Y: PY }, look);
+    sceneKey = key;
+    party = null;
   }
-  const vignette = ctx.createRadialGradient(cssW / 2, cssH / 2, cssH * 0.3, cssW / 2, cssH / 2, cssW * 0.7);
-  vignette.addColorStop(0, 'rgba(0,0,0,0)');
-  vignette.addColorStop(1, 'rgba(0,0,0,0.18)');
-  ctx.fillStyle = vignette;
-  ctx.fillRect(0, 0, cssW, cssH);
-  ctx.strokeStyle = 'rgba(255,255,255,0.72)';
-  ctx.lineWidth = Math.max(1, s * 0.15);
-  ctx.strokeRect(X(0), Y(0), 105 * s, 68 * s);
-  ctx.beginPath();
-  ctx.moveTo(X(52.5), Y(0));
-  ctx.lineTo(X(52.5), Y(68));
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(X(52.5), Y(34), 9.15 * s, 0, Math.PI * 2);
-  ctx.stroke();
-  for (const side of [0, 1]) {
-    const x0 = side === 0 ? 0 : 105;
-    const dir = side === 0 ? 1 : -1;
-    ctx.strokeRect(Math.min(X(x0), X(x0 + dir * 16.5)), Y(13.84), 16.5 * s, 40.32 * s);
-    ctx.strokeRect(Math.min(X(x0), X(x0 + dir * 5.5)), Y(24.84), 5.5 * s, 18.32 * s);
-    ctx.beginPath();
-    ctx.arc(X(x0 + dir * 11), Y(34), 9.15 * s, side === 0 ? -0.93 : Math.PI - 0.93, side === 0 ? 0.93 : Math.PI + 0.93);
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.fillRect(Math.min(X(x0), X(x0 - dir * 1.2)), Y(30.34), 1.2 * s, 7.32 * s);
-  }
+  if (scene) ctx.drawImage(scene.image, 0, 0, cssW, cssH);
+  const shade = scene?.shade ?? [0.14, 0.3];
+  const wind = look?.weather === 'wind' ? 1 : 0;
+  // 코너 깃발.
+  const flagSize = clamp(s * 0.8, 3, 5);
+  for (const [fx, fy] of [[0, 0], [105, 0], [105, 68], [0, 68]] as const) drawFlag(ctx, PX(fx, fy), PY(fx, fy), flagSize, look?.owner[0] ?? PICK, calm ? 0 : sec, wind);
   // 공격 방향.
-  ctx.fillStyle = 'rgba(255,255,255,0.55)';
-  ctx.font = `600 ${Math.max(10, s * 2.2)}px 'Barlow Condensed', system-ui, sans-serif`;
+  const turned = secondHalf(L);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = `600 ${clamp(s * 2.2, 10, 13)}px 'Barlow Condensed', 'IBM Plex Sans KR', system-ui, sans-serif`;
+  ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText('공격 →', X(1.5), Y(1));
-  ctx.textAlign = 'right';
-  ctx.fillText('← 상대 공격', X(103.5), Y(1));
+  if (view.up) ctx.fillText(turned ? '공격 ▼' : '공격 ▲', PX(50, 1.2), PY(50, 1.2));
+  else if (turned) {
+    ctx.textAlign = 'right';
+    ctx.fillText('◀ 공격', PX(51, 2.4), PY(51, 2.4));
+  } else ctx.fillText('공격 ▶', PX(54, 2.4), PY(54, 2.4));
+  view.flip = turned;
 
   // 배속이 빠를수록 스프링을 빠르게 한다. 멈춰 있거나 처음 그리면 바로 맞춘다.
   const w = 9 * Math.sqrt(speed);
   const step = snap ? 0 : dt;
   const lerp = (a: number, b: number): number => a + (b - a) * frac;
+  const mySlots = slotsOf(L, 0, m.me.shape);
+  const board = boardMode();
 
   // 선수 위치.
   type Dot = { t: 0 | 1; i: number; p: LivePlayer; v: Vis };
@@ -769,14 +1218,15 @@ function draw(frac: number, snap = false, dt = 0): void {
         const d = Math.hypot(bx, by) || 1;
         return [bx / d, by / d];
       })();
-      const turn = Math.min(1, step * 8 || 1);
-      v.hx += (dx - v.hx) * turn;
-      v.hy += (dy - v.hy) * turn;
+      const rate = Math.min(1, step * 8 || 1);
+      v.hx += (dx - v.hx) * rate;
+      v.hy += (dy - v.hy) * rate;
       const hn = Math.hypot(v.hx, v.hy) || 1;
       v.hx /= hn;
       v.hy /= hn;
-      v.sx = X(v.x);
-      v.sy = Y(v.y);
+      if (!calm) v.ph += step * clamp(5 + sp * 1.2, 0, 22);
+      v.sx = PX(v.x, v.y);
+      v.sy = PY(v.x, v.y);
       dots.push({ t, i, p, v });
     });
   }
@@ -807,130 +1257,176 @@ function draw(frac: number, snap = false, dt = 0): void {
     bv.vx = 0;
     bv.vy = 0;
   } else spring(bv, ballX, ballY, step, f ? 40 : 22);
-  if (Math.hypot(bv.vx, bv.vy) > 12) trail.push({ x: bv.x, y: bv.y });
+  const ballPace = Math.hypot(bv.vx, bv.vy);
+  if (!calm) bv.ph += step * Math.min(ballPace, 30) * 1.1;
+  if (ballPace > 12) trail.push({ x: bv.x, y: bv.y });
   else if (trail.length) trail.shift();
   if (trail.length > 7) trail.shift();
+
+  const r = clamp(s * 2.2, 9, 15);
+
+  // 전술판: 우리 선수의 기준 자리와 지금 위치를 잇는다. 고른 선수의 자리는 경기 중에도 보인다.
+  for (const { t, i, p, v } of dots) {
+    if (t !== 0 || (!board && i !== selected)) continue;
+    const slot = mySlots[p.slot] as Slot;
+    if (slot.line === 'GK') continue;
+    const ax = PX(slot.u, slot.v);
+    const ay = PY(slot.u, slot.v);
+    const on = i === selected;
+    ctx.save();
+    ctx.strokeStyle = on ? PICK : 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = on ? 1.6 : 1;
+    ctx.setLineDash([2, 3]);
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(v.sx, v.sy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(ax, ay, r * 0.62, 0, Math.PI * 2);
+    ctx.fillStyle = on ? 'rgba(255,225,74,0.22)' : 'rgba(255,255,255,0.1)';
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // 패스와 슈팅의 목표 지점.
   if (f) {
     ctx.save();
     ctx.setLineDash(f.kind === 'shot' ? [] : [3, 5]);
-    ctx.strokeStyle = f.kind === 'shot' ? 'rgba(255,225,74,0.85)' : 'rgba(255,255,255,0.35)';
+    ctx.strokeStyle = f.kind === 'shot' ? 'rgba(255,225,74,0.85)' : 'rgba(255,255,255,0.4)';
     ctx.lineWidth = f.kind === 'shot' ? 2 : 1.2;
     ctx.beginPath();
-    ctx.moveTo(X(bv.x), Y(bv.y));
-    ctx.lineTo(X(f.toX), Y(f.toY));
+    ctx.moveTo(PX(bv.x, bv.y), PY(bv.x, bv.y));
+    ctx.lineTo(PX(f.toX, f.toY), PY(f.toX, f.toY));
     ctx.stroke();
     ctx.restore();
   }
 
-  // 선수: 아래에 있는 선수부터 그려 겹칠 때 자연스럽게 한다.
-  const r = Math.max(8, s * 2);
-  const tags: { x: number; y: number; text: string; mine: boolean }[] = [];
+  // 선수 말: 화면 아래에 있는 선수가 위에 오게 그린다.
+  const tags: { x: number; y: number; text: string; kind: 'name' | 'mine' | 'theirs' }[] = [];
   const owner = L.owner;
-  dots.sort((a, b) => a.v.y - b.v.y);
+  dots.sort((a, b) => a.v.sy - b.v.sy);
   for (const { t, i, p, v } of dots) {
     const k = kit[t];
-    const x = X(v.x);
-    const y = Y(v.y);
-    const keeper = p.line === 'GK' && (SLOTS[t === 0 ? m.me.shape : m.opp.shape][p.slot] as { line: Pos }).line === 'GK';
+    const x = v.sx;
+    const y = v.sy;
+    const rr = t === 0 ? r : r * 0.9;
+    const keeper = p.line === 'GK' && (slotsOf(L, t, t === 0 ? m.me.shape : m.opp.shape)[p.slot] as Slot).line === 'GK';
     const body = keeper ? k.keeper : k.body;
-    // 그림자.
-    ctx.beginPath();
-    ctx.ellipse(x + r * 0.18, y + r * 0.32, r * 1.02, r * 0.78, 0, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    ctx.fill();
-    shirt(ctx, x, y, r, k, body);
+    const picked = t === 0 && i === selected;
     const hasBall = !!owner && owner.team === t && owner.i === i;
-    ctx.lineWidth = Math.max(1.2, r * 0.2);
-    ctx.strokeStyle = hasBall ? '#ffe14a' : 'rgba(0,0,0,0.6)';
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.stroke();
-    // 바라보는 쪽 표시.
-    const ang = Math.atan2(v.hy, v.hx);
-    ctx.beginPath();
-    ctx.arc(x, y, r + 1.6, ang - 0.5, ang + 0.5);
-    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-    ctx.lineWidth = Math.max(1.5, r * 0.22);
-    ctx.stroke();
-    if (t === 0 && i === selected) {
-      ctx.beginPath();
-      ctx.arc(x, y, r + 5, 0, Math.PI * 2);
-      ctx.strokeStyle = '#ffe14a';
-      ctx.lineWidth = 2.2;
-      ctx.setLineDash([4, 3]);
-      ctx.stroke();
-      ctx.setLineDash([]);
+    const tk = `${t}:${i}:${p.name}`;
+    let tone = toneOf.get(tk);
+    if (!tone) {
+      tone = tones(p.pid ?? hashName(p.name), p.nat ?? '');
+      toneOf.set(tk, tone);
     }
-    if (hasBall || (t === 0 && i === selected) || (L.next && L.next.team === t && L.next.i === i)) {
-      tags.push({ x, y, text: `${p.n} ${short(p.name, p.nat)}`, mine: t === 0 });
-    }
-    // 등번호: 바탕이 밝으면 검게, 무늬가 있으면 테두리를 둘러 읽히게 한다.
-    ctx.font = `700 ${Math.round(r * 1.2)}px 'Barlow Condensed', system-ui, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const ink = light(body) ? '#111' : '#fff';
-    if (!keeper && k.pattern) {
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = ink === '#111' ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.75)';
-      ctx.strokeText(String(p.n), x, y + 0.5);
-    }
-    ctx.fillStyle = ink;
-    ctx.fillText(String(p.n), x, y + 0.5);
+    const [hx, hy] = turn(v.hx, v.hy);
+    drawFigure(ctx, {
+      x, y, r: rr, ang: Math.atan2(hy, hx), kit: k, body, skin: tone[0], hair: tone[1], keeper, n: p.n,
+      stride: v.ph, run: calm ? 0 : clamp(Math.hypot(v.vx, v.vy) / 4, 0, 1), hasBall, picked, shade, lit: scene?.lit ?? false,
+    });
+    // 이름표: 전술판 모드에서는 우리 선수 모두, 경기 중에는 공 가진 선수와 고른 선수만.
+    if (t === 0 && (board || picked || hasBall)) tags.push({ x, y: y + rr + 8, text: short(p.name, p.nat), kind: picked || hasBall ? 'mine' : 'name' });
+    else if (t === 1 && hasBall) tags.push({ x, y: y + rr + 8, text: `${p.n} ${short(p.name, p.nat)}`, kind: 'theirs' });
   }
 
   // 공과 꼬리. 뜬 공은 그림자가 땅에 남는다.
-  const bx = X(bv.x);
-  const by = Y(bv.y);
+  const bx = PX(bv.x, bv.y);
+  const by = PY(bv.x, bv.y);
   const br = Math.max(3, s * 0.75);
   trail.forEach((pt, k) => {
     ctx.beginPath();
-    ctx.arc(X(pt.x), Y(pt.y) - lift * 0.5, br * (0.4 + k * 0.06), 0, Math.PI * 2);
+    ctx.arc(PX(pt.x, pt.y), PY(pt.x, pt.y) - lift * 0.5, br * (0.4 + k * 0.06), 0, Math.PI * 2);
     ctx.fillStyle = `rgba(255,255,255,${0.08 + k * 0.04})`;
     ctx.fill();
   });
   ctx.beginPath();
-  ctx.ellipse(bx + lift * 0.15, by + 1, br * (1 + lift / (s * 12)), br * 0.6, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.ellipse(bx + lift * 0.15, by + 1.5, br * (1 + lift / (s * 12)), br * 0.6, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(8,24,16,0.4)';
   ctx.fill();
-  ctx.beginPath();
-  ctx.arc(bx, by - lift, br * (1 + lift / (s * 20)), 0, Math.PI * 2);
-  ctx.fillStyle = '#ffffff';
-  ctx.fill();
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = '#111';
-  ctx.stroke();
+  drawBall(ctx, bx, by - lift, br * (1 + lift / (s * 20)), bv.ph);
 
-  ctx.font = `700 ${Math.max(11, Math.round(s * 2.4))}px 'IBM Plex Sans KR', system-ui, sans-serif`;
+  // 골 뒤풀이와 날씨. 이름표보다 아래에 그린다.
+  if (netHit) {
+    const age = (now - netHit.start) / 1000;
+    if (age > 1.1) netHit = null;
+    else {
+      const gx = netHit.side === 1 ? 105 : 0;
+      const out = netHit.side === 1 ? 1 : -1;
+      drawNetHit(ctx, box(gx, 30.34, gx + out * 2.2, 37.66), turn(out, 0), 1 - age / 1.1, calm ? 0 : age);
+    }
+  }
+  if (party) {
+    if (now > party.until) party = null;
+    else drawParty(ctx, party, now, calm);
+  }
+  if (!calm && look?.weather === 'rain') drawRain(ctx, cssW, cssH, sec);
+  else if (!calm && wind) drawWind(ctx, cssW, cssH, sec);
+
+  const th = clamp(s * 2.6, 12, 15);
+  ctx.font = `600 ${clamp(s * 1.9, 10, 12)}px 'IBM Plex Sans KR', system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const tag of tags) {
-    const tw = ctx.measureText(tag.text).width + 10;
-    const h = Math.max(16, s * 3.6);
-    const tx = Math.min(Math.max(tag.x, tw / 2 + 2), cssW - tw / 2 - 2);
-    const ty = tag.y - r - h / 2 - 4 < h / 2 ? tag.y + r + h / 2 + 4 : tag.y - r - h / 2 - 4;
-    ctx.fillStyle = tag.mine ? 'rgba(255,255,255,0.94)' : 'rgba(20,20,20,0.85)';
-    ctx.beginPath();
-    ctx.roundRect(tx - tw / 2, ty - h / 2, tw, h, h / 2);
-    ctx.fill();
-    ctx.fillStyle = tag.mine ? '#111' : '#fff';
-    ctx.fillText(tag.text, tx, ty + 0.5);
+    if (tag.kind === 'name') plate(ctx, cssW, tag.x, tag.y, tag.text, 'rgba(8,24,16,0.62)', '#f4f8f0', th);
+    else if (tag.kind === 'mine') plate(ctx, cssW, tag.x, tag.y, tag.text, 'rgba(255,255,255,0.95)', '#111', th);
+    else plate(ctx, cssW, tag.x, tag.y, tag.text, 'rgba(20,20,20,0.82)', '#fff', th);
   }
 
-  const flashEl = $('#live-flash');
-  if (flashEl) {
-    const on = !!flash && performance.now() < flash.until;
-    flashEl.textContent = on && flash ? flash.text : '';
-    flashEl.className = `live__flash${on && flash ? (flash.good ? ' is-good' : ' is-bad') : ''}`;
+  // 끄는 중: 놓을 자리와, 놓으면 어떤 자리가 되는지.
+  if (drag?.moving) {
+    const p = L.teams[0].players[drag.i] as LivePlayer;
+    const base = mySlots[p.slot] as Slot;
+    const other = ownAt(drag.x, drag.y, drag.i);
+    const swap = other >= 0 && (mySlots[(L.teams[0].players[other] as LivePlayer).slot] as Slot).line !== 'GK';
+    const [x, y] = toPitch(drag.x, drag.y);
+    const next = movedSlot(base, clamp(x, 0, 105), clamp(y, 0, 68), false);
+    const tx = swap ? (vis.get(`0:${other}`) as Vis).sx : PX(next.u, next.v);
+    const ty = swap ? (vis.get(`0:${other}`) as Vis).sy : PY(next.u, next.v);
+    ctx.save();
+    ctx.strokeStyle = PICK;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(PX(base.u, base.v), PY(base.u, base.v));
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(tx, ty, r + (swap ? 6 : 2), 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,225,74,0.2)';
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    ctx.font = `700 ${clamp(s * 2.1, 11, 13)}px 'IBM Plex Sans KR', system-ui, sans-serif`;
+    plate(ctx, cssW, tx, Math.max(th, ty - r - th), swap ? '자리 맞바꾸기' : `${p.n} → ${slotSpot(next)}`, PICK, '#111', th + 3);
   }
-  if (L.halfTimeDone && !L.talked) {
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+
+  const flashEl = $('#lv-flash');
+  if (flashEl) {
+    const on = flash && now < flash.until ? flash : null;
+    const fk = on ? `${on.until}` : '';
+    if (flashKey !== fk || (!on && flashEl.className !== 'lv__flash')) {
+      flashKey = fk;
+      flashEl.innerHTML = on ? `<b>${esc(on.text)}</b>${on.sub ? `<span>${esc(on.sub)}</span>` : ''}` : '';
+      flashEl.className = `lv__flash${on ? (on.good ? ' is-good' : ' is-bad') : ''}`;
+      if (on) flashEl.style.cssText = `--club:${kit[on.good ? 0 : 1].body};--club-ink:${light(kit[on.good ? 0 : 1].body) ? '#111' : '#fff'}`;
+    }
+  }
+  if (L.halfTimeDone && !L.talked && !drag?.moving) {
+    ctx.fillStyle = 'rgba(8,24,16,0.4)';
     ctx.fillRect(0, 0, cssW, cssH);
+    // 글자 뒤에 띠를 깔아 선수 이름표와 겹쳐도 읽히게 한다.
+    const big = clamp(s * 5, 20, 34);
+    ctx.fillStyle = 'rgba(8,24,16,0.82)';
+    ctx.fillRect(0, PY(52.5, 34) - big * 0.95, cssW, big * 2.55);
     ctx.fillStyle = '#fff';
-    ctx.font = `700 ${Math.max(18, s * 5)}px 'Black Han Sans', system-ui, sans-serif`;
+    ctx.font = `400 ${clamp(s * 5, 20, 34)}px 'Black Han Sans', system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('하프타임', cssW / 2, cssH / 2);
+    ctx.fillText('하프타임', cssW / 2, PY(52.5, 34));
+    ctx.font = `600 ${clamp(s * 2.4, 11, 14)}px 'IBM Plex Sans KR', system-ui, sans-serif`;
+    ctx.fillText('후반은 진영을 바꿔 뛴다', cssW / 2, PY(52.5, 34) + clamp(s * 5, 20, 34));
   }
 }

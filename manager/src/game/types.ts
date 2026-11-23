@@ -7,7 +7,7 @@ export type Spot = 'GK' | 'CB' | 'LB' | 'RB' | 'CDM' | 'CM' | 'CAM' | 'LM' | 'RM
 export type Foot = 'R' | 'L' | 'B';
 /** 전술. 팀이 공을 가졌을 때와 잃었을 때 무엇을 하는지를 정한다. */
 export type StyleId = 'press' | 'possess' | 'counter' | 'direct' | 'wide' | 'park';
-export type ShapeId = '442' | '433' | '4231' | '352' | '541';
+export type ShapeId = '442' | '433' | '4231' | '4141' | '4312' | '352' | '343' | '541';
 export type WeatherId = 'clear' | 'rain' | 'wind' | 'heat';
 export type FocusId = 'attack' | 'defense' | 'fitness' | 'youth';
 export type PlanId = 'allout' | 'steady' | 'rotate';
@@ -359,19 +359,49 @@ export interface TransferWindow {
   lend: { until: 'winter' | 'end'; share: number; fee: number };
 }
 
-/** 선수 개인에게 주는 역할. base는 포지션의 기본 역할이다. */
-export type RoleId = 'base' | 'link' | 'target' | 'drift' | 'hold' | 'maker' | 'runner' | 'stopper' | 'mark' | 'sweeper';
+/** 선수 개인에게 주는 역할. base는 그 자리의 기본 역할이다. 자리(세부 포지션)마다 고를 수 있는 역할이 다르다. */
+export type RoleId =
+  | 'base' | 'sweeper'
+  | 'stopper' | 'mark' | 'libero'
+  | 'wing' | 'invert' | 'stay'
+  | 'hold' | 'maker' | 'runner' | 'hunter' | 'shadow'
+  | 'inside' | 'hug' | 'track'
+  | 'link' | 'target' | 'drift' | 'poach' | 'harry';
+
+/** 세 단계 지시의 값. */
+export type Level = -1 | 0 | 1;
 
 /** 전술과 별개로 조절하는 팀 지시. -1, 0, 1의 세 단계다. */
 export interface Dials {
   /** 수비 라인: -1 내림, 1 올림. */
-  line: -1 | 0 | 1;
+  line: Level;
   /** 좌우 폭: -1 좁게, 1 넓게. */
-  width: -1 | 0 | 1;
+  width: Level;
   /** 템포: -1 느리게, 1 빠르게. */
-  tempo: -1 | 0 | 1;
+  tempo: Level;
   /** 풀백 오버래핑. */
   overlap: boolean;
+  /** 압박: -1 기다린다, 1 달려든다. */
+  press: Level;
+  /** 패스: -1 짧게, 1 길게. */
+  pass: Level;
+  /** 공격 방향: -1 왼쪽, 1 오른쪽. */
+  flank: Level;
+  /** 마무리: -1 만들어 넣는다, 1 보이면 쏜다. */
+  final: Level;
+  /** 공을 잃은 직후: -1 물러선다, 1 즉시 압박. */
+  lose: Level;
+  /** 공을 따낸 직후: -1 지킨다, 1 바로 역습. */
+  win: Level;
+  /** 수비 블록의 폭: -1 좁게, 1 넓게. */
+  block: Level;
+}
+
+/** 경기마다 들고 나가는 기본 지시. 구단 관리 화면에서 정해 두면 킥오프 때 그대로 걸린다. */
+export interface Plan {
+  dials: Dials;
+  /** 선수 id별 개인 역할. */
+  roles: Record<number, RoleId>;
 }
 
 /** 실시간 경기 화면의 선수 한 명. 좌표는 미터(가로 105, 세로 68)다. */
@@ -483,6 +513,8 @@ export interface LiveState {
   talked: boolean;
   /** 지시를 바꾼 뒤의 혼선이 끝나는 틱. */
   confusedUntil: number;
+  /** 지시를 바꾼 순간들(최근 몇 개). */
+  marks?: LiveMark[];
   over: boolean;
 }
 
@@ -500,6 +532,18 @@ export interface MatchTeam {
   /** 75분 이후의 태세. 1 총공세, -1 잠그기. */
   push: -1 | 0 | 1;
   red: boolean;
+  /** 공이 없을 때 서는 대형. 없으면 공격 대형 그대로 선다. */
+  shapeDef?: ShapeId;
+}
+
+/** 지시를 바꾼 순간의 경기 기록. 바꾼 뒤에 무엇이 달라졌는지 견주는 데 쓴다. */
+export interface LiveMark {
+  tick: number;
+  text: string;
+  shots: [number, number];
+  xg: [number, number];
+  poss: [number, number];
+  score: [number, number];
 }
 
 /** 직접 지휘하는 한 경기. 15분 여섯 토막으로 진행된다. */
@@ -543,6 +587,15 @@ export interface MatchState {
   /** 경기 소개에 덧붙이는 한 줄(라이벌전 통산 전적 등). 예전 저장에는 없다. */
   intro?: string;
   dials: Dials;
+  /** 상대의 팀 지시. 상대 감독이 경기 중에 바꾼다. 예전 저장에는 없다(모두 보통). */
+  oppDials?: Dials;
+  /** 벤치가 읽어 낸 상대의 지시. 상대가 바꾼 것을 아직 못 읽었으면 예전 것이 남아 있다. */
+  oppSeen?: Dials;
+  /** 상대 감독이 마지막으로 손을 쓴 때(분)와 지금까지 쓴 횟수. */
+  oppMoved?: number;
+  oppMoves?: number;
+  /** 아직 읽지 못한 상대의 변화. at분이 되면 드러난다. */
+  oppNews?: { at: number; text: string };
   /** 주전 선수 id별 개인 역할. 적혀 있지 않으면 기본 역할이다. */
   roles: Record<number, RoleId>;
   live: LiveState | null;
@@ -658,6 +711,8 @@ export interface Game {
   formation?: ShapeId;
   /** 대형별로 손으로 옮긴 자리 좌표(u: 자기 골문에서 앞으로, v: 왼쪽에서). 없으면 대형의 기본 자리. */
   tweaks?: Partial<Record<ShapeId, { u: number; v: number }[]>>;
+  /** 경기마다 들고 나가는 팀 지시와 개인 역할. 예전 저장에는 없다. */
+  plan?: Plan;
   /** 주전 열한 명을 뺀 나머지 선수층의 수준. */
   depth: number;
   morale: number;

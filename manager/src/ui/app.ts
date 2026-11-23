@@ -1,27 +1,31 @@
 // 화면. 게임 규칙은 game/에 있고, 여기서는 game.scene을 그리고 누른 선택지를 act()에 넘긴다.
 import { act, createGame, legacyScore, migrate } from '../game/career.ts';
 import {
-  ATTRS, ATTR_IDS, BACKGROUNDS, BACKGROUND_IDS, LEAGUES, POS_NAME, STYLES, won,
+  ATTRS, ATTR_IDS, BACKGROUNDS, BACKGROUND_IDS, LEAGUES, POS_NAME, STYLES, STYLE_IDS, won,
 } from '../game/data.ts';
 import { COUNTRIES, COUNTRY_IDS, countryOf, leaguesOf, quotaOf } from '../game/countries.ts';
 import type { CountryId } from '../game/countries.ts';
 import { licenseName } from '../game/hiring.ts';
 import { ko } from '../game/josa.ts';
-import { effOvr, formationOf, lineAt, potentialText, ratings, slotsFor, spotAt, stage, valueOf } from '../game/squad.ts';
+import { effOvr, formationOf, lineAt, lineupLocked, potentialText, ratings, slotsFor, spotAt, stage, valueOf } from '../game/squad.ts';
 import { formationMini, playerCard, playerRow, spotBadge } from './cards.ts';
 import { face } from './face.ts';
 import { ESC_SLOTS, NON_HG_LIMIT, PROMISES, RESERVE_LIMIT, oddsText, quotaWord, contractText, depthOf, englandStatus, englandText, foreignCount, inEngland, isForeign, placeAt, promiseKept, quota, swapLineup, totalWages } from '../game/contract.ts';
 import { SLOTS } from '../game/live.ts';
 import { agenda } from '../game/agenda.ts';
-import { manage } from '../game/manage.ts';
+import { manage, planDials, planRole } from '../game/manage.ts';
+import { WEATHER, hint } from '../game/match.ts';
 import { posPenalty } from '../game/player.ts';
-import { SHAPES, SHAPE_IDS } from '../game/tactics.ts';
+import { DIALS, PHASES, ROLES, SHAPES, SHAPE_IDS, comboState, fits } from '../game/tactics.ts';
+import type { DialPhase } from '../game/tactics.ts';
 import { legacyTitle } from '../game/talk.ts';
 import { dropCount, sortTable, zone } from '../game/world.ts';
-import { isLive, liveDrop, mountLive, onLiveClick, pauseLive, renderLive, unmountLive } from './live.ts';
-import type { BackgroundId, Block, Choice, Club, FormRow, MarketCard, MarketTab, Game, LeagueId, MatchLine, Phase, Player, ShapeId } from '../game/types.ts';
+import { isLive, mountLive, onLiveClick, pauseLive, renderLive, unmountLive } from './live.ts';
+import type { BackgroundId, Block, Choice, Club, FormRow, MarketCard, MarketTab, Game, LeagueId, MatchLine, MatchState, Phase, Player, ShapeId, StyleId } from '../game/types.ts';
 
 type Tab = 'play' | 'table' | 'squad' | 'record';
+/** 구단 관리 탭 안의 작은 탭. 한 화면이 길어지지 않게 나눈다. */
+type SquadTab = 'todo' | 'xi' | 'tactic' | 'players' | 'club';
 
 interface HallEntry {
   name: string;
@@ -49,6 +53,13 @@ let tableLeague: LeagueId | null = null;
 let marketTab: string | null = null;
 /** 구단 관리 탭에서 맞바꾸려고 고른 자리나 후보. */
 let squadPick: { kind: 'slot'; at: number } | { kind: 'res'; id: number } | null = null;
+/** 구단 관리에서 보고 있는 작은 탭(고르기 전에는 할 일이 있으면 할 일, 없으면 라인업)과 역할을 보고 있는 선발 자리. */
+let squadTab: SquadTab | null = null;
+let rolePick = 10;
+/** 구단 관리의 팀 지시에서 보고 있는 국면. */
+let planPhase: DialPhase = 'att';
+/** 경기 준비 화면에서 고른 전술. 고르기 전에는 몸에 밴 전술이다. */
+let preStyle: StyleId | null = null;
 let confirmReset = false;
 /** 선발 배치가 거절됐을 때 잠깐 보여 줄 이유. */
 let notice: string | null = null;
@@ -202,14 +213,6 @@ function onPointerUp(e: PointerEvent): void {
   const dst = target?.dataset.drop ?? '';
   const [sk, sv] = d.src.split(':');
   let action: string | null = null;
-  if (sk === 'lb' || sk === 'lp') {
-    // 실시간 경기: 벤치 선수와 경기장 선수를 맞바꾼다(교체).
-    const [dk, dv] = dst.split(':');
-    if (sk === 'lb' && dk === 'lp') action = `swap:${dv}:${sv}`;
-    else if (sk === 'lp' && dk === 'lb') action = `swap:${sv}:${dv}`;
-    if (action) liveDrop(action);
-    return;
-  }
   const at = Number(sv);
   if (dst.startsWith('s:')) {
     const j = Number(dst.slice(2));
@@ -256,7 +259,7 @@ function onClick(e: Event): void {
     e.preventDefault();
     return;
   }
-  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-country],[data-mtab],[data-todo],[data-lineup],[data-do],[data-live],[data-live-do],[data-step]');
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-country],[data-mtab],[data-todo],[data-lineup],[data-do],[data-live],[data-live-do],[data-step],[data-stab],[data-pre],[data-role],[data-phase]');
   if (!el) return;
   if (el.dataset.step && el.dataset.for) {
     const slider = root.querySelector<HTMLInputElement>(`input[type="range"][data-range="${CSS.escape(el.dataset.for)}"]`);
@@ -296,6 +299,35 @@ function onClick(e: Event): void {
     return;
   }
   if (!game) return;
+  if (el.dataset.stab) {
+    // 구단 관리의 작은 탭. 다른 화면의 바로가기에서도 쓴다.
+    const same = tab === 'squad';
+    const y = window.scrollY;
+    tab = 'squad';
+    squadTab = el.dataset.stab as SquadTab;
+    squadPick = null;
+    render();
+    window.scrollTo(0, same ? y : 0);
+    return;
+  }
+  if (el.dataset.phase) {
+    planPhase = PHASES.find((x) => x.id === el.dataset.phase)?.id ?? 'att';
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+    return;
+  }
+  if (el.dataset.role) {
+    rolePick = Number(el.dataset.role);
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+    return;
+  }
+  if (el.dataset.pre) {
+    prematch(game, el.dataset.pre);
+    return;
+  }
   if (el.dataset.tab) {
     tab = el.dataset.tab as Tab;
     confirmReset = false;
@@ -391,6 +423,37 @@ function onClick(e: Event): void {
   window.scrollTo(0, screenKey(game) === before ? y : 0);
 }
 
+const isPrematch = (g: Game): boolean => g.phase === 'match' && !!g.job && !!g.match && (g.match.step === 'shape' || g.match.step === 'plan' || g.match.step === 'mode');
+
+/**
+ * 경기 준비 화면의 동작. 대형, 전술, 지휘 방식을 한 화면에서 고르고, 킥오프를 누르면 엔진의 세 단계(대형 → 전술 → 방식)를 차례로 넘긴다.
+ * 대형은 구단 관리의 대형과 같은 것이라, 여기서 바꾸면 선발의 자리도 함께 바뀐다.
+ */
+function prematch(g: Game, cmd: string): void {
+  const m = g.match;
+  if (!m || !isPrematch(g)) return;
+  const [what, v = ''] = cmd.split(':');
+  const y = window.scrollY;
+  if (what === 'shape') {
+    if (m.step === 'shape') notice = manage(g, `formation:${v}`).msg;
+  } else if (what === 'style') {
+    if (m.step !== 'mode' && STYLE_IDS.includes(v as StyleId)) preStyle = v as StyleId;
+  } else if (what === 'go') {
+    if (v === 'auto') {
+      if (m.step === 'shape') act(g, 'auto');
+    } else {
+      const style = preStyle ?? g.season.style;
+      if (g.match?.step === 'shape') act(g, formationOf(g));
+      if (g.match?.step === 'plan') act(g, style);
+      if (g.match?.step === 'mode') act(g, v === 'live' ? 'live' : 'text');
+    }
+    preStyle = null;
+  }
+  store(SAVE_KEY, g);
+  render();
+  window.scrollTo(0, what === 'go' ? 0 : y);
+}
+
 /** 화면을 가르는 값. 이 값이 그대로면 같은 화면을 다시 그린 것이다. */
 function screenKey(g: Game): string {
   return [g.year, g.phase, g.scene.title, g.window?.view ?? '', g.hiring?.step ?? '', g.hiring?.talk?.at ?? '', g.hiring?.talk?.i ?? '', g.match?.step ?? '', g.match?.seg ?? ''].join('|');
@@ -429,6 +492,11 @@ function render(): void {
   const live = !!game && tab === 'play' && isLive(game);
   // 실시간 경기 중에는 전광판 대신 점수와 경기장을 화면 위에 붙여 둔다. 아래 지시 패널을 만지면서도 경기가 보인다.
   document.body.classList.toggle('is-live', live);
+  // 위아래에 붙는 막대의 실제 높이를 알려, 그 사이에 붙는 단추와 작은 탭이 가려지지 않게 한다.
+  const bar = root.querySelector<HTMLElement>('.board');
+  const nav = root.querySelector<HTMLElement>('.tabs');
+  if (bar && bar.offsetHeight) document.documentElement.style.setProperty('--board-h', `${bar.offsetHeight}px`);
+  if (nav && nav.offsetHeight) document.documentElement.style.setProperty('--tabs-h', `${nav.offsetHeight}px`);
   if (game && live) {
     mountLive(game, {
       save: () => store(SAVE_KEY, game),
@@ -495,10 +563,10 @@ function renderGame(g: Game): string {
   return `
     <header class="board">
       <div class="board__row">
-        ${club ? crest(club, 40) : ''}
+        ${club ? crest(club, 30) : ''}
         <div class="board__club">
-          <p class="board__kicker">${esc(where)} · ${g.year}</p>
           <h1 class="board__name">${esc(club ? club.name : '터치라인')}</h1>
+          <p class="board__kicker">${esc(where)} · ${g.year}</p>
         </div>
         <dl class="board__nums">
           <div><dt>명성</dt><dd>${Math.round(g.manager.rep)}</dd></div>
@@ -507,7 +575,7 @@ function renderGame(g: Game): string {
       </div>
       ${step >= 0 ? `<ol class="steps" aria-label="시즌 진행">${STEPS.map((s, i) => `<li class="steps__item${i < step ? ' is-done' : i === step ? ' is-now' : ''}"${i === step ? ' aria-current="step"' : ''}>${s.label}</li>`).join('')}</ol>` : ''}
     </header>
-    <main class="page">${tab === 'play' ? (isLive(g) ? renderLive(g) : renderScene(g)) : tab === 'table' ? renderTables(g) : tab === 'squad' ? renderSquad(g) : renderRecord(g)}</main>
+    <main class="page">${tab === 'play' ? (isLive(g) ? renderLive(g) : isPrematch(g) ? renderPrematch(g) : renderScene(g)) : tab === 'table' ? renderTables(g) : tab === 'squad' ? renderSquad(g) : renderRecord(g)}</main>
     <nav class="tabs" aria-label="화면 전환">
       ${([['play', '진행'], ['table', '순위'], ['squad', '구단 관리'], ['record', '기록']] as [Tab, string][]).map(([id, label]) => {
         const n = id === 'squad' && g.job ? agenda(g).length : 0;
@@ -530,10 +598,10 @@ function renderTodo(g: Game): string {
   const items = agenda(g);
   if (items.length === 0) return '';
   const urgent = items.filter((t) => t.tone === 'bad').length;
-  return `<button type="button" class="todo-bar${urgent ? ' is-urgent' : ''}" data-tab="squad">
+  return `<button type="button" class="todo-bar${urgent ? ' is-urgent' : ''}" data-stab="todo">
     <span class="todo-bar__count">${items.length}</span>
     <span class="todo-bar__text">할 일 ${items.length}건${urgent ? ` · 급함 ${urgent}` : ''} — ${esc(items[0]!.text.split('.')[0] as string)}</span>
-    <span class="todo-bar__go">구단 관리에서 처리 ›</span>
+    <span class="todo-bar__go" aria-hidden="true">›</span>
   </button>`;
 }
 
@@ -549,6 +617,25 @@ function choiceButton(g: Game, c: Choice, solo: boolean): string {
   </button>`;
 }
 
+/** 진행 화면 맨 위의 한 줄 현황: 순위, 최근 흐름, 분위기, 예산. 누르면 해당 화면으로 간다. */
+function renderPulse(g: Game): string {
+  if (!g.job) return '';
+  const club = g.clubs[g.job.club] as Club;
+  const rows = club.nation ? [] : sortTable(g.tables[club.league] ?? []);
+  const at = rows.findIndex((r) => r.club === g.job!.club);
+  const row = rows[at];
+  const form = row && row.form.length
+    ? `<span class="form">${row.form.map((f) => `<span class="form__dot form__dot--${f}">${f === 'W' ? '승' : f === 'D' ? '무' : '패'}</span>`).join('')}</span>`
+    : '<span class="muted">개막 전</span>';
+  const mood = Math.round(g.morale);
+  return `<div class="pulse" role="group" aria-label="팀 현황">
+    <button type="button" class="pulse__cell" data-tab="table"><span class="pulse__k">순위</span><span class="pulse__v">${row && row.p > 0 ? `${at + 1}<small>위 / ${rows.length}</small>` : '<small>–</small>'}</span></button>
+    <button type="button" class="pulse__cell pulse__cell--form" data-tab="table"><span class="pulse__k">최근</span><span class="pulse__v">${form}</span></button>
+    <button type="button" class="pulse__cell" data-stab="club"><span class="pulse__k">분위기</span><span class="pulse__v${mood < 40 ? ' is-bad' : ''}">${mood}</span></button>
+    ${g.job.kind === 'club' ? `<button type="button" class="pulse__cell" data-stab="club"><span class="pulse__k">예산</span><span class="pulse__v pulse__v--text">${esc(won(g.job.budget))}</span></button>` : ''}
+  </div>`;
+}
+
 function renderScene(g: Game): string {
   const s = g.scene;
   const deal = s.blocks.find((b): b is Extract<Block, { kind: 'deal' }> => b.kind === 'deal');
@@ -556,17 +643,97 @@ function renderScene(g: Game): string {
   // 협상 화면에서는 합의 가능성과 제출 버튼을 화면 아래에 붙여, 조건을 바꾸면서 바로 본다.
   const main = deal ? visible.find((c) => c.tone === 'primary') : undefined;
   const rest = visible.filter((c) => c !== main);
+  const hub = TODO_PHASES.includes(g.phase) && !deal;
+  // 선택지가 하나뿐이면 화면 아래에 붙여 둔다. 긴 글을 끝까지 내리지 않아도 넘어갈 수 있다.
+  const lone = !deal && visible.length === 1;
+  const list = rest.map((c, i) => `${c.group && c.group !== rest[i - 1]?.group ? `<p class="choices__group">${esc(c.group.trim())}</p>` : ''}${choiceButton(g, c, visible.length === 1)}`).join('');
   return `
-    ${TODO_PHASES.includes(g.phase) && !deal ? renderTodo(g) : ''}
-    <article class="scene${deal ? ' scene--deal' : ''}">
-      <p class="eyebrow">${esc(s.eyebrow)}</p>
-      <h2 class="scene__title">${esc(s.title)}</h2>
-      ${s.blocks.map((b) => renderBlock(g, b)).join('')}
-      <div class="choices">
-        ${rest.map((c, i) => `${c.group && c.group !== rest[i - 1]?.group ? `<p class="choices__group">${esc(c.group.trim())}</p>` : ''}${choiceButton(g, c, visible.length === 1)}`).join('')}
-      </div>
+    ${hub ? `${renderPulse(g)}${renderTodo(g)}` : ''}
+    <article class="scene${deal ? ' scene--deal' : ''}${s.blocks.length && rest.length > 1 ? ' scene--split' : ''}">
+      <header class="scene__head">
+        <p class="eyebrow">${esc(s.eyebrow)}</p>
+        <h2 class="scene__title">${esc(s.title)}</h2>
+      </header>
+      <div class="scene__body">${s.blocks.map((b) => renderBlock(g, b)).join('')}</div>
+      ${lone ? `<div class="dock">${list}</div>` : `<div class="choices${rest.length >= 6 && rest.every((c) => !c.group) ? ' choices--many' : ''}">${list}</div>`}
       ${deal && main ? `<div class="dealbar">${gauge(deal.odds, deal.oddsLabel)}${choiceButton(g, main, false)}</div>` : ''}
     </article>`;
+}
+
+/** 경기 준비: 상대, 두 팀의 대형을 올린 전술판, 대형과 전술 고르기, 킥오프를 한 화면에 담는다. */
+function renderPrematch(g: Game): string {
+  const m = g.match as MatchState;
+  const club = g.clubs[g.job!.club] as Club;
+  const opp = g.clubs[m.oppId] as Club | undefined;
+  const open = m.step === 'shape';
+  const shape = open ? formationOf(g) : m.me.shape;
+  const style = m.step === 'mode' ? m.me.style : (preStyle ?? g.season.style);
+  const a = SHAPES[shape];
+  const b = SHAPES[m.opp.shape];
+  const weather = WEATHER[m.weather];
+  const msg = notice;
+  notice = null;
+  const shapeNotes = [a.desc, a.cm !== b.cm ? (a.cm > b.cm ? '중원 수적 우위' : '중원 수적 열세') : '', a.cb - b.cf >= 2 ? '문전에 수비 여유' : a.cb - b.cf <= 0 ? '문전 일대일' : ''].filter(Boolean);
+  const styleNotes = [STYLES[style].desc, style === g.season.style ? '몸에 밴 전술' : '완성도 절반', fits(style, shape) ? `${a.name}과 잘 맞음` : ''].filter(Boolean);
+  // 전술판: 우리는 왼쪽에서 오른쪽으로 공격한다. 자리 좌표(길이 80 기준)를 반쪽 조금 넘게 펼친다.
+  const mine = slotsFor(g, shape).map((sl, i) => {
+    const p = g.squad[i];
+    return `<g transform="translate(${(5 + sl.u * 0.66).toFixed(1)} ${sl.v.toFixed(1)})"><circle r="3.5" fill="${club.colors[0]}" stroke="#0e2218" stroke-width="0.7"/><text class="pre__no" fill="${lightOf(club.colors[0]) ? '#111' : '#fff'}">${p ? p.no : ''}</text></g>`;
+  }).join('');
+  const theirs = SLOTS[m.opp.shape].map((sl) => `<circle cx="${(100 - sl.u * 0.66).toFixed(1)}" cy="${(68 - sl.v).toFixed(1)}" r="2.6" fill="${opp ? opp.colors[0] : '#c9cdc9'}" stroke="#0e2218" stroke-width="0.6" opacity="0.92"/>`).join('');
+  const d = planDials(g);
+  const combos = comboState(d, g.squad.map((_, i) => planRole(g, i))).on;
+  const orders = [...combos.map((c) => (c.good ? `조합 ${c.name}` : `주의 ${c.name}`)), ...DIALS.filter((x) => d[x.id] !== 0).map((x) => `${x.name} ${x.steps[d[x.id] + 1]}`), ...(d.overlap ? ['풀백 오버래핑'] : [])];
+  return `
+    <article class="pre">
+      <header class="pre__vs">
+        <div class="pre__side">${crest(club, 30)}<b>${esc(club.name)}</b><span>${esc(a.name)}</span></div>
+        <p class="pre__at"><b>${m.venue === 'home' ? '홈' : m.venue === 'away' ? '원정' : '중립'}</b><span>${esc(weather.name)}</span></p>
+        <div class="pre__side pre__side--opp">${opp ? crest(opp, 30) : ''}<b>${esc(m.oppName)}</b><span>${esc(b.name)} · ${esc(STYLES[m.oppUsual].name)}</span></div>
+      </header>
+      <p class="eyebrow">${esc(m.label)}${weather.note ? ` · ${esc(weather.note)}` : ''}</p>
+      ${m.intro ? `<p class="note note--plain">${esc(m.intro)}</p>` : ''}
+      ${msg ? `<p class="note note--plain" role="status">${esc(msg)}</p>` : ''}
+      <button type="button" class="pre__board" data-stab="xi" aria-label="전술판. 누르면 라인업을 손본다">
+        <svg viewBox="0 0 105 68" aria-hidden="true">
+          <rect class="pre__turf" width="105" height="68"/>
+          <path class="pre__chalk" d="M1 1 H104 V67 H1 Z M52.5 1 V67 M1 13.8 H17.5 V54.2 H1 M104 13.8 H87.5 V54.2 H104 M1 24.8 H6.5 V43.2 H1 M104 24.8 H98.5 V43.2 H104"/>
+          <circle class="pre__chalk" cx="52.5" cy="34" r="9.15"/>
+          ${theirs}${mine}
+        </svg>
+        <span class="pre__edit">라인업 손보기 ›</span>
+      </button>
+      <section class="pre__pick">
+        <p class="pre__label">대형<small>${esc(shapeNotes.join(' · '))}</small></p>
+        <div class="pre__shapes" role="group" aria-label="대형">
+          ${SHAPE_IDS.map((id) => `<button type="button" class="pre__shape${id === shape ? ' is-on' : ''}" data-pre="shape:${id}" aria-pressed="${id === shape}"${open ? '' : ' disabled'}>${miniFor(id)}<span>${esc(SHAPES[id].name)}</span></button>`).join('')}
+        </div>
+      </section>
+      <section class="pre__pick">
+        <p class="pre__label">전술<small>${esc(styleNotes.join(' · '))}</small></p>
+        <div class="pre__styles" role="group" aria-label="전술">
+          ${STYLE_IDS.map((id) => {
+            const h = hint(g, m, id, m.oppUsual);
+            return `<button type="button" class="pre__style${id === style ? ' is-on' : ''}" data-pre="style:${id}" aria-pressed="${id === style}"${m.step === 'mode' ? ' disabled' : ''}><span>${esc(STYLES[id].name)}</span>${h === '비슷' ? '' : `<i class="pre__hint pre__hint--${h === '유리' ? 'good' : 'bad'}">${h}</i>`}</button>`;
+          }).join('')}
+        </div>
+      </section>
+      <p class="pre__orders"><span>팀 지시 · ${orders.length ? esc(orders.join(' · ')) : '모두 보통'}</span><button type="button" class="link" data-stab="tactic">지시와 역할 ›</button></p>
+      <div class="dock dock--kick">
+        <button type="button" class="choice choice--solo" data-pre="go:live"><span class="choice__label">킥오프 · 보면서 지휘</span></button>
+        <div class="dock__row">
+          <button type="button" class="choice" data-pre="go:text"><span class="choice__label">빠른 진행</span><span class="choice__detail">글로 1분</span></button>
+          <button type="button" class="choice" data-pre="go:auto"${open ? '' : ' disabled'}><span class="choice__label">코치에게 맡긴다</span><span class="choice__detail">자동 진행</span></button>
+        </div>
+      </div>
+    </article>`;
+}
+
+/** 밝은 색인지(위에 올릴 글자 색을 정한다). */
+function lightOf(hex: string): boolean {
+  const h = hex.replace('#', '');
+  const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
+  return ((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114 > 150;
 }
 
 /** 합의 가능성 막대. */
@@ -594,13 +761,13 @@ function renderMarket(tabs: MarketTab[]): string {
 function marketCard(c: MarketCard): string {
   const p = c.player;
   const gain = c.gain === undefined ? '' : `<span class="mcard__gain mcard__gain--${c.gain > 0 ? 'up' : c.gain < 0 ? 'down' : 'flat'}" title="같은 포지션 가장 약한 선발 대비">${c.gain > 0 ? '+' : ''}${c.gain}</span>`;
+  // 한 장이 두 줄을 넘지 않게: 윗줄에 얼굴, 자리, 이름과 값, OVR. 아랫줄에 꼬리표.
   const body = `
-    <span class="mcard__top">${face(p.id, p.nat, 40, undefined, p.name)}${spotBadge(p)}<span class="mcard__who"><span class="mcard__name">${esc(p.name)}</span><span class="mcard__meta">${p.age}세 · ${esc(c.from)}</span></span><span class="mcard__ovr"><span class="mcard__ovrn">${p.ovr + p.temp}</span>${gain}</span></span>
-    <span class="mcard__price">${esc(c.price)}</span>
-    ${c.tags.length ? `<span class="mcard__tags">${c.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</span>` : ''}
+    <span class="mcard__top">${face(p.id, p.nat, 36, undefined, p.name)}<span class="mcard__who"><span class="mcard__name">${spotBadge(p)}${esc(p.name)}</span><span class="mcard__meta">${p.age}세 · ${esc(c.from)}</span></span><span class="mcard__ovr"><span class="mcard__ovrn">${p.ovr + p.temp}</span>${gain}</span></span>
+    <span class="mcard__line"><span class="mcard__price">${esc(c.price)}</span>${c.tags.length ? `<span class="mcard__tags">${c.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</span>` : ''}</span>
     ${c.status ? `<span class="mcard__status mcard__status--${c.status.tone}">${esc(c.status.text)}</span>` : ''}`;
   return `<li class="mcard${c.status?.tone === 'bad' ? ' is-warn' : ''}">
-    ${c.act ? `<button type="button" class="mcard__main" data-act="${esc(c.act)}">${body}<span class="mcard__go" aria-hidden="true">협상 ›</span></button>` : `<div class="mcard__main">${body}</div>`}
+    ${c.act ? `<button type="button" class="mcard__main" data-act="${esc(c.act)}" aria-label="${esc(`${p.name} 협상`)}">${body}</button>` : `<div class="mcard__main">${body}</div>`}
     ${c.actions?.length ? `<div class="mcard__acts">${c.actions.map((a) => `<button type="button" class="chip${a.tone === 'primary' ? ' chip--primary' : a.tone === 'danger' ? ' chip--danger' : ''}" data-act="${esc(a.act)}"${a.disabled ? ' disabled' : ''}>${esc(a.label)}</button>`).join('')}</div>` : ''}
   </li>`;
 }
@@ -668,7 +835,7 @@ function renderBlock(g: Game, b: Block): string {
       <li class="log__row log__row--${l.tone}"><span class="log__min">${l.min === 0 ? '시작' : `${Math.min(90, l.min)}'`}</span><span class="log__text">${esc(l.text)}</span></li>`).join('')}</ol>`;
     case 'text': return `<p class="prose">${esc(b.text)}</p>`;
     case 'note': return `<p class="note note--${b.tone}">${esc(b.text)}</p>`;
-    case 'stats': return `<dl class="stats">${b.rows.map((r) => `<div class="stats__row"><dt>${esc(r.label)}</dt><dd class="${r.tone ? `is-${r.tone}` : ''}">${esc(r.value)}</dd></div>`).join('')}</dl>`;
+    case 'stats': return `<dl class="stats${b.rows.length >= 4 && b.rows.every((r) => r.value.length <= 16) ? ' stats--grid' : ''}">${b.rows.map((r) => `<div class="stats__row"><dt>${esc(r.label)}</dt><dd class="${r.tone ? `is-${r.tone}` : ''}">${esc(r.value)}</dd></div>`).join('')}</dl>`;
     case 'matches': return renderMatches(b.items);
     case 'table': return renderTable(g, b.league);
     case 'players': return `<ul class="plist">${b.items.map((it) => playerRow(it.player, { note: it.note, delta: it.delta })).join('')}</ul>`;
@@ -810,8 +977,9 @@ function renderSquad(g: Game): string {
   const q = quota(g);
   const msg = notice;
   notice = null;
-  const busy = g.phase === 'match';
+  const busy = lineupLocked(g);
   const items = agenda(g);
+  const view: SquadTab = squadTab ?? (items.length ? 'todo' : 'xi');
   const pickSlot = squadPick?.kind === 'slot' ? squadPick.at : -1;
   const pickRes = squadPick?.kind === 'res' ? squadPick.id : -1;
   const target = pickSlot >= 0 ? lineAt(g, pickSlot) : null;
@@ -849,23 +1017,27 @@ function renderSquad(g: Game): string {
     </button>`;
   };
 
-  return `
-    <section class="section">
-      <p class="eyebrow">${esc(club.name)} · 구단 관리</p>
-      <h2 class="scene__title">할 일과 선수단</h2>
+  const names: [SquadTab, string][] = [['todo', '할 일'], ['xi', '라인업'], ['tactic', '전술'], ['players', '선수'], ['club', '구단']];
+  const head = `
       <dl class="teamrate" aria-label="팀 지표">
         <div><dt>ATT</dt><dd>${Math.round(r.att)}</dd></div>
         <div><dt>MID</dt><dd>${Math.round(r.mid)}</dd></div>
         <div><dt>DEF</dt><dd>${Math.round(r.def)}</dd></div>
         <div><dt>뎁스</dt><dd>${Math.round(depthOf(g))}</dd></div>
       </dl>
-      ${msg ? `<p class="note note--plain" role="status">${esc(msg)}</p>` : ''}
-      <h3 class="section__sub">할 일 ${items.length ? `<span class="muted">${items.length}건 · 버튼으로 바로 처리한다</span>` : ''}</h3>
-      ${items.length ? `<ul class="todo__list todo__list--open">${items.map(todoItem).join('')}</ul>` : '<p class="muted">지금 챙길 일이 없다.</p>'}
+      <div class="subtabs" role="tablist" aria-label="구단 관리">
+        ${names.map(([id, label]) => `<button type="button" role="tab" class="subtabs__item${id === view ? ' is-on' : ''}" data-stab="${id}" aria-selected="${id === view}">${label}${id === 'todo' && items.length ? `<i>${items.length}</i>` : ''}</button>`).join('')}
+      </div>
+      ${msg ? `<p class="note note--plain" role="status">${esc(msg)}</p>` : ''}`;
 
-      <h3 class="section__sub">선발 11명 <span class="muted">${esc(SHAPES[shape].name)}</span></h3>
-      <p class="fine">${busy ? '경기 중에는 바꿀 수 없다.' : squadPick ? '바꿀 상대(다른 자리나 아래 후보)를 누른다. 같은 칸을 다시 누르면 취소.' : '끌어다 놓기: 선수를 다른 선수 위에 놓으면 맞바꾸고, 빈 잔디에 놓으면 그 자리로 옮기며(앞뒤 위치에 따라 수비·미드필더·공격 줄이 바뀐다), 후보 칸에 놓으면 후보로 내린다. 후보는 ⠿를 잡고 경기장으로 끌어 올린다. 눌러서 고른 뒤 상대를 눌러도 된다.'}</p>
-      <div class="xi-actions" role="group" aria-label="대형">
+  let body = '';
+  if (view === 'todo') {
+    body = `
+      ${items.length ? `<ul class="todo__list todo__list--open">${items.map(todoItem).join('')}</ul>` : '<p class="muted">지금 챙길 일이 없다.</p>'}
+      ${nation ? '' : `<div class="xi-actions">${marketOpenNow(g) ? '<button type="button" class="chip" data-todo="market:sign">영입 후보 보기</button><button type="button" class="chip" data-todo="market:mine">판매 · 임대 · 해지</button>' : '<span class="fine">영입, 판매, 임대, 재계약은 여름·겨울 이적시장에서 한다.</span>'}</div>`}`;
+  } else if (view === 'xi') {
+    body = `
+      <div class="shape-row" role="group" aria-label="대형">
         ${SHAPE_IDS.map((id) => `<button type="button" class="chip${id === shape ? ' is-on' : ''}" data-todo="formation:${id}" aria-pressed="${id === shape}"${busy ? ' disabled' : ''}>${esc(SHAPES[id].name)}</button>`).join('')}
       </div>
       <div class="xi-actions">
@@ -873,39 +1045,94 @@ function renderSquad(g: Game): string {
         ${g.tweaks?.[shape] ? `<button type="button" class="chip" data-todo="reset"${busy ? ' disabled' : ''}>자리 되돌리기</button>` : ''}
         ${squadPick ? '<button type="button" class="chip" data-lineup="clear">선택 취소</button>' : ''}
       </div>
-      <div class="xi-pitch" role="group" aria-label="선발 11명"${busy ? '' : ' data-drop="pitch"'}>
-        <svg class="xi-pitch__lines" viewBox="0 0 68 86" preserveAspectRatio="none" aria-hidden="true">
-          <rect x="1" y="1" width="66" height="84" fill="none"/><line x1="1" y1="43" x2="67" y2="43"/><circle cx="34" cy="43" r="7"/>
-          <rect x="14" y="1" width="40" height="13" fill="none"/><rect x="14" y="72" width="40" height="13" fill="none"/>
-        </svg>
-        ${g.squad.map(token).join('')}
-      </div>
-      <p class="fine">경기마다 대형과 전술을 다시 고를 수 있다. 여기서 정한 대형은 선발의 자리와 포지션 감점(빨간 숫자)을 정한다.</p>
-
-      ${nation ? '' : `
-      <h3 class="section__sub">후보 ${g.reserves.length}/${RESERVE_LIMIT}${q.reg !== null || q.pitch !== null ? ` <span class="muted">${quotaWord(g)} 등록 ${foreignCount(g, [...g.squad, ...g.reserves])}${q.reg !== null ? `/${q.reg}` : ''} · 선발 ${foreignCount(g, g.squad)}/${q.pitch ?? '-'}</span>` : ''}${inEngland(g) ? ` <span class="muted">비홈그로운 ${englandStatus(g).nonHg}/${NON_HG_LIMIT} · ESC ${englandStatus(g).esc}/${ESC_SLOTS}</span>` : ''}</h3>
-      ${g.reserves.length === 0 ? '<p class="muted">후보 명단이 비어 있다. 이적시장에서 백업이나 로테이션으로 영입하면 여기에 들어온다.</p>' : `<div class="bench-grid"${busy ? '' : ' data-drop="reserves"'}>${g.reserves.map(resCard).join('')}</div>`}
-      ${g.loaned.length ? `<p class="fine">임대 보낸 선수: ${g.loaned.map((p) => `${esc(p.name)}(${esc(p.loan!.club)}, ${p.loan!.until === 'winter' ? '겨울 복귀' : '시즌 끝 복귀'})`).join(', ')}</p>` : ''}
-      <div class="xi-actions">${marketOpenNow(g) ? '<button type="button" class="chip" data-todo="market:mine">이적시장에서 판매 · 임대 · 해지</button><button type="button" class="chip" data-todo="market:sign">영입 후보 보기</button>' : '<span class="fine">영입, 판매, 임대, 재계약은 여름·겨울 이적시장에서 한다.</span>'}</div>`}
-
-      <details class="squad-more">
-        <summary class="section__sub">선수 정보 자세히 보기(능력치, 계약, 성장)</summary>
-        <ul class="plist">${[...g.squad, ...g.reserves].map((p) => playerRow(p, {
-          note: `${g.squad.includes(p) ? '선발' : '후보'} · ${POS_NAME[p.pos]}${p.contract ? ` · ${PROMISES[p.contract.promise].name}` : ''}`, extra: extra(p), kit: club.colors, flag: flags(p).join(' · ') || undefined,
-        })).join('')}</ul>
-      </details>
-      <dl class="stats">
-        <div class="stats__row"><dt>전술</dt><dd>${g.lastStyle ? esc(STYLES[g.lastStyle].name) : '미정'} · 전술 완성도 ${Math.round(g.cohesion)}</dd></div>
+      <div class="xi-wrap">
+        <div class="xi-pitch" role="group" aria-label="선발 11명"${busy ? '' : ' data-drop="pitch"'}>
+          <svg class="xi-pitch__lines" viewBox="0 0 68 86" preserveAspectRatio="none" aria-hidden="true">
+            <rect x="1" y="1" width="66" height="84" fill="none"/><line x1="1" y1="43" x2="67" y2="43"/><circle cx="34" cy="43" r="7"/>
+            <rect x="14" y="1" width="40" height="13" fill="none"/><rect x="14" y="72" width="40" height="13" fill="none"/>
+          </svg>
+          ${g.squad.map(token).join('')}
+        </div>
+        <div class="xi-side">
+          <p class="fine">${busy ? '경기 중에는 경기 화면에서 바꾼다.' : squadPick ? '바꿀 상대(다른 자리나 후보)를 누른다. 같은 칸을 다시 누르면 취소.' : '선수를 끌어 빈 잔디에 놓으면 그 자리로 옮기고, 다른 선수 위에 놓으면 맞바꾼다. 눌러서 고른 뒤 상대를 눌러도 된다.'}</p>
+          ${nation ? '' : `
+          <h3 class="section__sub">후보 ${g.reserves.length}/${RESERVE_LIMIT}${q.reg !== null || q.pitch !== null ? ` <span class="muted">${quotaWord(g)} 등록 ${foreignCount(g, [...g.squad, ...g.reserves])}${q.reg !== null ? `/${q.reg}` : ''} · 선발 ${foreignCount(g, g.squad)}/${q.pitch ?? '-'}</span>` : ''}${inEngland(g) ? ` <span class="muted">비홈그로운 ${englandStatus(g).nonHg}/${NON_HG_LIMIT} · ESC ${englandStatus(g).esc}/${ESC_SLOTS}</span>` : ''}</h3>
+          ${g.reserves.length === 0 ? '<p class="muted">후보 명단이 비어 있다. 이적시장에서 백업이나 로테이션으로 영입하면 여기에 들어온다.</p>' : `<div class="bench-grid"${busy ? '' : ' data-drop="reserves"'}>${g.reserves.map(resCard).join('')}</div>`}`}
+        </div>
+      </div>`;
+  } else if (view === 'tactic') {
+    const d = planDials(g);
+    const at = Math.min(Math.max(0, rolePick), g.squad.length - 1);
+    const who = g.squad[at];
+    const seg = (label: string, desc: string, opts: [string, string, boolean][]): string => `<div class="seg"><p class="seg__label">${esc(label)}<small>${esc(desc)}</small></p><div class="seg__opts" role="group" aria-label="${esc(label)}">${opts.map(([cmd, text, on]) => `<button type="button" class="seg__opt${on ? ' is-on' : ''}" data-todo="${cmd}" aria-pressed="${on}"${busy ? ' disabled' : ''}>${esc(text)}</button>`).join('')}</div></div>`;
+    const roles = who ? ROLES[spotAt(g, at)] : [];
+    const mineRole = who ? planRole(g, at) : '';
+    const combo = comboState(d, g.squad.map((_, i) => planRole(g, i)));
+    const count = (id: DialPhase): number => DIALS.filter((x) => x.phase === id && d[x.id] !== 0).length + (id === 'att' && d.overlap ? 1 : 0);
+    body = `
+      ${busy ? '<p class="note note--plain">경기 중에는 경기 화면의 지시 탭에서 바꾼다.</p>' : ''}
+      <div class="tac">
+        <section class="tac__col">
+          <h3 class="section__sub">팀 지시 <span class="muted">경기마다 이대로 시작한다</span></h3>
+          <div class="phases" role="tablist" aria-label="국면">
+            ${PHASES.map((x) => `<button type="button" role="tab" class="phases__tab${x.id === planPhase ? ' is-on' : ''}" data-phase="${x.id}" aria-selected="${x.id === planPhase}"><b>${esc(x.name)}${count(x.id) ? `<i>${count(x.id)}</i>` : ''}</b><small>${esc(x.desc)}</small></button>`).join('')}
+          </div>
+          <div class="combos" aria-label="조합">
+            ${combo.on.length + combo.near.length === 0 ? '<span class="muted">걸린 조합이 없다. 지시를 서로 맞물리면 조합이 걸린다.</span>' : ''}
+            ${combo.on.map((c) => `<span class="combo combo--${c.good ? 'good' : 'bad'}">${c.good ? '' : '주의 '}${esc(c.name)}</span>`).join('')}
+            ${combo.near.slice(0, 3).map(({ combo: c, missing, fix }) => (fix
+              ? `<button type="button" class="combo combo--near" data-todo="dial:${fix.dial}.${fix.level}"${busy ? ' disabled' : ''}>${esc(c.name)}<small>+ ${esc(missing)}</small></button>`
+              : `<span class="combo combo--near">${esc(c.name)}<small>+ ${esc(missing)}</small></span>`)).join('')}
+          </div>
+          ${combo.on.map((c) => `<p class="fine${c.good ? '' : ' fine--bad'}"><b>${esc(c.name)}</b> ${esc(c.text)}</p>`).join('')}
+          <div class="segs">
+            ${DIALS.filter((x) => x.phase === planPhase).map((x) => seg(x.name, x.desc, x.steps.map((t, k): [string, string, boolean] => [`dial:${x.id}.${k - 1}`, t, d[x.id] === k - 1]))).join('')}
+            ${planPhase === 'att' ? seg('풀백', '오버래핑하면 측면 공격이 늘고 뒷공간이 빈다', [['dial:overlap.0', '자리 지킴', !d.overlap], ['dial:overlap.1', '오버래핑', d.overlap]]) : ''}
+          </div>
+          <div class="xi-actions">
+            <button type="button" class="chip chip--primary" data-todo="dial:preset"${busy ? ' disabled' : ''}>코치 추천(${esc(STYLES[g.season.style].name)})</button>
+            <button type="button" class="chip" data-todo="dial:reset"${busy ? ' disabled' : ''}>모두 보통으로</button>
+          </div>
+        </section>
+        <section class="tac__col">
+          <h3 class="section__sub">개인 역할 <span class="muted">선수를 누르고 역할을 고른다</span></h3>
+          <div class="rolegrid">
+            ${g.squad.map((p, i) => `<button type="button" class="rolegrid__man${i === at ? ' is-on' : ''}" data-role="${i}" aria-pressed="${i === at}"><b>${spotAt(g, i)}</b><span>${esc(p.name)}</span><small>${esc(ROLES[spotAt(g, i)].find((x) => x.id === planRole(g, i))?.name ?? '')}</small></button>`).join('')}
+          </div>
+          ${who ? `<div class="rolebox">
+            <p class="rolebox__who">${face(who.id, who.nat, 30, club.colors, who.name)}<b>${esc(who.name)}</b><span class="muted">${spotAt(g, at)} · OVR ${effOvr(who, lineAt(g, at)) + who.temp}</span></p>
+            <div class="chips" role="group" aria-label="역할">
+              ${roles.map((x) => `<button type="button" class="chip${x.id === mineRole ? ' is-on' : ''}" data-todo="role:${who.id}.${x.id}" aria-pressed="${x.id === mineRole}"${busy ? ' disabled' : ''}>${esc(x.name)}</button>`).join('')}
+            </div>
+            <p class="fine">${esc(roles.find((x) => x.id === mineRole)?.desc ?? '')}</p>
+          </div>` : ''}
+        </section>
+      </div>`;
+  } else if (view === 'players') {
+    body = `
+      <ul class="plist">${[...g.squad, ...g.reserves].map((p) => playerRow(p, {
+        note: `${g.squad.includes(p) ? '선발' : '후보'} · ${POS_NAME[p.pos]}${p.contract ? ` · ${PROMISES[p.contract.promise].name}` : ''}`, extra: extra(p), kit: club.colors, flag: flags(p).join(' · ') || undefined,
+      })).join('')}</ul>
+      ${g.loaned.length ? `<p class="fine">임대 보낸 선수: ${g.loaned.map((p) => `${esc(p.name)}(${esc(p.loan!.club)}, ${p.loan!.until === 'winter' ? '겨울 복귀' : '시즌 끝 복귀'})`).join(', ')}</p>` : ''}`;
+  } else {
+    body = `
+      <dl class="stats stats--grid">
+        <div class="stats__row"><dt>몸에 밴 전술</dt><dd>${g.lastStyle ? esc(STYLES[g.lastStyle].name) : '미정'}</dd></div>
+        <div class="stats__row"><dt>전술 완성도</dt><dd>${Math.round(g.cohesion)}</dd></div>
         <div class="stats__row"><dt>라커룸 분위기</dt><dd>${Math.round(g.morale)}</dd></div>
         ${g.job.kind === 'club' ? `<div class="stats__row"><dt>이적 예산</dt><dd>${esc(won(g.job.budget))}</dd></div>
-        <div class="stats__row"><dt>연봉 총액 / 예산</dt><dd>${g.job.wageBudget > 0 ? `${esc(won(totalWages(g)))} / ${esc(won(g.job.wageBudget))}` : '무급(아마추어)'}</dd></div>` : ''}
+        <div class="stats__row"><dt>연봉 총액</dt><dd>${g.job.wageBudget > 0 ? esc(won(totalWages(g))) : '무급'}</dd></div>
+        <div class="stats__row"><dt>연봉 예산</dt><dd>${g.job.wageBudget > 0 ? esc(won(g.job.wageBudget)) : '아마추어'}</dd></div>` : ''}
       </dl>
-    </section>
-    <section class="section">
-      <h2 class="section__title">${esc(g.manager.name)} 감독의 지도자 역량</h2>
+      <h3 class="section__sub">${esc(g.manager.name)} 감독의 지도자 역량</h3>
       <dl class="stats">${ATTR_IDS.map((id) => `
         <div class="stats__row"><dt>${esc(ATTRS[id].name)}</dt><dd><span class="meter" aria-hidden="true"><span class="meter__fill" style="width:${a[id] * 5}%"></span></span>${a[id]}</dd></div>`).join('')}
-      </dl>
+      </dl>`;
+  }
+  return `
+    <section class="section section--squad" data-view="${view}">
+      ${head}
+      ${body}
     </section>`;
 }
 
