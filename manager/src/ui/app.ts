@@ -10,7 +10,8 @@ import { ko } from '../game/josa.ts';
 import { effOvr, formationOf, lineAt, lineupLocked, potentialText, ratings, slotsFor, spotAt, stage, valueOf } from '../game/squad.ts';
 import { formationMini, playerCard, playerRow, spotBadge } from './cards.ts';
 import { face } from './face.ts';
-import { ESC_SLOTS, NON_HG_LIMIT, PROMISES, RESERVE_LIMIT, oddsText, quotaWord, contractText, depthOf, englandStatus, englandText, foreignCount, inEngland, isForeign, placeAt, promiseKept, quota, swapLineup, totalWages } from '../game/contract.ts';
+import { flagsOf, renderPeek } from './peek.ts';
+import { ESC_SLOTS, NON_HG_LIMIT, PROMISES, RESERVE_LIMIT, oddsText, quotaWord, contractText, depthOf, englandStatus, englandText, foreignCount, inEngland, isForeign, placeAt, quota, swapLineup, totalWages } from '../game/contract.ts';
 import { SLOTS } from '../game/live.ts';
 import { agenda } from '../game/agenda.ts';
 import { manage, planDials, planRole } from '../game/manage.ts';
@@ -39,6 +40,7 @@ interface HallEntry {
 
 const SAVE_KEY = 'touchline:save';
 const HALL_KEY = 'touchline:hall';
+const PEEK_KEY = 'touchline:peek';
 const STEPS: { label: string; phases: Phase[] }[] = [
   { label: '전술', phases: ['style'] }, { label: '훈련', phases: ['focus'] }, { label: '여름', phases: ['market'] },
   { label: '전반기', phases: ['half1'] }, { label: '사건', phases: ['event', 'outcome'] }, { label: '겨울', phases: ['winter'] },
@@ -60,6 +62,9 @@ let rolePick = 10;
 let planPhase: DialPhase = 'att';
 /** 경기 준비 화면에서 고른 전술. 고르기 전에는 몸에 밴 전술이다. */
 let preStyle: StyleId | null = null;
+/** 스쿼드 미리보기를 펼쳤는지(고르기 전에는 넓은 화면에서만 펼친다)와 거기서 눌러 본 선수. */
+let peekOpen: boolean | null = null;
+let peekPick: number | null = null;
 let confirmReset = false;
 /** 선발 배치가 거절됐을 때 잠깐 보여 줄 이유. */
 let notice: string | null = null;
@@ -94,6 +99,7 @@ export function start(data: { game?: unknown }): void {
   root = document.getElementById('app') as HTMLElement;
   const saved = (data.game as Game | undefined) ?? load<Game>(SAVE_KEY);
   game = saved && migrate(saved) ? saved : null;
+  peekOpen = load<boolean>(PEEK_KEY);
   root.addEventListener('click', onClick);
   root.addEventListener('pointerdown', onPointerDown);
   document.addEventListener('visibilitychange', () => {
@@ -259,7 +265,7 @@ function onClick(e: Event): void {
     e.preventDefault();
     return;
   }
-  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-country],[data-mtab],[data-todo],[data-lineup],[data-do],[data-live],[data-live-do],[data-step],[data-stab],[data-pre],[data-role],[data-phase]');
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-country],[data-mtab],[data-todo],[data-lineup],[data-do],[data-live],[data-live-do],[data-step],[data-stab],[data-pre],[data-role],[data-phase],[data-peek]');
   if (!el) return;
   if (el.dataset.step && el.dataset.for) {
     const slider = root.querySelector<HTMLInputElement>(`input[type="range"][data-range="${CSS.escape(el.dataset.for)}"]`);
@@ -299,6 +305,20 @@ function onClick(e: Event): void {
     return;
   }
   if (!game) return;
+  if (el.dataset.peek) {
+    if (el.dataset.peek === 'toggle') {
+      peekOpen = !peekShown();
+      peekPick = null;
+      store(PEEK_KEY, peekOpen);
+    } else {
+      const id = Number(el.dataset.peek.slice(2));
+      peekPick = peekPick === id ? null : id;
+    }
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+    return;
+  }
   if (el.dataset.stab) {
     // 구단 관리의 작은 탭. 다른 화면의 바로가기에서도 쓴다.
     const same = tab === 'squad';
@@ -418,6 +438,7 @@ function onClick(e: Event): void {
   const y = window.scrollY;
   act(game, id);
   store(SAVE_KEY, game);
+  if (screenKey(game) !== before) peekPick = null;
   render();
   // 같은 화면 안에서 고른 것(칩, 지원 표시, 슬라이더 버튼 등)은 보던 자리를 지키고, 화면이 바뀔 때만 맨 위로 간다.
   window.scrollTo(0, screenKey(game) === before ? y : 0);
@@ -488,7 +509,11 @@ function crest(club: Club, size: number): string {
 function render(): void {
   crestCount = 0;
   unmountLive();
+  // 스쿼드 미리보기 안에서 내려 본 자리는 다시 그려도 지킨다.
+  const peekY = root.querySelector('.peek__body')?.scrollTop ?? 0;
   root.innerHTML = game ? renderGame(game) : renderStart();
+  const peekBody = root.querySelector('.peek__body');
+  if (peekBody && peekY) peekBody.scrollTop = peekY;
   const live = !!game && tab === 'play' && isLive(game);
   // 실시간 경기 중에는 전광판 대신 점수와 경기장을 화면 위에 붙여 둔다. 아래 지시 패널을 만지면서도 경기가 보인다.
   document.body.classList.toggle('is-live', live);
@@ -555,7 +580,16 @@ function renderStart(): string {
     </main>`;
 }
 
+/** 스쿼드 미리보기를 붙이는 화면: 이적시장이 열려 있거나 선수를 살펴보는 장면. 경기 준비와 경기에는 전술판이 따로 있다. */
+function peekOn(g: Game): boolean {
+  return tab === 'play' && !!g.job && g.phase !== 'match' && (marketOpenNow(g) || g.scene.blocks.some((b) => b.kind === 'deal' || b.kind === 'card' || b.kind === 'market'));
+}
+
+const peekShown = (): boolean => peekOpen ?? window.matchMedia('(min-width: 1180px)').matches;
+
 function renderGame(g: Game): string {
+  const peek = peekOn(g);
+  const eyed = g.scene.blocks.find((b): b is Extract<Block, { kind: 'deal' | 'card' }> => b.kind === 'deal' || b.kind === 'card');
   const club = g.job ? (g.clubs[g.job.club] as Club) : null;
   const meta = club && !club.nation ? LEAGUES[club.league]! : null;
   const where = club ? (meta ? (meta.short === meta.name || meta.name.startsWith(meta.short) ? meta.name : `${meta.name} · ${meta.short}`) : '국가대표팀') : '무소속';
@@ -575,7 +609,7 @@ function renderGame(g: Game): string {
       </div>
       ${step >= 0 ? `<ol class="steps" aria-label="시즌 진행">${STEPS.map((s, i) => `<li class="steps__item${i < step ? ' is-done' : i === step ? ' is-now' : ''}"${i === step ? ' aria-current="step"' : ''}>${s.label}</li>`).join('')}</ol>` : ''}
     </header>
-    <main class="page">${tab === 'play' ? (isLive(g) ? renderLive(g) : isPrematch(g) ? renderPrematch(g) : renderScene(g)) : tab === 'table' ? renderTables(g) : tab === 'squad' ? renderSquad(g) : renderRecord(g)}</main>
+    <main class="page${peek ? ' has-peek' : ''}">${peek ? renderPeek(g, { open: peekShown(), focus: eyed?.player ?? null, pick: peekPick }) : ''}${tab === 'play' ? (isLive(g) ? renderLive(g) : isPrematch(g) ? renderPrematch(g) : renderScene(g)) : tab === 'table' ? renderTables(g) : tab === 'squad' ? renderSquad(g) : renderRecord(g)}</main>
     <nav class="tabs" aria-label="화면 전환">
       ${([['play', '진행'], ['table', '순위'], ['squad', '구단 관리'], ['record', '기록']] as [Tab, string][]).map(([id, label]) => {
         const n = id === 'squad' && g.job ? agenda(g).length : 0;
@@ -973,7 +1007,7 @@ function renderSquad(g: Game): string {
     ...(inEngland(g) ? [`잉글랜드 규정|${p.nat} · ${englandText(g, p)}`] : p.nat !== localNat(g) ? [`국적|${p.nat}${isForeign(g, p) ? ' · 쿼터에 든다' : ''}`] : []),
     `이번 시즌|리그 ${p.apps}경기 ${p.goals}골 · 팀에서 ${p.years + 1}번째 시즌${p.homegrown ? ' · 유스 출신' : ''}`,
   ];
-  const flags = (p: Player): string[] => [p.unhappy ? '불만' : '', p.contract && p.contract.years <= 1 && !p.loan ? '만료 임박' : '', p.loan?.dir === 'in' ? '임대' : '', isForeign(g, p) ? quotaWord(g) : '', !promiseKept(g, p) ? '약속 위반' : ''].filter(Boolean);
+  const flags = (p: Player): string[] => flagsOf(g, p);
   const q = quota(g);
   const msg = notice;
   notice = null;
