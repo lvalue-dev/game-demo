@@ -5,7 +5,7 @@ import { CLUB_LEAGUES, CLUB_SEEDS, LEAGUES } from '../src/game/data.ts';
 import { rand } from '../src/game/rng.ts';
 import { NEUTRAL } from '../src/game/tactics.ts';
 import { roundRobin, sortTable } from '../src/game/world.ts';
-import type { Game } from '../src/game/types.ts';
+import type { Game, Player } from '../src/game/types.ts';
 
 /** 막히지 않은 첫 선택지. 이적 시장에서는 바로 마감한다(후보 보기와 돌아가기를 오가지 않게). */
 function firstChoice(g: Game): string {
@@ -575,7 +575,7 @@ test('이전 버전(3)의 저장도 불러와 이어 할 수 있다', async () =
   delete (old as unknown as Record<string, unknown>).window;
   (old as unknown as Record<string, unknown>).market = [];
   assert.ok(migrate(old));
-  assert.equal(old.version, 12);
+  assert.equal(old.version, 13);
   assert.ok(old.squad.every((p) => typeof p.nat === 'string'), '국적이 생긴다');
   assert.ok(old.squad.every((p) => p.no > 0), '등번호가 생긴다');
   assert.ok(old.squad.every((p) => p.spot && p.dev.length === 6));
@@ -662,9 +662,9 @@ test('이전 버전(6)의 저장도 불러오면 홈그로운과 ESC 표시가 �
     delete (p as unknown as Record<string, unknown>).esc;
   }
   assert.ok(migrate(old));
-  assert.equal(old.version, 12);
+  assert.equal(old.version, 13);
   assert.ok(old.squad.every((p) => typeof p.hg === 'boolean' && p.esc === false));
-  assert.equal(old.version, 12);
+  assert.equal(old.version, 13);
   assert.equal(old.squad.length, 11, '예전 저장의 선발 일곱 명이 열한 명이 된다');
 });
 
@@ -822,7 +822,7 @@ test('이전 버전(7)의 저장: 잉글랜드 리그 이름이 바뀌고 새 �
   for (const k of ['license', 'licensed', 'course', 'idle', 'countries']) delete (old.manager as unknown as Record<string, unknown>)[k];
   delete (old as unknown as Record<string, unknown>).hiring;
   assert.ok(migrate(old));
-  assert.equal(old.version, 12);
+  assert.equal(old.version, 13);
   assert.equal(old.clubs[old.job!.club]!.league, 'eng1');
   for (const id of CLUB_LEAGUES) assert.ok(old.leagues[id]!.length > 0, `${id}가 생긴다`);
   assert.equal(old.manager.license, 4, '프리미어리그 감독은 Pro를 가진 것으로 본다');
@@ -937,7 +937,7 @@ test('선발은 열한 명이고 대형을 따른다. 예전(8) 저장의 선발
   old.reserves = [...old.squad.filter((p) => !keep.includes(p)).slice(0, 2), ...old.reserves].slice(0, 6);
   old.squad = keep;
   assert.ok(migrate(old));
-  assert.equal(old.version, 12);
+  assert.equal(old.version, 13);
   assert.ok(old.formation);
   assert.equal(old.squad.length, 11);
   assert.equal(old.squad[0]!.pos, 'GK');
@@ -1174,7 +1174,7 @@ test('국가대표: 조 최강팀이 라이벌이고 job.rivalry는 읽지도 �
   assert.deepEqual(job.rivalry, marker, '국가대표는 rivalry를 건드리지 않는다');
 });
 
-test('버전 9 저장을 불러오면 최신 버전(12)이 되고 rivalry는 비어 있으며, 진행 중인 라이벌은 그대로다', async () => {
+test('버전 9 저장을 불러오면 최신 버전(13)이 되고 rivalry는 비어 있으며, 진행 중인 라이벌은 그대로다', async () => {
   const { migrate } = await import('../src/game/career.ts');
   const g = toMarket(9090, false);
   const old = JSON.parse(JSON.stringify(g)) as Game;
@@ -1182,7 +1182,7 @@ test('버전 9 저장을 불러오면 최신 버전(12)이 되고 rivalry는 비
   delete (old.job as unknown as Record<string, unknown>).rivalry;
   const rival = old.season.rival;
   assert.equal(migrate(old), true);
-  assert.equal(old.version, 12);
+  assert.equal(old.version, 13);
   assert.equal(old.job!.rivalry, null);
   assert.equal(old.season.rival, rival);
   act(old, 'done');
@@ -1377,15 +1377,21 @@ test('리그 집계: 실시간 컵 경기는 누구의 골과 출전도 바꾸�
 /**
  * K5에서 한 시즌을 끝까지 치른다. 첫 라이벌전은 실시간으로 지휘하고(교체 없이 끝까지 건너뛴다), 나머지 직접 지휘 경기는 수석 코치에게 맡긴다.
  * 후반기 경기를 정산하기 직전마다 신뢰를 sack이면 바닥으로, 아니면 100으로 맞춘다(라이벌 전적은 지워 정산이 신뢰를 건드리지 않게 한다).
- * 경질되면 결산 초기화가 일어나지 않으므로 결산 직후의 시즌 기록을 볼 수 있다. always는 시즌 내내 선발이었던 선수들이다.
+ * 첫 시즌이므로 결산 직후 career(이 구단 통산)가 곧 그 시즌 결산 직전의 기록이다. always는 시즌 내내 선발이었던 선수들이다.
+ * hooks.winter는 겨울 이적시장에 처음 들어섰을 때 한 번, hooks.last는 후반기 경기를 정산하기 직전마다 부른다.
  */
-function seasonToEnd(seed: number, sack: boolean): { g: Game; always: Set<number> } {
+function seasonToEnd(seed: number, sack: boolean, hooks: { winter?: (g: Game) => void; last?: (g: Game) => void } = {}): { g: Game; always: Set<number> } {
   const g = createGame(seed, '집계', 'pro', 'kr5');
   let always: Set<number> | null = null;
   let live = false;
+  let winter = false;
   for (let guard = 0; g.phase !== 'end'; guard++) {
     assert.ok(guard < 3000, '시즌이 끝나지 않는다');
     if (g.job) g.job.confidence = Math.max(g.job.confidence, 40); // 전반기 뒤 경질을 피한다
+    if (g.phase === 'winter' && !winter) {
+      winter = true;
+      hooks.winter?.(g);
+    }
     if (g.phase === 'match' && g.match!.step === 'shape') {
       if (!live && g.match!.kind === 'league') {
         act(g, '433');
@@ -1398,6 +1404,7 @@ function seasonToEnd(seed: number, sack: boolean): { g: Game; always: Set<number
       if (g.phase === 'match' && g.match!.step === 'done' && g.season.half === 2) {
         g.job!.rivalry = null;
         g.job!.confidence = sack ? -1000 : 100;
+        hooks.last?.(g);
       }
       act(g, firstChoice(g));
     }
@@ -1420,8 +1427,10 @@ test('리그 집계: 교체 없이 시즌 내내 선발인 선수의 출전은 �
     const row = g.tables.kr5.find((r) => r.club === club)!;
     assert.equal(row.p, 2 * (g.leagues.kr5.length - 1));
     assert.ok(always.size > 0, '시즌 내내 선발이었던 선수가 있다');
-    for (const p of g.squad.filter((x) => always.has(x.id))) assert.equal(p.apps, row.p, `${p.name}의 출전`);
-    const goals = [...g.squad, ...g.reserves].reduce((s, p) => s + p.goals, 0);
+    // 경질된 시즌에도 결산에서 통산에 더하고 비운다. 첫 시즌이므로 통산이 곧 이번 시즌 기록이다.
+    for (const p of g.squad.filter((x) => always.has(x.id))) assert.equal(p.career.apps, row.p, `${p.name}의 출전`);
+    for (const p of [...g.squad, ...g.reserves]) assert.deepEqual([p.goals, p.apps], [0, 0], `${p.name}: 경질된 시즌도 결산 뒤 0`);
+    const goals = [...g.squad, ...g.reserves].reduce((s, p) => s + p.career.goals, 0);
     assert.ok(goals <= row.gf, `선수 골 합 ${goals} ≤ 리그 득점 ${row.gf}`);
     assert.ok(g.season.liveGoals <= row.gf);
   }
@@ -1571,9 +1580,9 @@ test('리그 집계: 새 시즌을 시작하면 liveGoals가 0으로 돌아간�
   assert.equal(g.season.liveGoals, 0);
 });
 
-test('버전 11 저장을 불러오면 버전 12가 되고 출전과 liveGoals가 0에서 시작한다', async () => {
+test('버전 11 저장을 불러오면 최신 버전(13)이 되고 출전과 liveGoals가 0에서 시작한다', async () => {
   const { migrate, SAVE_VERSION } = await import('../src/game/career.ts');
-  assert.equal(SAVE_VERSION, 12);
+  assert.equal(SAVE_VERSION, 13);
   const g = toRivalMatch(2025);
   assert.ok(g.squad.every((p) => p.apps > 0), '라이벌전 전에 자동 리그 경기를 치렀다');
   const old = JSON.parse(JSON.stringify(g)) as Game;
@@ -1581,10 +1590,247 @@ test('버전 11 저장을 불러오면 버전 12가 되고 출전과 liveGoals�
   for (const p of [...old.squad, ...old.reserves, ...old.loaned]) delete (p as unknown as Record<string, unknown>).apps;
   delete (old.season as unknown as Record<string, unknown>).liveGoals;
   assert.equal(migrate(old), true);
-  assert.equal(old.version, 12);
+  assert.equal(old.version, 13);
   assert.ok([...old.squad, ...old.reserves, ...old.loaned].every((p) => p.apps === 0));
   assert.equal(old.season.liveGoals, 0);
   act(old, 'auto');
   act(old, 'next');
   assert.ok(old.squad.every((p) => p.apps === 1), '불러온 뒤 치른 경기부터 센다');
+});
+
+// ---------- 이 구단 통산 기록 ----------
+
+/** K5 구단을 맡은 직후. 후보 한 명을 임대 보낸 상태로 만든다. */
+function careerSetup(seed: number): { g: Game; lent: Player } {
+  const g = createGame(seed, '통산', 'pro', 'kr5');
+  while (g.phase !== 'market') act(g, firstChoice(g));
+  assert.ok(g.reserves.length >= 2, '후보가 둘 이상 있다');
+  const lent = g.reserves.pop()!;
+  lent.loan = { dir: 'out', club: '임대처', until: 'end', year: g.year, share: 1 };
+  g.loaned.push(lent);
+  for (const p of [...g.squad, ...g.reserves, ...g.loaned]) assert.deepEqual(p.career, { apps: 0, goals: 0, titles: 0 }, '새 선수는 0에서 시작한다');
+  return { g, lent };
+}
+
+test('통산: 결산 두 번을 거치면 career는 각 결산 직전 기록의 합이고, 결산 뒤 선발·후보·임대 간 선수의 기록은 0이다', async () => {
+  const { bankCareer } = await import('../src/game/squad.ts');
+  const { g, lent } = careerSetup(4242);
+  const mine = [...g.squad, ...g.reserves];
+  const sum = new Map(mine.map((p) => [p.id, { apps: 0, goals: 0 }]));
+  for (const season of [1, 2]) {
+    mine.forEach((p, i) => {
+      p.apps = (i * season) % 7;
+      p.goals = (i + season) % 3;
+      const s = sum.get(p.id)!;
+      s.apps += p.apps;
+      s.goals += p.goals;
+    });
+    lent.apps = 9;
+    lent.goals = 4;
+    bankCareer(g, false);
+    for (const p of [...g.squad, ...g.reserves, ...g.loaned]) assert.deepEqual([p.apps, p.goals], [0, 0], `${p.name}: 결산 뒤 0`);
+  }
+  for (const p of mine) assert.deepEqual([p.career.apps, p.career.goals, p.career.titles], [sum.get(p.id)!.apps, sum.get(p.id)!.goals, 0], p.name);
+  assert.deepEqual(lent.career, { apps: 0, goals: 0, titles: 0 }, '임대 간 선수는 더하지 않는다');
+});
+
+test('통산: 우승한 시즌에는 출전 1 이상인 선발·후보만 우승 횟수가 정확히 1 오르고, 출전 0과 임대 간 선수는 그대로다', async () => {
+  const { bankCareer } = await import('../src/game/squad.ts');
+  const { g, lent } = careerSetup(4343);
+  const mine = [...g.squad, ...g.reserves];
+  mine.forEach((p, i) => (p.apps = i % 3 === 0 ? 0 : 5));
+  lent.apps = 8;
+  const played = new Set(mine.filter((p) => p.apps >= 1).map((p) => p.id));
+  assert.ok(played.size > 0 && played.size < mine.length);
+  bankCareer(g, true);
+  for (const p of mine) assert.equal(p.career.titles, played.has(p.id) ? 1 : 0, p.name);
+  assert.equal(lent.career.titles, 0);
+  // 우승하지 못한 시즌에는 오르지 않는다.
+  for (const p of mine) p.apps = 5;
+  bankCareer(g, false);
+  for (const p of mine) assert.equal(p.career.titles, played.has(p.id) ? 1 : 0, p.name);
+});
+
+test('통산 이정표: 골 먼저·큰 경계 먼저로 세 줄까지, 남으면 "외 N명", 한 선수는 가장 큰 것 하나, 같은 경계는 다시 나오지 않는다', async () => {
+  const { bankCareer } = await import('../src/game/squad.ts');
+  const { g } = careerSetup(4444);
+  const mine = [...g.squad, ...g.reserves];
+  for (const p of mine) p.apps = 0;
+  const [a, b, c, d, e, f] = mine as [Player, Player, Player, Player, Player, Player];
+  a.career.goals = 24; a.goals = 1; // 25골
+  b.career.apps = 49; b.apps = 1; // 50경기
+  c.career.goals = 49; c.goals = 2; c.career.apps = 99; c.apps = 1; // 50골과 100경기를 함께 넘는다 → 50골만
+  d.career.goals = 99; d.goals = 3; // 100골
+  e.career.apps = 199; e.apps = 2; // 200경기
+  f.career.goals = 25; f.goals = 5; // 이미 25골을 넘었다 → 없음
+  const lines = bankCareer(g, false);
+  assert.deepEqual(lines, [`${d.name}, 구단 통산 100골`, `${c.name}, 구단 통산 50골`, `${a.name}, 구단 통산 25골 외 2명`]);
+  // 다음 결산: 조금 더 쌓아도 같은 경계로는 다시 나오지 않는다.
+  for (const p of [a, b, c, d, e]) {
+    p.apps = 1;
+    p.goals = 1;
+  }
+  assert.deepEqual(bankCareer(g, false), []);
+  // 출전 이정표만 셋 이하면 "외"가 붙지 않는다.
+  b.apps = 60;
+  assert.deepEqual(bankCareer(g, false), [`${b.name}, 구단 통산 100경기`]);
+});
+
+test('통산: 결산 직후(기록 0) 같은 결산을 한 번 더 처리해도 통산·우승 횟수·이정표가 변하지 않는다', async () => {
+  const { bankCareer } = await import('../src/game/squad.ts');
+  const { g } = careerSetup(4646);
+  const mine = [...g.squad, ...g.reserves];
+  for (const p of mine) p.apps = 0;
+  const [a, b] = mine as [Player, Player];
+  a.career.goals = 24; a.goals = 1; a.apps = 3;
+  b.career.apps = 49; b.apps = 1;
+  assert.equal(bankCareer(g, true).length, 2);
+  const after = mine.map((p) => ({ ...p.career }));
+  assert.equal(a.career.titles, 1);
+  assert.deepEqual(bankCareer(g, true), []);
+  mine.forEach((p, i) => assert.deepEqual(p.career, after[i], p.name));
+});
+
+test('통산 이정표: 세 명까지는 "외"가 없고, 네 명이면 세 번째 줄에만 " 외 1명"이 붙고, 없으면 빈 목록이다', async () => {
+  const { bankCareer } = await import('../src/game/squad.ts');
+  const run = (seed: number, goalHits: number, appHits: number): string[] => {
+    const { g } = careerSetup(seed);
+    const mine = [...g.squad, ...g.reserves];
+    for (const p of mine) {
+      p.apps = 0;
+      p.goals = 0;
+    }
+    assert.ok(mine.length >= goalHits + appHits);
+    for (let i = 0; i < goalHits; i++) {
+      mine[i]!.career.goals = 24;
+      mine[i]!.goals = 1;
+    }
+    for (let i = goalHits; i < goalHits + appHits; i++) {
+      mine[i]!.career.apps = 49;
+      mine[i]!.apps = 1;
+    }
+    return bankCareer(g, false);
+  };
+  const three = run(4747, 2, 1);
+  assert.equal(three.length, 3);
+  assert.ok(three.every((l) => !l.includes(' 외 ')), three.join('|'));
+  assert.ok(three[0]!.endsWith('25골') && three[1]!.endsWith('25골') && three[2]!.endsWith('50경기'));
+  const four = run(4848, 2, 2);
+  assert.equal(four.length, 3);
+  assert.ok(!four[0]!.includes(' 외 ') && !four[1]!.includes(' 외 '));
+  assert.ok(four[2]!.endsWith('50경기 외 1명'), four[2]);
+  assert.deepEqual(run(4949, 0, 0), []);
+});
+
+test('통산 이정표: 이미 100골을 넘은 선수는 더 쌓아도 이정표가 나오지 않고 기록은 계속 쌓인다', async () => {
+  const { bankCareer } = await import('../src/game/squad.ts');
+  const { g } = careerSetup(5050);
+  const mine = [...g.squad, ...g.reserves];
+  for (const p of mine) {
+    p.apps = 0;
+    p.goals = 0;
+  }
+  const a = mine[0]!;
+  a.career.goals = 100;
+  a.goals = 30;
+  assert.deepEqual(bankCareer(g, false), []);
+  assert.equal(a.career.goals, 130);
+});
+
+test('통산: 겨울에 임대 보냈다가 시즌 끝에 돌아온 선수는 전반기 기록이 통산에 들어가지 않고, 결산 뒤 기록은 0이다', () => {
+  let lent: Player | null = null;
+  const { g } = seasonToEnd(75, false, {
+    winter: (w) => {
+      const p = w.reserves[w.reserves.length - 1]!;
+      p.apps = 7;
+      p.goals = 2;
+      w.reserves = w.reserves.filter((q) => q !== p);
+      p.loan = { dir: 'out', club: '임대처', until: 'end', year: w.year, share: 1 };
+      w.loaned.push(p);
+      lent = p;
+    },
+  });
+  assert.equal(g.sacked, false);
+  const p = lent as Player | null;
+  assert.ok(p, '겨울 이적시장을 거쳤다');
+  assert.ok(!g.loaned.includes(p), '시즌 끝에 돌아왔다');
+  assert.equal(p.loan, null);
+  assert.deepEqual(p.career, { apps: 0, goals: 0, titles: 0 });
+  assert.deepEqual([p.apps, p.goals], [0, 0], '다음 시즌은 0에서 시작한다');
+});
+
+test('통산: 컵을 우승한 시즌 결산에서 리그에 나온 선수만 우승 1회가 쌓이고 선수 카드 문구에 들어간다', () => {
+  const { g } = seasonToEnd(76, false, {
+    last: (w) => {
+      const s = w.season;
+      s.cup = { ...(s.cup ?? { name: '시험컵', rounds: [], next: 0, lines: [] }), alive: false, won: true };
+    },
+  });
+  assert.equal(g.sacked, false);
+  const mine = [...g.squad, ...g.reserves];
+  assert.ok(mine.some((p) => p.career.titles === 1), '우승을 받은 선수가 있다');
+  // 첫 시즌이므로 career.apps가 곧 결산 직전 출전이다.
+  for (const p of mine) assert.equal(p.career.titles, p.career.apps >= 1 ? 1 : 0, p.name);
+  for (const p of g.loaned) assert.equal(p.career.titles, 0);
+});
+
+test('통산 이정표 note는 결산 화면의 성적 표와 순위표 사이에 좋은 소식으로 세 줄까지 나온다', () => {
+  const { g } = seasonToEnd(77, false, {
+    winter: (w) => {
+      for (const p of w.squad) p.career.apps = 49;
+    },
+  });
+  const blocks = g.scene.blocks;
+  const stats = blocks.findIndex((b) => b.kind === 'stats');
+  const table = blocks.findIndex((b) => b.kind === 'table');
+  const between = blocks.slice(stats + 1, table);
+  assert.equal(between.length, 3, '선발 열한 명이 50경기를 넘었으므로 세 줄');
+  for (const b of between) {
+    assert.equal(b.kind, 'note');
+    if (b.kind === 'note') {
+      assert.equal(b.tone, 'good');
+      assert.match(b.text, /, 구단 통산 \d+(골|경기)/);
+    }
+  }
+  const last = between[2]!;
+  assert.ok(last.kind === 'note' && / 외 \d+명$/.test(last.text));
+});
+
+test('통산: 대표팀 감독의 결산에서는 어느 선수의 통산 기록도 변하지 않는다', async () => {
+  const { beginSeason } = await import('../src/game/career.ts');
+  const g = createGame(8081, '대표', 'pro', 'kr5');
+  act(g, 'take0');
+  const korea = g.clubs.find((c) => c.nation && c.name === '대한민국') ?? g.clubs.find((c) => c.nation)!;
+  g.job!.kind = 'nation';
+  g.job!.club = korea.id;
+  beginSeason(g);
+  const all = [...g.squad, ...g.reserves, ...g.loaned];
+  all.forEach((p, i) => {
+    p.career = { apps: 10 + i, goals: i, titles: 1 };
+    p.apps = 3;
+    p.goals = 1;
+  });
+  for (let guard = 0; g.phase !== 'end'; guard++) {
+    assert.ok(guard < 1500, '대표팀 한 해가 끝나지 않는다');
+    if (g.phase === 'match' && g.match!.step === 'shape') act(g, 'auto');
+    else act(g, firstChoice(g));
+  }
+  all.forEach((p, i) => assert.deepEqual(p.career, { apps: 10 + i, goals: i, titles: 1 }, p.name));
+});
+
+test('버전 12 저장을 불러오면 버전 13이 되고 선발·후보·임대·이적 창 후보 모두 통산 기록이 0으로 생긴다', async () => {
+  const { migrate } = await import('../src/game/career.ts');
+  const { g } = careerSetup(4545);
+  const old = JSON.parse(JSON.stringify(g)) as Game;
+  old.version = 12;
+  const cand = JSON.parse(JSON.stringify(old.squad[0])) as Player;
+  (old as unknown as { window: unknown }).window = { list: [{ player: cand }] };
+  const everyone = [...old.squad, ...old.reserves, ...old.loaned, cand];
+  assert.ok(old.loaned.length > 0);
+  for (const p of everyone) delete (p as unknown as Record<string, unknown>).career;
+  assert.equal(migrate(old), true);
+  assert.equal(old.version, 13);
+  for (const p of everyone) assert.deepEqual(p.career, { apps: 0, goals: 0, titles: 0 }, p.name);
+  old.squad[0]!.career.apps = 5;
+  assert.equal(old.squad[1]!.career.apps, 0, '선수마다 따로 된 기록이다');
 });

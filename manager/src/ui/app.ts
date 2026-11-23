@@ -1006,6 +1006,7 @@ function renderSquad(g: Game): string {
     `성장|${potentialText(g, p)}`,
     ...(inEngland(g) ? [`잉글랜드 규정|${p.nat} · ${englandText(g, p)}`] : p.nat !== localNat(g) ? [`국적|${p.nat}${isForeign(g, p) ? ' · 쿼터에 든다' : ''}`] : []),
     `이번 시즌|리그 ${p.apps}경기 ${p.goals}골 · 팀에서 ${p.years + 1}번째 시즌${p.homegrown ? ' · 유스 출신' : ''}`,
+    `통산(이 구단)|리그 ${p.career.apps}경기 ${p.career.goals}골${p.career.titles > 0 ? ` · 우승 ${p.career.titles}회` : ''}`,
   ];
   const flags = (p: Player): string[] => flagsOf(g, p);
   const q = quota(g);

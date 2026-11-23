@@ -13,7 +13,7 @@ import { actHiring, enroll, finishCourses, hiringScene, licenseName, openHiring,
 import type { Vacancy } from './types.ts';
 import { chance, int, pick, shuffle, spread } from './rng.ts';
 import {
-  departures, develop, generateSquad, linesOf, makePlayer, myClub, ratings, shareGoals,
+  bankCareer, departures, develop, generateSquad, linesOf, makePlayer, myClub, ratings, shareGoals,
 } from './squad.ts';
 import { ensureDetail, guessNat } from './player.ts';
 import { assignNumber, checkPromises, depthOf, enforceQuota, existingContract, expireContracts, relegationCut, settle, totalWages, wageBudgetFor } from './contract.ts';
@@ -47,7 +47,7 @@ function blankSeason(): SeasonState {
   };
 }
 
-export const SAVE_VERSION = 12;
+export const SAVE_VERSION = 13;
 
 /**
  * 새 커리어. 감독은 출신에 따라 자격증을 가지고(없을 수도 있다) 구직부터 시작한다.
@@ -373,6 +373,11 @@ export function migrate(g: Game): boolean {
     g.version = 12;
     for (const p of [...g.squad, ...g.reserves, ...g.loaned, ...(g.window?.list.map((d) => d.player) ?? [])]) p.apps = p.apps ?? 0;
     g.season.liveGoals = g.season.liveGoals ?? 0;
+  }
+  if (g.version === 12) {
+    // 선수의 이 구단 통산 기록이 생겼다. 지난 시즌 기록은 남아 있지 않으므로 0부터 센다.
+    g.version = 13;
+    for (const p of [...g.squad, ...g.reserves, ...g.loaned, ...(g.window?.list.map((d) => d.player) ?? [])]) p.career = p.career ?? { apps: 0, goals: 0, titles: 0 };
   }
   // 구단 유니폼 색이 새로 생기거나 바뀌었으면 저장된 구단에도 입힌다.
   const seeds = new Map(CLUB_LEAGUES.flatMap((l) => CLUB_SEEDS[l] ?? []).filter((x) => x.colors).map((x) => [x.name, x]));
@@ -778,6 +783,9 @@ function finishClubSeason(g: Game, midSack: boolean): void {
   shareGoals(g, Math.max(0, row.gf - s.liveGoals));
   // 골 수가 같으면 출전이 적은 선수가 앞선다.
   const scorer = [...g.squad].sort((a, b) => b.goals - a.goals || a.apps - b.apps)[0] as Player;
+  const scorerGoals = scorer.goals;
+  // 이번 시즌 리그 기록을 이 구단 통산에 더하고 비운다. 경질된 시즌에도 더한다. 우승은 대회를 몇 개 따도 한 번이다.
+  const milestones = bankCareer(g, title || (!midSack && (!!s.cup?.won || !!s.conti?.won)));
 
   const outcome = title ? 'title' : g.sacked ? 'sacked' : promoted ? 'up' : relegated ? 'down' : 'plain';
   const mood: Mood = g.sacked ? 'sacked' : title ? 'title' : promoted ? 'promoted' : relegated ? 'relegated' : rel >= 2 ? 'over' : rel >= -1 ? 'par' : 'under';
@@ -801,11 +809,12 @@ function finishClubSeason(g: Game, midSack: boolean): void {
         value: `올 시즌 ${tallyText(rivalRec.w, rivalRec.d, rivalRec.l)} · 통산 ${tallyText(rivalry.w, rivalry.d, rivalry.l)}`,
         tone: (rivalSweep ? 'good' : 'plain') as Tone,
       }] : []),
-      { label: '팀 내 최다 득점', value: `${scorer.name} ${scorer.goals}골` },
+      { label: '팀 내 최다 득점', value: `${scorer.name} ${scorerGoals}골` },
       { label: '이사회 신뢰', value: `${Math.round(job.confidence)}`, tone: (job.confidence < 30 ? 'bad' : 'plain') as Tone },
       { label: '명성', value: `${Math.round(g.manager.rep)}` },
     ],
   });
+  for (const text of milestones) blocks.push({ kind: 'note', text, tone: 'good' });
   blocks.push({ kind: 'table', league }, reactions(g, mood, club.name, league === 'kr5'));
 
   if (!g.sacked) {
@@ -830,10 +839,6 @@ function finishClubSeason(g: Game, midSack: boolean): void {
     }
     job.budget = round1((job.budget + moves.income) * 0.5);
     g.depth += (nextLevel - 2 + club.wealth * 0.8 - g.depth) * 0.3;
-    for (const p of [...g.squad, ...g.reserves]) {
-      p.goals = 0;
-      p.apps = 0;
-    }
   }
   g.history.push({
     year: g.year, age: g.manager.age, club: club.name, league: meta.short, pos, size,

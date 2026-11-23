@@ -37,6 +37,8 @@ export interface Player {
   goals: number;
   /** 이번 시즌 리그 출전 수(경기장에 한 번이라도 선 경기). 클럽 감독일 때만 센다. */
   apps: number;
+  /** 이 구단에서 쌓은 통산 기록: 리그 출전, 리그 골, 우승한 시즌 수. 클럽 시즌 결산마다 더한다. 판정에는 쓰지 않는다. */
+  career: { apps: number; goals: number; titles: number };
   /** 이번 시즌 동안만 적용되는 실력 보정(불화, 부상 여파 등). */
   temp: number;
   homegrown: boolean;
