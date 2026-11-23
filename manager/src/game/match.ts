@@ -23,6 +23,8 @@ export interface MatchSetup {
   label: string;
   opp: { id: number; name: string; att: number; def: number; style: StyleId; shape: ShapeId };
   venue: 'home' | 'away' | 'neutral';
+  /** 경기 소개에 덧붙이는 한 줄. */
+  intro?: string;
 }
 
 const WEATHER: Record<WeatherId, { name: string; note: string }> = {
@@ -279,6 +281,7 @@ export function beginMatch(g: Game, setup: MatchSetup): void {
     read: false, subs: 3, talk: 0, confusion: 0, subAtt: 0, subDef: 0, log: [], logStart: 0, pens: null, auto: false,
     dials: { line: 0, width: 0, tempo: 0, overlap: false }, roles: {}, live: null,
   };
+  if (setup.intro) g.match.intro = setup.intro;
   g.phase = 'match';
   scene(g);
 }
@@ -340,6 +343,7 @@ function scene(g: Game): void {
     g.scene = {
       eyebrow, title: ko`${m.oppName}과 맞붙는다`,
       blocks: [
+        ...(m.intro ? [{ kind: 'note', text: m.intro, tone: 'plain' } as Block] : []),
         { kind: 'text', text: ko`${where}, 날씨는 ${weather.name}.${weather.note ? ` ${weather.note}` : ''} 분석팀 보고에 따르면 상대는 평소 ${STYLES[m.oppUsual].name}을 쓰고, 오늘은 ${SHAPES[m.opp.shape].name}으로 나왔다. ${SHAPES[m.opp.shape].desc}.` },
         { kind: 'text', text: '먼저 대형을 고른다. 경기 중에는 교체로만 바꿀 수 있다.' },
       ],

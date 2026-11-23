@@ -29,7 +29,7 @@ import {
 } from './world.ts';
 import type {
   AttrId, BackgroundId, Block, Choice, Club, ClubLeagueId, FocusId, Game, Knockout, LeagueId, MatchLine, MatchState, NationYear,
-  PlanId, Player, Pos, Row, SeasonState, ShapeId, StyleId, Tone,
+  PlanId, Player, Pos, Rivalry, Row, SeasonState, ShapeId, StyleId, Tone,
 } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
@@ -47,7 +47,7 @@ function blankSeason(): SeasonState {
   };
 }
 
-export const SAVE_VERSION = 9;
+export const SAVE_VERSION = 10;
 
 /**
  * 새 커리어. 감독은 출신에 따라 자격증을 가지고(없을 수도 있다) 구직부터 시작한다.
@@ -185,7 +185,8 @@ function setupNation(g: Game): void {
   if (kind === 'wc') g.season.finals = newKnockout('월드컵', ['16강', '8강', '4강', '결승']);
 }
 
-function beginSeason(g: Game): void {
+/** 새 시즌을 차린다: 목표, 라이벌, 예산, 토너먼트. 시험에서도 부른다. */
+export function beginSeason(g: Game): void {
   const job = g.job!;
   const club = myClub(g);
   g.season = blankSeason();
@@ -201,8 +202,18 @@ function beginSeason(g: Game): void {
     const power = (id: number): number => (g.clubs[id] as Club).att + (g.clubs[id] as Club).def;
     const rank = 1 + ids.filter((id) => id !== club.id && power(id) > power(club.id)).length;
     job.objective = clamp(rank - (club.wealth >= 3 ? 1 : 0) + (job.seasons === 0 ? job.promise ?? 0 : 0), 1, ids.length - Math.max(1, dropCount(club.league as ClubLeagueId)));
-    // 전력이 가장 비슷한 팀이 올 시즌의 라이벌이다. 그 팀과의 두 경기는 직접 지휘한다.
-    g.season.rival = ids.filter((id) => id !== club.id).sort((a, b) => Math.abs(power(a) - power(club.id)) - Math.abs(power(b) - power(club.id)))[0] as number;
+    // 전력이 가장 비슷한 팀이 라이벌이다. 그 팀과의 두 경기는 직접 지휘한다.
+    // 지난 라이벌이 같은 리그에서 여전히 전력이 가장 가까운 3팀 안에 있으면 그대로 두고 전적을 이어 간다.
+    const near = ids.filter((id) => id !== club.id).sort((a, b) => Math.abs(power(a) - power(club.id)) - Math.abs(power(b) - power(club.id)));
+    const old = job.rivalry;
+    const keep = !!old && !!g.clubs[old.club] && (g.clubs[old.club] as Club).league === club.league && near.slice(0, 3).includes(old.club);
+    if (keep) {
+      g.season.rival = old!.club;
+    } else {
+      g.season.rival = near[0] as number;
+      job.rivalry = { club: g.season.rival, w: 0, d: 0, l: 0, last: null };
+      g.season.notes.push(`새 라이벌: ${(g.clubs[g.season.rival] as Club).name}`);
+    }
     job.budget = round1(job.budget + meta.money * (1 + club.wealth * 0.12));
     // 분할 지급으로 남은 이적료 중 올해 몫을 낸다.
     const due = job.debts.filter((d) => d.due <= g.year);
@@ -347,6 +358,11 @@ export function migrate(g: Game): boolean {
     if (g.job) migrateEleven(g);
     reopen = true;
   }
+  if (g.version === 9) {
+    // 라이벌 상대 전적이 생겼다. 진행 중인 시즌의 라이벌(g.season.rival)은 그대로 두고, 전적은 다음 시즌 라이벌부터 센다.
+    g.version = 10;
+    if (g.job) g.job.rivalry = null;
+  }
   // 구단 유니폼 색이 새로 생기거나 바뀌었으면 저장된 구단에도 입힌다.
   const seeds = new Map(CLUB_LEAGUES.flatMap((l) => CLUB_SEEDS[l] ?? []).filter((x) => x.colors).map((x) => [x.name, x]));
   for (const c of g.clubs) {
@@ -424,6 +440,29 @@ function recordOf(lines: MatchLine[]): { w: number; d: number; l: number; text: 
   return { w, d, l, text: `${w}승 ${d}무 ${l}패` };
 }
 
+/** "3승 1무 2패"처럼 쓰되 0인 항목은 뺀다. 모두 0이면 "경기 없음". */
+function tallyText(w: number, d: number, l: number): string {
+  return [w ? `${w}승` : '', d ? `${d}무` : '', l ? `${l}패` : ''].filter(Boolean).join(' ') || '경기 없음';
+}
+
+/** 라이벌전 직전 화면의 한 줄: "통산 3승 1무 2패 · 지난 맞대결 1:2 패", 처음이면 "첫 맞대결". */
+function rivalryLine(r: Rivalry): string {
+  if (r.w + r.d + r.l === 0 || !r.last) return '첫 맞대결';
+  const [gf, ga] = r.last;
+  return `통산 ${tallyText(r.w, r.d, r.l)} · 지난 맞대결 ${gf}:${ga} ${gf > ga ? '승' : gf === ga ? '무' : '패'}`;
+}
+
+/** 올 시즌 라이벌과 치른 리그 경기. playRound가 라이벌전을 건너뛰므로 여기 있는 것은 모두 settleMatch가 적은 경기다. */
+function rivalLinesThisSeason(g: Game): MatchLine[] {
+  const rival = g.clubs[g.season.rival];
+  return rival ? g.season.lines.filter((l) => l.opp === rival.name) : [];
+}
+
+/** 시즌 결산의 라이벌전 보너스: 한 경기 이상 치러 모두 이겼으면 신뢰 +2. 경기 수는 정해 두지 않는다. */
+export function rivalSweepBonus(lines: MatchLine[]): number {
+  return lines.length > 0 && lines.every((l) => l.result === 'W') ? 2 : 0;
+}
+
 /**
  * 전반기 또는 후반기를 시작한다. 리그 경기를 자동으로 돌리되, 라이벌전 한 경기는 빼 두었다가
  * 감독이 직접 지휘한다. 이어서 토너먼트를 치르고, 다 끝나면 결산으로 넘어간다.
@@ -497,11 +536,13 @@ function advance(g: Game): void {
     s.pending = null;
     const opp = g.clubs[p.opp] as Club;
     const neutral = club.nation && s.nationYear !== 'q2' && s.nationYear !== 'q3';
+    const rivalry = club.nation ? null : g.job!.rivalry;
     beginMatch(g, {
       kind: 'league', ko: null, league: p.league, round: p.round,
       label: club.nation ? `${seasonLabel(g)} · ${p.round + 1}차전` : `${seasonLabel(g)} · ${p.round + 1}R 라이벌전`,
       opp: { id: opp.id, name: opp.name, att: opp.att, def: opp.def, style: opp.style, shape: opp.shape },
       venue: neutral ? 'neutral' : p.home ? 'home' : 'away',
+      ...(rivalry && rivalry.club === opp.id ? { intro: rivalryLine(rivalry) } : {}),
     });
     return;
   }
@@ -544,6 +585,15 @@ function settleMatch(g: Game): void {
       label: club.nation ? `${m.round + 1}차전` : `${m.round + 1}R`, opp: m.oppName, home: m.venue !== 'away', gf, ga,
       result: gf > ga ? 'W' : gf === ga ? 'D' : 'L', note: m.auto ? '라이벌전' : '직접 지휘',
     });
+    // 라이벌전은 직접 지휘했든 수석 코치에게 맡겼든 똑같이 전적에 쌓이고, 이사회 신뢰가 조금 움직인다.
+    const rivalry = g.job!.rivalry;
+    if (!club.nation && rivalry && m.oppId === rivalry.club) {
+      if (gf > ga) rivalry.w++;
+      else if (gf === ga) rivalry.d++;
+      else rivalry.l++;
+      rivalry.last = [gf, ga];
+      g.job!.confidence = clamp(g.job!.confidence + (gf > ga ? 2 : gf < ga ? -2 : 0), 0, 100);
+    }
   } else {
     const ko = (m.ko === 'cup' ? g.season.cup : m.ko === 'conti' ? g.season.conti : g.season.finals) as Knockout;
     settleKnockout(ko, m.oppName, gf, ga, m.pens ? m.pens === 'won' : gf > ga, !!m.pens, m.auto ? undefined : '직접 지휘');
@@ -659,6 +709,11 @@ function finishClubSeason(g: Game, midSack: boolean): void {
   const s = g.season;
   const blocks: Block[] = [];
   let repBonus = 0;
+  // 올 시즌 라이벌전. 경기 수를 정해 두지 않고, 한 경기 이상 치러 모두 이겼으면 결산에서 신뢰를 더 준다.
+  const rivalry = job.rivalry && job.rivalry.club === s.rival ? job.rivalry : null;
+  const rivalLines = rivalry ? rivalLinesThisSeason(g) : [];
+  const rivalRec = recordOf(rivalLines);
+  const rivalSweep = rivalSweepBonus(rivalLines) > 0;
 
   if (!midSack) {
     if (title) addTrophy(g, `${meta.name} 우승`, meta.weight);
@@ -666,7 +721,7 @@ function finishClubSeason(g: Game, midSack: boolean): void {
     if (s.conti?.won) addTrophy(g, `${s.conti.name} 우승`, CONTI_WEIGHT[COUNTRIES[meta.country].confed]);
     if (promoted) g.promotions++;
     const cupRounds = (s.cup?.next ?? 0) + (s.conti?.next ?? 0) * 2;
-    const delta = clamp(rel * 7, -30, 30) + (title ? 25 : 0) + (promoted ? 20 : 0) - (relegated ? 35 : 0) + (s.cup?.won ? 15 : 0) + (s.conti?.won ? 25 : 0) + Math.max(0, cupRounds - 2) * 2;
+    const delta = clamp(rel * 7, -30, 30) + (title ? 25 : 0) + (promoted ? 20 : 0) - (relegated ? 35 : 0) + (s.cup?.won ? 15 : 0) + (s.conti?.won ? 25 : 0) + Math.max(0, cupRounds - 2) * 2 + rivalSweepBonus(rivalLines);
     job.confidence = clamp(job.confidence + delta, 0, 100);
     g.sacked = job.confidence < 22 || (relegated && job.confidence < 45);
     repBonus = (title ? 3 : 0) + (promoted ? 2 : 0) + (s.cup?.won ? 3 : 0) + (s.conti?.won ? 8 : 0) + Math.max(0, cupRounds - 3) * 0.5 - (g.sacked ? 4 : 0);
@@ -695,6 +750,11 @@ function finishClubSeason(g: Game, midSack: boolean): void {
       { label: '최종 순위', value: `${pos}위 / ${size}팀`, tone: gap >= 0 ? 'good' : 'bad' },
       { label: '성적', value: `${row.w}승 ${row.d}무 ${row.l}패 · ${row.gf}득점 ${row.ga}실점` },
       ...(cupText ? [{ label: '컵 대회', value: cupText }] : []),
+      ...(rivalry ? [{
+        label: `라이벌 ${(g.clubs[rivalry.club] as Club).name}`,
+        value: `올 시즌 ${tallyText(rivalRec.w, rivalRec.d, rivalRec.l)} · 통산 ${tallyText(rivalry.w, rivalry.d, rivalry.l)}`,
+        tone: (rivalSweep ? 'good' : 'plain') as Tone,
+      }] : []),
       { label: '팀 내 최다 득점', value: `${scorer.name} ${scorer.goals}골` },
       { label: '이사회 신뢰', value: `${Math.round(job.confidence)}`, tone: (job.confidence < 30 ? 'bad' : 'plain') as Tone },
       { label: '명성', value: `${Math.round(g.manager.rep)}` },
@@ -925,7 +985,7 @@ function startJob(g: Game, v: Vacancy): void {
     const c = countryOf(club.league);
     if (!g.manager.countries.includes(c)) g.manager.countries.push(c);
   }
-  g.job = { kind: v.kind, club: club.id, confidence: clamp(50 + g.manager.attrs.deal / 2 + v.confidence, 20, 90), objective: 0, budget: 0, wageBudget: 0, debts: [], seasons: 0, promise: v.objective };
+  g.job = { kind: v.kind, club: club.id, confidence: clamp(50 + g.manager.attrs.deal / 2 + v.confidence, 20, 90), objective: 0, budget: 0, wageBudget: 0, debts: [], seasons: 0, promise: v.objective, rivalry: null };
   g.loaned = [];
   // 선발 대형은 구단이 해 오던 전술에 어울리는 것으로 시작한다. 구단 관리 탭에서 바꿀 수 있다.
   g.formation = usualShape(club.style, club.id);
