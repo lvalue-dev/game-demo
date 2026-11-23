@@ -212,6 +212,17 @@ export interface Job {
   seasons: number;
   /** 면접에서 약속한 목표 보정(첫 시즌 목표 순위에 더한다). 음수면 더 높은 순위를 약속했다. */
   promise?: number;
+  /** 지금 라이벌과의 통산 상대 전적. 라이벌이 바뀌면 0부터 다시 센다. 국가대표는 쓰지 않는다(늘 null). */
+  rivalry: Rivalry | null;
+}
+
+export interface Rivalry {
+  club: number;
+  w: number;
+  d: number;
+  l: number;
+  /** 지난 맞대결 스코어 [우리, 상대]. 아직 없으면 null. */
+  last: [number, number] | null;
 }
 
 export type NationYear = 'asia' | 'q2' | 'q3' | 'wc' | 'friendly';
@@ -529,6 +540,8 @@ export interface MatchState {
   logStart: number;
   pens: 'won' | 'lost' | null;
   auto: boolean;
+  /** 경기 소개에 덧붙이는 한 줄(라이벌전 통산 전적 등). 예전 저장에는 없다. */
+  intro?: string;
   dials: Dials;
   /** 주전 선수 id별 개인 역할. 적혀 있지 않으면 기본 역할이다. */
   roles: Record<number, RoleId>;
