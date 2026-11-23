@@ -5,6 +5,10 @@
 // 움직임: 엔진은 3초(1틱)마다 선수의 위치를 정한다. 화면은 그 위치를 그대로 잇지 않고, 선수마다 감쇠 스프링으로 따라가게 해서
 // 가속과 감속이 생기고 재개 위치로의 순간이동도 짧은 달리기로 보이게 한다. 공은 가진 선수의 발밑에 붙고, 날아갈 때는 감속하며 뜬다.
 //
+// 중계 카메라: 슈팅이 나오면 골문 쪽으로 잠깐 다가가고, 골은 느린 화면으로 한 번 더 보여 준다(1, 2배속에서만. 경기 시트에서 끌 수 있다).
+// 선수 말은 서로 포개지지 않게 그릴 자리만 벌린다(spread.ts). 엔진의 위치와 경기 결과는 그대로다.
+// 카메라는 그리는 좌표만 바꾼다. 누른 자리는 카메라를 걷어 낸 좌표로 되돌려 찾으므로 확대 중에도 선수를 고르고 끌 수 있다.
+//
 // 지시: 선수 말을 누르면 그 선수의 시트(역할, 위치, 교체)가 열린다. 말을 끌어 옮기면 기준 자리가 바뀌고, 다른 선수 위에 놓으면 자리를 맞바꾼다.
 import { STYLES, STYLE_IDS } from '../game/data.ts';
 import { PER_MIN, movedSlot, slotSpot, slotsOf } from '../game/live.ts';
@@ -18,6 +22,8 @@ import type { Club, Game, Level, LiveMark, LivePlayer, LiveState, MatchState, Pl
 import { face, hashName, tones } from './face.ts';
 import { PICK, drawBall, drawFigure, drawFlag, drawNetHit, drawParty, drawRain, drawWind, startParty } from './figures.ts';
 import type { Kit, Party } from './figures.ts';
+import { spread } from './spread.ts';
+import type { Dot } from './spread.ts';
 import { TURF, light, margins, paintStadium, rgb } from './stadium.ts';
 import type { Look, Scene } from './stadium.ts';
 
@@ -225,6 +231,7 @@ export function mountLive(g: Game, h: LiveHost): void {
   party = null;
   netHit = null;
   flash = null;
+  resetCam();
   shown = [m.score[0], m.score[1]];
   toneOf.clear();
   calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -276,6 +283,8 @@ export function unmountLive(): void {
   canvas = null;
   scene = null;
   party = null;
+  replay = null;
+  tape.length = 0;
 }
 
 /** 페이지가 가려지면 멈춘다. */
@@ -390,6 +399,11 @@ export function onLiveClick(el: HTMLElement): boolean {
     } else if (what === 'with') {
       subShape = SHAPE_IDS.includes(value as ShapeId) ? (value as ShapeId) : '';
       updateSheet();
+    } else if (what === 'cam') {
+      setCam(!cam.on);
+      if (replay) endReplay(performance.now());
+      updateSheet();
+      say(cam.on ? '중계 카메라를 켰다. 슈팅에 다가가고 골은 다시 보여 준다' : '중계 카메라를 껐다. 경기장을 늘 한눈에 본다');
     } else if (what === 'close') {
       selected = -1;
       benchPick = -1;
@@ -427,9 +441,15 @@ function frame(now: number): void {
   if (!paused && m.step === 'live') {
     acc += dt * BASE_TPS * speed;
     while (acc >= 1 && m.step === 'live') {
+      if (holding(m.live as LiveState)) {
+        acc = 0.999;
+        break;
+      }
       acc -= 1;
       liveTick(g);
       ticked = true;
+      const shot = (m.live as LiveState).flight;
+      if (shot?.kind === 'shot') aim = { x: shot.toX, y: shot.toY, side: shot.side };
       if (halftime(g)) {
         paused = true;
         acc = 0;
@@ -524,14 +544,14 @@ function updateHud(full: boolean): void {
   }
   const subs = $('#lv-subs');
   if (subs) subs.innerHTML = `교체 카드 <b>${m.subs}</b>`;
-  // 점수가 달라졌으면 골이다. 경기장 위에 띠를 띄우고, 그물이 출렁이고, 넣은 팀 관중이 뛴다.
+  // 점수가 달라졌으면 골이다. 경기장 위에 띠를 띄우고, 그물이 출렁이고, 넣은 팀 관중이 뛴다. 조금 뒤에 느린 화면으로 다시 보여 준다.
   if (m.score[0] !== shown[0] || m.score[1] !== shown[1]) {
     const good = m.score[0] > shown[0];
     const now = performance.now();
     const line = m.log.slice(seenLog).reverse().find((l) => l.tone === (good ? 'good' : 'bad'));
     flash = { text: good ? '골!' : '실점', sub: line?.text ?? '', until: now + 2400, good };
-    netHit = { side: good ? 1 : 0, start: now };
-    if (scene && look && canvas) party = startParty(now, scene.fans.filter((f) => f.team === (good ? 0 : 1)), scene.dot, look.fans[good ? 0 : 1], canvas.clientWidth, canvas.clientHeight);
+    cheer(now, good);
+    cueReplay(now, good, line?.text ?? '');
     shown = [m.score[0], m.score[1]];
     if (score) {
       score.classList.remove('is-pop');
@@ -874,8 +894,9 @@ function sheetMatch(m: MatchState, L: LiveState): string {
       <div><dt>상대 체력</dt><dd class="lv-stats__text">${esc(staminaText(m.opp.stamina))}</dd></div>
     </dl>
     <ol class="lv-log">${ticker}</ol>
-    <div class="lv-chips">
+    <div class="lv-chips lv-chips--tight">
       <button type="button" class="lv-opt" data-act="skip">남은 경기 건너뛰기</button>
+      <button type="button" class="lv-opt" data-live-do="cam" aria-pressed="${cam.on}" aria-label="중계 카메라">카메라 <b>${cam.on ? '켬' : '끔'}</b></button>
       <button type="button" class="lv-opt" data-tab="table">순위표</button>
       <button type="button" class="lv-opt" data-tab="squad">구단 관리</button>
     </div>`;
@@ -947,11 +968,16 @@ interface Vis {
   /** 바라보는 방향(단위 벡터). */
   hx: number;
   hy: number;
+  /** 다른 말과 포개지지 않게 벌린 뒤의 자리(m). 그리는 자리다. */
+  fx: number;
+  fy: number;
   /** 화면 좌표(누르기 판정용). */
   sx: number;
   sy: number;
   /** 걸음의 위상(공은 구른 각도). */
   ph: number;
+  /** 이름표를 말 위쪽에 다는가. */
+  up: boolean;
 }
 
 /** 화면에 그리는 위치. 엔진 위치를 스프링으로 따라간다. 키는 "팀:자리". */
@@ -1001,7 +1027,7 @@ function spring(v: Vis, tx: number, ty: number, dt: number, w: number): void {
 function visOf(key: string, x: number, y: number, hx: number): Vis {
   let v = vis.get(key);
   if (!v) {
-    v = { x, y, vx: 0, vy: 0, hx, hy: 0, sx: 0, sy: 0, ph: 0 };
+    v = { x, y, vx: 0, vy: 0, hx, hy: 0, fx: x, fy: y, sx: 0, sy: 0, ph: 0, up: false };
     vis.set(key, v);
   }
   return v;
@@ -1015,8 +1041,12 @@ interface Drag {
   id: number;
   /** 잡은 선수. 빈 곳을 눌렀으면 -1. */
   i: number;
-  x0: number;
-  y0: number;
+  /** 누른 자리와 지금 자리(캔버스 좌표). 카메라가 움직여도 손가락 밑을 가리키도록 따로 둔다. */
+  rx0: number;
+  ry0: number;
+  rx: number;
+  ry: number;
+  /** 지금 자리(카메라를 걷어 낸 좌표). */
   x: number;
   y: number;
   moving: boolean;
@@ -1058,8 +1088,18 @@ function local(e: PointerEvent): [number, number] {
 
 function onPitchDown(e: PointerEvent): void {
   if (!game || !canvas || (e.pointerType === 'mouse' && e.button !== 0)) return;
-  const [x, y] = local(e);
-  drag = { id: e.pointerId, i: ownAt(x, y), x0: x, y0: y, x, y, moving: false };
+  if (replay) {
+    // 리플레이는 누르면 넘어간다. 시작하기 전에 눌렀으면 리플레이 없이 하던 일을 한다.
+    const showing = replay.live;
+    endReplay(performance.now());
+    if (showing) {
+      e.preventDefault();
+      return;
+    }
+  }
+  const [rx, ry] = local(e);
+  const [x, y] = uncam(rx, ry);
+  drag = { id: e.pointerId, i: ownAt(x, y), rx0: rx, ry0: ry, rx, ry, x, y, moving: false };
   canvas.setPointerCapture(e.pointerId);
   e.preventDefault();
 }
@@ -1067,8 +1107,9 @@ function onPitchDown(e: PointerEvent): void {
 function onPitchMove(e: PointerEvent): void {
   const g = game;
   if (!g || !drag || drag.id !== e.pointerId || drag.i < 0) return;
-  [drag.x, drag.y] = local(e);
-  if (drag.moving || Math.hypot(drag.x - drag.x0, drag.y - drag.y0) < 9) return;
+  [drag.rx, drag.ry] = local(e);
+  [drag.x, drag.y] = uncam(drag.rx, drag.ry);
+  if (drag.moving || Math.hypot(drag.rx - drag.rx0, drag.ry - drag.ry0) < 9) return;
   const m = g.match as MatchState;
   const L = m.live as LiveState;
   const p = L.teams[0].players[drag.i] as LivePlayer;
@@ -1135,6 +1176,374 @@ function plate(ctx: CanvasRenderingContext2D, cssW: number, x: number, y: number
   ctx.fillText(text, tx, y + 0.5);
 }
 
+// ----- 중계 카메라 -----
+
+/** 한 순간의 선수 한 명(경기장 좌표). */
+interface Man {
+  t: 0 | 1;
+  i: number;
+  p: LivePlayer;
+  x: number;
+  y: number;
+  hx: number;
+  hy: number;
+  ph: number;
+  run: number;
+  has: boolean;
+}
+
+/** 한 순간의 그림. 화면은 늘 이것을 그리고, 골 장면을 다시 보여 주려고 몇 초 치를 모아 둔다. */
+interface Still {
+  /** 경기 시각(틱). */
+  at: number;
+  men: Man[];
+  bx: number;
+  by: number;
+  /** 공이 뜬 높이(m)와 구른 각도. */
+  lift: number;
+  spin: number;
+  /** 날아가는 공이 향하는 곳. */
+  to: { x: number; y: number; shot: boolean } | null;
+}
+
+interface Replay {
+  /** 다시 보여 줄 구간(경기 시각)과 시작하는 때(ms). 골이 들어가고 잠깐 뜸을 들인 뒤 시작한다. */
+  from: number;
+  to: number;
+  start: number;
+  /** 공이 꽂힌 자리. */
+  x: number;
+  y: number;
+  good: boolean;
+  sub: string;
+  idx: number;
+  /** 화면에 나오기 시작했는가, 공이 그물에 닿았는가. */
+  live: boolean;
+  hit: boolean;
+}
+
+/** 되감는 길이(틱), 느린 화면의 속도(1초에 몇 틱), 골과 리플레이 사이의 뜸(ms), 그물에 닿은 뒤 머무는 시간(초). */
+const REPLAY_TICKS = 6;
+const REPLAY_RATE = BASE_TPS * 0.55;
+const REPLAY_WAIT = 1200;
+const REPLAY_REST = 0.9;
+const CAM_KEY = 'touchline:cam';
+
+/**
+ * 중계 카메라. 슈팅이 나오면 골문 쪽으로 잠깐 다가가고, 골은 느린 화면으로 한 번 더 보여 준다.
+ * 공이 페널티 지역에 들어갈 때마다 다가가면 화면이 10초에 한 번꼴로 출렁여서, 슈팅에만 움직인다.
+ * x, y는 화면 한가운데에 오는 점, tx, ty는 그 점이 따라가는 목표다(모두 확대하기 전의 화면 좌표).
+ * 멈췄거나 선수를 골랐으면 전술판이 다 보이게 물러난다. 4배속부터는 쓰지 않는다.
+ */
+const cam = { on: true, z: 1, x: 0, y: 0, tx: 0, ty: 0, w: 0, h: 0, shot: 0, cut: 0, snap: false };
+const tape: Still[] = [];
+let tapeAt = 0;
+/** 마지막 슈팅이 향한 곳. 골이 되면 공을 그물 안에 잠깐 둔다. */
+let aim: { x: number; y: number; side: 0 | 1 } | null = null;
+let netBall: { x: number; y: number; until: number } | null = null;
+let replay: Replay | null = null;
+
+const camLive = (): boolean => cam.on && !calm && speed <= 2;
+
+function camPref(): boolean {
+  try {
+    return localStorage.getItem(CAM_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function setCam(on: boolean): void {
+  cam.on = on;
+  try {
+    if (on) localStorage.removeItem(CAM_KEY);
+    else localStorage.setItem(CAM_KEY, '0');
+  } catch {
+    // 저장소를 쓸 수 없으면 이번 접속 동안만 따른다.
+  }
+}
+
+function resetCam(): void {
+  Object.assign(cam, { on: camPref(), z: 1, shot: 0, cut: 0, snap: false });
+  tape.length = 0;
+  aim = null;
+  netBall = null;
+  replay = null;
+}
+
+/** 확대한 화면의 점을 확대하기 전 좌표로. 누른 자리를 찾을 때 쓴다. */
+const uncam = (x: number, y: number): [number, number] => (cam.z === 1 ? [x, y] : [(x - cam.w / 2) / cam.z + cam.x, (y - cam.h / 2) / cam.z + cam.y]);
+
+/** 골이다. 그물이 출렁이고 넣은 팀 관중이 뛴다. */
+function cheer(now: number, good: boolean): void {
+  netHit = { side: good ? 1 : 0, start: now };
+  if (scene && look && canvas) party = startParty(now, scene.fans.filter((f) => f.team === (good ? 0 : 1)), scene.dot, look.fans[good ? 0 : 1], canvas.clientWidth, canvas.clientHeight);
+}
+
+/** 골이 들어갔다. 공을 그물 안에 두고, 모아 둔 그림이 넉넉하면 리플레이를 건다. */
+function cueReplay(now: number, good: boolean, sub: string): void {
+  const side = good ? 0 : 1;
+  const spot = aim && aim.side === side ? aim : { x: side === 0 ? 106.2 : -1.2, y: 34 };
+  aim = null;
+  netBall = { x: spot.x, y: spot.y, until: now + 1100 };
+  const end = tape[tape.length - 1];
+  if (!camLive() || paused || !end || tape.length < 8 || game?.match?.step !== 'live') return;
+  const from = Math.max((tape[0] as Still).at, end.at - REPLAY_TICKS);
+  if (end.at - from < 2) return;
+  replay = { from, to: end.at, start: now + REPLAY_WAIT, x: spot.x, y: spot.y, good, sub, idx: Math.max(0, tape.findIndex((s) => s.at >= from)), live: false, hit: false };
+  netBall.until = replay.start;
+  cam.shot = replay.start;
+  if (flash) flash.until = replay.start;
+}
+
+/** 리플레이를 끝낸다. 화면에 나오던 중이었으면 장면을 끊고 전체 화면으로 돌아간다. */
+function endReplay(now: number): void {
+  const cut = !!replay?.live;
+  replay = null;
+  tape.length = 0;
+  if (!cut) return;
+  netBall = null;
+  Object.assign(cam, { z: 1, shot: 0, cut: now });
+}
+
+/** 리플레이가 끝날 때까지 다음 킥오프를 미룬다(그 전까지 경기는 그대로 흐른다). */
+const holding = (L: LiveState): boolean => !!replay && L.restart === 'kick' && L.wait <= 2;
+
+function blend(a: Still, b: Still, k: number): Still {
+  if (a.men.length !== b.men.length) return a;
+  const mix = (p: number, q: number): number => p + (q - p) * k;
+  const men = a.men.map((m, j) => {
+    const n = b.men[j] as Man;
+    return n.t !== m.t || n.i !== m.i ? m : { ...m, x: mix(m.x, n.x), y: mix(m.y, n.y), hx: mix(m.hx, n.hx), hy: mix(m.hy, n.hy), ph: mix(m.ph, n.ph), run: mix(m.run, n.run) };
+  });
+  return { at: mix(a.at, b.at), men, bx: mix(a.bx, b.bx), by: mix(a.by, b.by), lift: mix(a.lift, b.lift), spin: mix(a.spin, b.spin), to: a.to };
+}
+
+/** 리플레이 중이면 지금 보여 줄 그림. 모아 둔 그림 사이를 이어 느리게 돌리고, 끝에는 공을 그물까지 보낸다. */
+function replayStill(now: number): Still | null {
+  const r = replay;
+  if (!r || now < r.start) return null;
+  if (!r.live) {
+    r.live = true;
+    party = null;
+    netHit = null;
+    cam.cut = now;
+    cam.snap = true;
+  }
+  const t = (now - r.start) / 1000;
+  const at = r.from + t * REPLAY_RATE;
+  if (at <= r.to) {
+    while (r.idx < tape.length - 2 && (tape[r.idx + 1] as Still).at <= at) r.idx++;
+    const a = tape[r.idx] as Still;
+    const b = tape[r.idx + 1] as Still;
+    return blend(a, b, b.at > a.at ? clamp((at - a.at) / (b.at - a.at), 0, 1) : 0);
+  }
+  const end = tape[tape.length - 1] as Still;
+  const tail = t - (r.to - r.from) / REPLAY_RATE;
+  const fly = Math.hypot(r.x - end.bx, r.y - end.by) / 22;
+  const k = fly > 0 ? Math.min(1, tail / fly) : 1;
+  if (k >= 1 && !r.hit) {
+    r.hit = true;
+    cheer(now, r.good);
+  }
+  if (tail > fly + REPLAY_REST) {
+    endReplay(now);
+    return null;
+  }
+  const slow = Math.max(0, 1 - tail / 0.4);
+  return { ...end, men: end.men.map((m) => ({ ...m, run: m.run * slow })), bx: end.bx + (r.x - end.bx) * k, by: end.by + (r.y - end.by) * k, lift: end.lift * (1 - k), to: null };
+}
+
+/** 카메라가 볼 곳을 정하고 한 걸음 따라간다. */
+function follow(L: LiveState, st: Still, showing: boolean, dt: number, now: number): void {
+  // 공과 골문 사이를 본다.
+  const mouth = (gx: number, k: number): void => {
+    cam.tx = PX(st.bx, st.by) * (1 - k) + PX(gx, 34) * k;
+    cam.ty = PY(st.bx, st.by) * (1 - k) + PY(gx, 34) * k;
+  };
+  let zoom = 1;
+  let rate = 9;
+  if (showing) {
+    zoom = 1.5;
+    mouth((replay as Replay).x > 52.5 ? 105 : 0, 0.3);
+  } else if (drag && !drag.moving) {
+    // 누르고 있는 동안에는 화면을 움직이지 않는다.
+    return;
+  } else if (camLive() && !boardMode() && selected < 0) {
+    // 슈팅이 날아가는 동안과 그 뒤 1초(선방, 골대 밖, 골)를 가까이서 본다.
+    const f = L.flight;
+    if (f?.kind === 'shot') {
+      cam.shot = now + 1000;
+      mouth(f.side === 0 ? 105 : 0, 0.45);
+    }
+    zoom = now < cam.shot ? 1.32 : 1;
+    rate = zoom > cam.z ? 6 : 2.6;
+  }
+  const ease = (r: number): number => 1 - Math.exp(-dt * r);
+  if (cam.snap) {
+    cam.snap = false;
+    cam.z = zoom;
+    cam.x = cam.tx;
+    cam.y = cam.ty;
+  }
+  cam.z += (zoom - cam.z) * ease(rate);
+  if (zoom === 1 && cam.z < 1.004) cam.z = 1;
+  cam.x += (cam.tx - cam.x) * ease(5);
+  cam.y += (cam.ty - cam.y) * ease(5);
+  // 경기장 밖이 보이지 않게 한다. 다 물러나면 한가운데다.
+  const hw = cam.w / (2 * cam.z);
+  const hh = cam.h / (2 * cam.z);
+  cam.x = clamp(cam.x, hw, cam.w - hw);
+  cam.y = clamp(cam.y, hh, cam.h - hh);
+}
+
+/** 말의 반지름(화면 px). 우리 팀 기준이고 상대는 조금 작다. */
+const manR = (): number => clamp(view.s * 2.2, 9, 15);
+const THEIRS = 0.9;
+
+/**
+ * 엔진의 위치를 스프링으로 따라가 지금 그릴 그림을 만든다. 누르기 판정에 쓰는 화면 좌표도 여기서 맞춘다.
+ * 말이 서로 포개지지 않게 자리를 벌린다. 따라갈 자리를 먼저 벌려 스프링이 부드럽게 옮기게 하고,
+ * 스프링이 늦어 생긴 작은 겹침은 그리기 직전에 한 번 더 푼다.
+ */
+function pose(L: LiveState, frac: number, snap: boolean, dt: number, now: number): Still {
+  // 배속이 빠를수록 스프링을 빠르게 한다. 멈춰 있거나 처음 그리면 바로 맞춘다.
+  const w = 9 * Math.sqrt(speed);
+  const step = snap ? 0 : dt;
+  const lerp = (a: number, b: number): number => a + (b - a) * frac;
+  const owner = L.owner;
+  // 테두리와 팔다리까지 닿지 않게 반지름에 틈을 더한다. 시트를 열어 경기장이 작아지면 자리가 모자라 틈을 줄인다.
+  const rad = (manR() + clamp(view.s * 0.6, 0.8, 3.2)) / view.s;
+  const cast: { t: 0 | 1; i: number; p: LivePlayer; x: number; y: number; has: boolean }[] = [];
+  for (const t of [0, 1] as const) {
+    L.teams[t].players.forEach((p, i) => {
+      if (!p.off) cast.push({ t, i, p, x: lerp(p.px, p.x), y: lerp(p.py, p.y), has: !!owner && owner.team === t && owner.i === i });
+    });
+  }
+  const dotOf = (c: (typeof cast)[number], x: number, y: number): Dot => ({ x, y, r: c.t === 0 ? rad : rad * THEIRS, hold: c.has ? 3 : 1 });
+  const want = cast.map((c) => dotOf(c, c.x, c.y));
+  spread(want, 12);
+  const seen = cast.map((c, k) => {
+    const { x: tx, y: ty } = want[k] as Dot;
+    const v = visOf(`${c.t}:${c.i}`, tx, ty, c.t === 0 ? 1 : -1);
+    if (snap || step === 0 || Math.hypot(tx - v.x, ty - v.y) > 25) {
+      v.x = tx;
+      v.y = ty;
+      v.vx = 0;
+      v.vy = 0;
+    } else spring(v, tx, ty, step, w);
+    return dotOf(c, v.x, v.y);
+  });
+  spread(seen, 4);
+  const men: Man[] = [];
+  cast.forEach(({ t, i, p, has }, k) => {
+    const v = vis.get(`${t}:${i}`) as Vis;
+    v.fx = (seen[k] as Dot).x;
+    v.fy = (seen[k] as Dot).y;
+    // 움직이면 그쪽을, 서 있으면 공을 본다.
+    const sp = Math.hypot(v.vx, v.vy);
+    const [dx, dy] = sp > 0.6 ? [v.vx / sp, v.vy / sp] : (() => {
+      const bx = L.ball.x - v.x;
+      const by = L.ball.y - v.y;
+      const d = Math.hypot(bx, by) || 1;
+      return [bx / d, by / d];
+    })();
+    const rate = Math.min(1, step * 8 || 1);
+    v.hx += (dx - v.hx) * rate;
+    v.hy += (dy - v.hy) * rate;
+    const hn = Math.hypot(v.hx, v.hy) || 1;
+    v.hx /= hn;
+    v.hy /= hn;
+    if (!calm) v.ph += step * clamp(5 + sp * 1.2, 0, 22);
+    v.sx = PX(v.fx, v.fy);
+    v.sy = PY(v.fx, v.fy);
+    men.push({ t, i, p, x: v.fx, y: v.fy, hx: v.hx, hy: v.hy, ph: v.ph, run: calm ? 0 : clamp(sp / 4, 0, 1), has });
+  });
+  // 벌린 만큼 공도 옮긴다. 패스는 찬 선수의 그림에서 떠나 받는 선수의 그림에 닿는다.
+  const shift = (t: 0 | 1, i: number): [number, number] => {
+    const c = cast.find((o) => o.t === t && o.i === i);
+    const v = c && vis.get(`${t}:${i}`);
+    return c && v ? [v.fx - c.x, v.fy - c.y] : [0, 0];
+  };
+
+  // 공: 가진 선수 발밑, 날아가는 중이면 감속하는 궤적, 멈춰 있으면 그 자리. 골이 된 공은 그물 안에 잠깐 남는다.
+  const f = L.flight;
+  let ballX = lerp(L.ball.px, L.ball.x);
+  let ballY = lerp(L.ball.py, L.ball.y);
+  let lift = 0;
+  let to: Still['to'] = null;
+  if (netBall && (now > netBall.until || L.restart !== 'kick' || L.wait <= 0)) netBall = null;
+  if (netBall) {
+    ballX = netBall.x;
+    ballY = netBall.y;
+  } else if (f) {
+    const span = Math.max(1, f.end - f.start);
+    const prog = clamp((L.tick - 1 - f.start + frac) / span, 0, 1);
+    const e = f.kind === 'shot' ? prog : easeOut(prog);
+    const [ax, ay] = shift(f.side, f.by);
+    const [zx, zy] = f.result === null && f.kind !== 'shot' ? shift(f.team, f.to) : [0, 0];
+    ballX = f.fromX + (f.toX - f.fromX) * e + ax * (1 - e) + zx * e;
+    ballY = f.fromY + (f.toY - f.fromY) * e + ay * (1 - e) + zy * e;
+    if (f.kind === 'long' || f.kind === 'cross') lift = Math.sin(Math.PI * prog) * Math.min(6, Math.hypot(f.toX - f.fromX, f.toY - f.fromY) * 0.12);
+    to = { x: f.toX + zx, y: f.toY + zy, shot: f.kind === 'shot' };
+  } else if (owner) {
+    const ov = vis.get(`${owner.team}:${owner.i}`);
+    if (ov) {
+      ballX = ov.fx + ov.hx * 0.9;
+      ballY = ov.fy + ov.hy * 0.9;
+    }
+  }
+  const bv = visOf('ball', ballX, ballY, 1);
+  if (snap || step === 0 || Math.hypot(ballX - bv.x, ballY - bv.y) > 30) {
+    bv.x = ballX;
+    bv.y = ballY;
+    bv.vx = 0;
+    bv.vy = 0;
+  } else spring(bv, ballX, ballY, step, f ? 40 : 22);
+  const ballPace = Math.hypot(bv.vx, bv.vy);
+  if (!calm) bv.ph += step * Math.min(ballPace, 30) * 1.1;
+  if (ballPace > 12) trail.push({ x: bv.x, y: bv.y });
+  else if (trail.length) trail.shift();
+  if (trail.length > 7) trail.shift();
+  return { at: L.tick - 1 + frac, men, bx: bv.x, by: bv.y, lift, spin: bv.ph, to };
+}
+
+/** 리플레이 딱지. 화면 왼쪽 위에 붙고, 아래 줄이 차오르며 남은 길이를 알려 준다. */
+function replayTag(ctx: CanvasRenderingContext2D, r: Replay, now: number, cssW: number): void {
+  const title = "600 12px 'IBM Plex Sans KR', system-ui, sans-serif";
+  const fine = "500 11px 'IBM Plex Sans KR', system-ui, sans-serif";
+  const hint = '누르면 넘어간다';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.font = title;
+  const tw = ctx.measureText('리플레이').width;
+  ctx.font = fine;
+  const w = Math.min(cssW - 16, Math.max(tw + 35 + ctx.measureText(hint).width, r.sub ? ctx.measureText(r.sub).width + 18 : 0));
+  const h = r.sub ? 42 : 24;
+  const total = (r.to - r.from) / REPLAY_RATE + REPLAY_REST;
+  // 긴 해설은 딱지 안에 들어가는 데까지만 쓴다.
+  let sub = r.sub;
+  while (sub.length > 1 && ctx.measureText(sub).width > w - 18) sub = `${sub.slice(0, -2).trimEnd()}…`;
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(8, 8, w, h, 3);
+  ctx.clip();
+  ctx.fillStyle = 'rgba(8,24,16,0.84)';
+  ctx.fillRect(8, 8, w, h);
+  ctx.fillStyle = 'rgba(244,248,240,0.6)';
+  ctx.fillText(hint, tw + 34, 20.5);
+  if (sub) ctx.fillText(sub, 17, 37.5);
+  ctx.fillStyle = 'rgba(244,248,240,0.5)';
+  ctx.fillRect(8, 6 + h, w * clamp((now - r.start) / 1000 / total, 0, 1), 2);
+  // 넣은 팀의 색.
+  ctx.fillStyle = kit[r.good ? 0 : 1].body;
+  ctx.fillRect(8, 8, 3, h);
+  ctx.fillStyle = '#f4f8f0';
+  ctx.font = title;
+  ctx.fillText('리플레이', 17, 20.5);
+  ctx.restore();
+}
+
 function draw(frac: number, snap = false, dt = 0): void {
   const g = game;
   const c = canvas;
@@ -1150,7 +1559,6 @@ function draw(frac: number, snap = false, dt = 0): void {
   }
   const ctx = c.getContext('2d');
   if (!ctx) return;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   view.up = upright();
   const [pw, ph] = view.up ? [68, 105] : [105, 68];
   const [padT, padG] = margins(wide());
@@ -1161,6 +1569,29 @@ function draw(frac: number, snap = false, dt = 0): void {
   const s = view.s;
   const now = performance.now();
   const sec = now / 1000;
+  cam.w = cssW;
+  cam.h = cssH;
+
+  // 선수와 공의 자리. 후반에는 화면만 반 바퀴 돌려 두 팀이 진영을 바꾼 것으로 보여 준다.
+  const turned = secondHalf(L);
+  view.flip = turned;
+  if (replay && (paused || drag?.moving || m.step !== 'live')) endReplay(now);
+  const cur = pose(L, frac, snap, dt, now);
+  if (!camLive()) {
+    if (!replay) tape.length = 0;
+  } else if (!paused && !replay && now - tapeAt >= 30) {
+    tapeAt = now;
+    tape.push(cur);
+    while (tape.length > 1 && (tape[0] as Still).at < cur.at - REPLAY_TICKS - 1) tape.shift();
+  }
+  const st = replayStill(now) ?? cur;
+  const showing = st !== cur;
+  follow(L, st, showing, snap ? 0 : dt, now);
+  if (drag) [drag.x, drag.y] = uncam(drag.rx, drag.ry);
+  // 경기장은 카메라를 거쳐 그리고, 비와 딱지는 화면에 바로 그린다.
+  const world = (): void => ctx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * (cssW / 2 - cam.x * cam.z), dpr * (cssH / 2 - cam.y * cam.z));
+  const screen = (): void => ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
   // 구장과 벤치는 그대로 두고, 후반에는 선수와 공만 반대 진영으로 옮겨 그린다. 배경은 크기가 바뀔 때만 다시 칠한다.
   view.flip = false;
   const key = `${c.width}x${c.height}:${view.up}:${s.toFixed(3)}`;
@@ -1169,6 +1600,7 @@ function draw(frac: number, snap = false, dt = 0): void {
     sceneKey = key;
     party = null;
   }
+  world();
   if (scene) ctx.drawImage(scene.image, 0, 0, cssW, cssH);
   const shade = scene?.shade ?? [0.14, 0.3];
   const wind = look?.weather === 'wind' ? 1 : 0;
@@ -1176,7 +1608,6 @@ function draw(frac: number, snap = false, dt = 0): void {
   const flagSize = clamp(s * 0.8, 3, 5);
   for (const [fx, fy] of [[0, 0], [105, 0], [105, 68], [0, 68]] as const) drawFlag(ctx, PX(fx, fy), PY(fx, fy), flagSize, look?.owner[0] ?? PICK, calm ? 0 : sec, wind);
   // 공격 방향.
-  const turned = secondHalf(L);
   ctx.fillStyle = 'rgba(255,255,255,0.5)';
   ctx.font = `600 ${clamp(s * 2.2, 10, 13)}px 'Barlow Condensed', 'IBM Plex Sans KR', system-ui, sans-serif`;
   ctx.textBaseline = 'middle';
@@ -1188,98 +1619,26 @@ function draw(frac: number, snap = false, dt = 0): void {
   } else ctx.fillText('공격 ▶', PX(54, 2.4), PY(54, 2.4));
   view.flip = turned;
 
-  // 배속이 빠를수록 스프링을 빠르게 한다. 멈춰 있거나 처음 그리면 바로 맞춘다.
-  const w = 9 * Math.sqrt(speed);
-  const step = snap ? 0 : dt;
-  const lerp = (a: number, b: number): number => a + (b - a) * frac;
   const mySlots = slotsOf(L, 0, m.me.shape);
-  const board = boardMode();
-
-  // 선수 위치.
-  type Dot = { t: 0 | 1; i: number; p: LivePlayer; v: Vis };
-  const dots: Dot[] = [];
-  for (const t of [0, 1] as const) {
-    L.teams[t].players.forEach((p, i) => {
-      if (p.off) return;
-      const tx = lerp(p.px, p.x);
-      const ty = lerp(p.py, p.y);
-      const v = visOf(`${t}:${i}`, tx, ty, t === 0 ? 1 : -1);
-      if (snap || step === 0 || Math.hypot(tx - v.x, ty - v.y) > 25) {
-        v.x = tx;
-        v.y = ty;
-        v.vx = 0;
-        v.vy = 0;
-      } else spring(v, tx, ty, step, w);
-      // 움직이면 그쪽을, 서 있으면 공을 본다.
-      const sp = Math.hypot(v.vx, v.vy);
-      const [dx, dy] = sp > 0.6 ? [v.vx / sp, v.vy / sp] : (() => {
-        const bx = L.ball.x - v.x;
-        const by = L.ball.y - v.y;
-        const d = Math.hypot(bx, by) || 1;
-        return [bx / d, by / d];
-      })();
-      const rate = Math.min(1, step * 8 || 1);
-      v.hx += (dx - v.hx) * rate;
-      v.hy += (dy - v.hy) * rate;
-      const hn = Math.hypot(v.hx, v.hy) || 1;
-      v.hx /= hn;
-      v.hy /= hn;
-      if (!calm) v.ph += step * clamp(5 + sp * 1.2, 0, 22);
-      v.sx = PX(v.x, v.y);
-      v.sy = PY(v.x, v.y);
-      dots.push({ t, i, p, v });
-    });
-  }
-
-  // 공: 가진 선수 발밑, 날아가는 중이면 감속하는 궤적, 멈춰 있으면 그 자리.
-  const f = L.flight;
-  let ballX = lerp(L.ball.px, L.ball.x);
-  let ballY = lerp(L.ball.py, L.ball.y);
-  let lift = 0;
-  if (f) {
-    const span = Math.max(1, f.end - f.start);
-    const prog = clamp((L.tick - 1 - f.start + frac) / span, 0, 1);
-    const e = f.kind === 'shot' ? prog : easeOut(prog);
-    ballX = f.fromX + (f.toX - f.fromX) * e;
-    ballY = f.fromY + (f.toY - f.fromY) * e;
-    if (f.kind === 'long' || f.kind === 'cross') lift = Math.sin(Math.PI * prog) * Math.min(6, Math.hypot(f.toX - f.fromX, f.toY - f.fromY) * 0.12) * s;
-  } else if (L.owner) {
-    const ov = vis.get(`${L.owner.team}:${L.owner.i}`);
-    if (ov) {
-      ballX = ov.x + ov.hx * 0.9;
-      ballY = ov.y + ov.hy * 0.9;
-    }
-  }
-  const bv = visOf('ball', ballX, ballY, 1);
-  if (snap || step === 0 || Math.hypot(ballX - bv.x, ballY - bv.y) > 30) {
-    bv.x = ballX;
-    bv.y = ballY;
-    bv.vx = 0;
-    bv.vy = 0;
-  } else spring(bv, ballX, ballY, step, f ? 40 : 22);
-  const ballPace = Math.hypot(bv.vx, bv.vy);
-  if (!calm) bv.ph += step * Math.min(ballPace, 30) * 1.1;
-  if (ballPace > 12) trail.push({ x: bv.x, y: bv.y });
-  else if (trail.length) trail.shift();
-  if (trail.length > 7) trail.shift();
-
-  const r = clamp(s * 2.2, 9, 15);
+  const board = !showing && boardMode();
+  const r = manR();
+  const spots = st.men.map((man) => ({ man, x: PX(man.x, man.y), y: PY(man.x, man.y) }));
 
   // 전술판: 우리 선수의 기준 자리와 지금 위치를 잇는다. 고른 선수의 자리는 경기 중에도 보인다.
-  for (const { t, i, p, v } of dots) {
-    if (t !== 0 || (!board && i !== selected)) continue;
-    const slot = mySlots[p.slot] as Slot;
+  for (const { man, x, y } of spots) {
+    if (showing || man.t !== 0 || (!board && man.i !== selected)) continue;
+    const slot = mySlots[man.p.slot] as Slot;
     if (slot.line === 'GK') continue;
     const ax = PX(slot.u, slot.v);
     const ay = PY(slot.u, slot.v);
-    const on = i === selected;
+    const on = man.i === selected;
     ctx.save();
     ctx.strokeStyle = on ? PICK : 'rgba(255,255,255,0.5)';
     ctx.lineWidth = on ? 1.6 : 1;
     ctx.setLineDash([2, 3]);
     ctx.beginPath();
     ctx.moveTo(ax, ay);
-    ctx.lineTo(v.sx, v.sy);
+    ctx.lineTo(x, y);
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.beginPath();
@@ -1291,62 +1650,77 @@ function draw(frac: number, snap = false, dt = 0): void {
   }
 
   // 패스와 슈팅의 목표 지점.
-  if (f) {
+  const bx = PX(st.bx, st.by);
+  const by = PY(st.bx, st.by);
+  if (st.to) {
     ctx.save();
-    ctx.setLineDash(f.kind === 'shot' ? [] : [3, 5]);
-    ctx.strokeStyle = f.kind === 'shot' ? 'rgba(255,225,74,0.85)' : 'rgba(255,255,255,0.4)';
-    ctx.lineWidth = f.kind === 'shot' ? 2 : 1.2;
+    ctx.setLineDash(st.to.shot ? [] : [3, 5]);
+    ctx.strokeStyle = st.to.shot ? 'rgba(255,225,74,0.85)' : 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = st.to.shot ? 2 : 1.2;
     ctx.beginPath();
-    ctx.moveTo(PX(bv.x, bv.y), PY(bv.x, bv.y));
-    ctx.lineTo(PX(f.toX, f.toY), PY(f.toX, f.toY));
+    ctx.moveTo(bx, by);
+    ctx.lineTo(PX(st.to.x, st.to.y), PY(st.to.x, st.to.y));
     ctx.stroke();
     ctx.restore();
   }
 
   // 선수 말: 화면 아래에 있는 선수가 위에 오게 그린다.
   const tags: { x: number; y: number; text: string; kind: 'name' | 'mine' | 'theirs' }[] = [];
-  const owner = L.owner;
-  dots.sort((a, b) => a.v.sy - b.v.sy);
-  for (const { t, i, p, v } of dots) {
+  const th = clamp(s * 2.6, 12, 15);
+  // 이름표가 가리는 다른 말의 수. 공 가진 선수와 고른 선수의 이름표는 덜 가리는 쪽(아래나 위)에 단다.
+  const hidden = (own: Man, x: number, y: number, text: string): number => {
+    const half = text.length * 5.5 + 5 + r * 0.7;
+    return spots.filter((o) => o.man !== own && Math.abs(o.x - x) < half && Math.abs(o.y - y) < th / 2 + r * 0.7).length;
+  };
+  spots.sort((a, b) => a.y - b.y);
+  for (const { man, x, y } of spots) {
+    const { t, i, p } = man;
     const k = kit[t];
-    const x = v.sx;
-    const y = v.sy;
-    const rr = t === 0 ? r : r * 0.9;
+    const rr = t === 0 ? r : r * THEIRS;
     const keeper = p.line === 'GK' && (slotsOf(L, t, t === 0 ? m.me.shape : m.opp.shape)[p.slot] as Slot).line === 'GK';
     const body = keeper ? k.keeper : k.body;
-    const picked = t === 0 && i === selected;
-    const hasBall = !!owner && owner.team === t && owner.i === i;
+    const picked = !showing && t === 0 && i === selected;
     const tk = `${t}:${i}:${p.name}`;
     let tone = toneOf.get(tk);
     if (!tone) {
       tone = tones(p.pid ?? hashName(p.name), p.nat ?? '');
       toneOf.set(tk, tone);
     }
-    const [hx, hy] = turn(v.hx, v.hy);
+    const [hx, hy] = turn(man.hx, man.hy);
     drawFigure(ctx, {
       x, y, r: rr, ang: Math.atan2(hy, hx), kit: k, body, skin: tone[0], hair: tone[1], keeper, n: p.n,
-      stride: v.ph, run: calm ? 0 : clamp(Math.hypot(v.vx, v.vy) / 4, 0, 1), hasBall, picked, shade, lit: scene?.lit ?? false,
+      stride: man.ph, run: man.run, hasBall: man.has, picked, shade, lit: scene?.lit ?? false,
     });
     // 이름표: 전술판 모드에서는 우리 선수 모두, 경기 중에는 공 가진 선수와 고른 선수만.
-    if (t === 0 && (board || picked || hasBall)) tags.push({ x, y: y + rr + 8, text: short(p.name, p.nat), kind: picked || hasBall ? 'mine' : 'name' });
-    else if (t === 1 && hasBall) tags.push({ x, y: y + rr + 8, text: `${p.n} ${short(p.name, p.nat)}`, kind: 'theirs' });
+    const named = t === 0 ? board || picked || man.has : man.has;
+    if (!named) continue;
+    const text = t === 0 ? short(p.name, p.nat) : `${p.n} ${short(p.name, p.nat)}`;
+    const drop = rr + 8;
+    const v = vis.get(`${t}:${i}`);
+    // 지금 단 쪽이 더 많이 가릴 때만 옮긴다(오락가락하지 않게). 전술판에서는 모두 아래에 단다.
+    if (v && !board) {
+      const here = hidden(man, x, v.up ? y - drop : y + drop, text);
+      if (here > 0 && here > hidden(man, x, v.up ? y + drop : y - drop, text)) v.up = !v.up;
+    } else if (v) v.up = false;
+    tags.push({ x, y: v?.up ? y - drop : y + drop, text, kind: t === 1 ? 'theirs' : picked || man.has ? 'mine' : 'name' });
   }
 
   // 공과 꼬리. 뜬 공은 그림자가 땅에 남는다.
-  const bx = PX(bv.x, bv.y);
-  const by = PY(bv.x, bv.y);
+  const lift = st.lift * s;
   const br = Math.max(3, s * 0.75);
-  trail.forEach((pt, k) => {
-    ctx.beginPath();
-    ctx.arc(PX(pt.x, pt.y), PY(pt.x, pt.y) - lift * 0.5, br * (0.4 + k * 0.06), 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(255,255,255,${0.08 + k * 0.04})`;
-    ctx.fill();
-  });
+  if (!showing) {
+    trail.forEach((pt, k) => {
+      ctx.beginPath();
+      ctx.arc(PX(pt.x, pt.y), PY(pt.x, pt.y) - lift * 0.5, br * (0.4 + k * 0.06), 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,255,255,${0.08 + k * 0.04})`;
+      ctx.fill();
+    });
+  }
   ctx.beginPath();
   ctx.ellipse(bx + lift * 0.15, by + 1.5, br * (1 + lift / (s * 12)), br * 0.6, 0, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(8,24,16,0.4)';
   ctx.fill();
-  drawBall(ctx, bx, by - lift, br * (1 + lift / (s * 20)), bv.ph);
+  drawBall(ctx, bx, by - lift, br * (1 + lift / (s * 20)), st.spin);
 
   // 골 뒤풀이와 날씨. 이름표보다 아래에 그린다.
   if (netHit) {
@@ -1362,10 +1736,11 @@ function draw(frac: number, snap = false, dt = 0): void {
     if (now > party.until) party = null;
     else drawParty(ctx, party, now, calm);
   }
+  screen();
   if (!calm && look?.weather === 'rain') drawRain(ctx, cssW, cssH, sec);
   else if (!calm && wind) drawWind(ctx, cssW, cssH, sec);
+  world();
 
-  const th = clamp(s * 2.6, 12, 15);
   ctx.font = `600 ${clamp(s * 1.9, 10, 12)}px 'IBM Plex Sans KR', system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -1401,6 +1776,14 @@ function draw(frac: number, snap = false, dt = 0): void {
     ctx.restore();
     ctx.font = `700 ${clamp(s * 2.1, 11, 13)}px 'IBM Plex Sans KR', system-ui, sans-serif`;
     plate(ctx, cssW, tx, Math.max(th, ty - r - th), swap ? '자리 맞바꾸기' : `${p.n} → ${slotSpot(next)}`, PICK, '#111', th + 3);
+  }
+
+  screen();
+  if (showing && replay) replayTag(ctx, replay, now, cssW);
+  // 장면이 바뀔 때는 잠깐 어두워졌다 밝아진다.
+  if (now - cam.cut < 180) {
+    ctx.fillStyle = `rgba(6,14,10,${(0.6 * (1 - (now - cam.cut) / 180)).toFixed(3)})`;
+    ctx.fillRect(0, 0, cssW, cssH);
   }
 
   const flashEl = $('#lv-flash');
