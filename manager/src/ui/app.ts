@@ -7,7 +7,7 @@ import { COUNTRIES, COUNTRY_IDS, countryOf, leaguesOf, quotaOf } from '../game/c
 import type { CountryId } from '../game/countries.ts';
 import { licenseName } from '../game/hiring.ts';
 import { ko } from '../game/josa.ts';
-import { effOvr, formationOf, lineAt, potentialText, ratings, spotAt, stage, valueOf } from '../game/squad.ts';
+import { effOvr, formationOf, lineAt, potentialText, ratings, slotsFor, spotAt, stage, valueOf } from '../game/squad.ts';
 import { formationMini, playerCard, playerRow, spotBadge } from './cards.ts';
 import { face } from './face.ts';
 import { ESC_SLOTS, NON_HG_LIMIT, PROMISES, RESERVE_LIMIT, oddsText, quotaWord, contractText, depthOf, englandStatus, englandText, foreignCount, inEngland, isForeign, placeAt, promiseKept, quota, swapLineup, totalWages } from '../game/contract.ts';
@@ -18,7 +18,7 @@ import { posPenalty } from '../game/player.ts';
 import { SHAPES, SHAPE_IDS } from '../game/tactics.ts';
 import { legacyTitle } from '../game/talk.ts';
 import { dropCount, sortTable, zone } from '../game/world.ts';
-import { isLive, mountLive, onLiveClick, pauseLive, renderLive, unmountLive } from './live.ts';
+import { isLive, liveDrop, mountLive, onLiveClick, pauseLive, renderLive, unmountLive } from './live.ts';
 import type { BackgroundId, Block, Choice, Club, FormRow, MarketCard, MarketTab, Game, LeagueId, MatchLine, Phase, Player, ShapeId } from '../game/types.ts';
 
 type Tab = 'play' | 'table' | 'squad' | 'record';
@@ -84,6 +84,7 @@ export function start(data: { game?: unknown }): void {
   const saved = (data.game as Game | undefined) ?? load<Game>(SAVE_KEY);
   game = saved && migrate(saved) ? saved : null;
   root.addEventListener('click', onClick);
+  root.addEventListener('pointerdown', onPointerDown);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) pauseLive();
   });
@@ -122,7 +123,139 @@ function begin(): void {
   window.scrollTo(0, 0);
 }
 
+// ---------- 끌어다 놓기 ----------
+// 마우스는 바로, 손가락은 선발 토큰이나 ⠿ 손잡이에서만 끈다(나머지는 화면 스크롤). 놓은 곳의 data-drop이 무엇이냐에 따라 맞바꾸기, 자리 옮기기, 후보로 내리기를 한다.
+
+interface Drag {
+  src: string;
+  el: HTMLElement;
+  ghost: HTMLElement | null;
+  x0: number;
+  y0: number;
+  id: number;
+  over: HTMLElement | null;
+}
+
+let drag: Drag | null = null;
+/** 끌기를 마친 직후의 클릭(손을 뗄 때 생기는)을 무시한다. */
+let justDragged = false;
+
+function onPointerDown(e: PointerEvent): void {
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-drag]');
+  if (!el || !game || e.button > 0) return;
+  if (e.pointerType !== 'mouse' && !(e.target as HTMLElement).closest('.xi-tok, .drag-handle')) return;
+  drag = { src: el.dataset.drag as string, el, ghost: null, x0: e.clientX, y0: e.clientY, id: e.pointerId, over: null };
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', cancelDrag);
+}
+
+function onPointerMove(e: PointerEvent): void {
+  const d = drag;
+  if (!d || e.pointerId !== d.id) return;
+  if (!d.ghost) {
+    if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 6) return;
+    const rect = d.el.getBoundingClientRect();
+    const ghost = d.el.cloneNode(true) as HTMLElement;
+    ghost.classList.add('drag-ghost');
+    ghost.removeAttribute('data-drop');
+    ghost.style.cssText = `width:${rect.width}px;height:${rect.height}px;left:0;top:0;`;
+    document.body.appendChild(ghost);
+    d.ghost = ghost;
+    d.el.classList.add('is-dragging');
+    document.body.classList.add('is-dragging-any');
+  }
+  e.preventDefault();
+  const r = d.ghost.getBoundingClientRect();
+  d.ghost.style.transform = `translate(${e.clientX - r.width / 2}px, ${e.clientY - r.height / 2}px) scale(1.05)`;
+  const target = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest<HTMLElement>('[data-drop]') ?? null;
+  if (target !== d.over) {
+    d.over?.classList.remove('is-over');
+    if (target && target !== d.el) target.classList.add('is-over');
+    d.over = target;
+  }
+}
+
+function cancelDrag(): void {
+  const d = drag;
+  drag = null;
+  window.removeEventListener('pointermove', onPointerMove);
+  window.removeEventListener('pointerup', onPointerUp);
+  window.removeEventListener('pointercancel', cancelDrag);
+  if (!d) return;
+  d.ghost?.remove();
+  d.el.classList.remove('is-dragging');
+  d.over?.classList.remove('is-over');
+  document.body.classList.remove('is-dragging-any');
+}
+
+function onPointerUp(e: PointerEvent): void {
+  const d = drag;
+  if (!d || e.pointerId !== d.id) return;
+  const started = !!d.ghost;
+  const target = started ? ((document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest<HTMLElement>('[data-drop]') ?? null) : null;
+  cancelDrag();
+  if (!started || !game) return;
+  justDragged = true;
+  setTimeout(() => { justDragged = false; }, 50);
+  const g = game;
+  const dst = target?.dataset.drop ?? '';
+  const [sk, sv] = d.src.split(':');
+  let action: string | null = null;
+  if (sk === 'lb' || sk === 'lp') {
+    // 실시간 경기: 벤치 선수와 경기장 선수를 맞바꾼다(교체).
+    const [dk, dv] = dst.split(':');
+    if (sk === 'lb' && dk === 'lp') action = `swap:${dv}:${sv}`;
+    else if (sk === 'lp' && dk === 'lb') action = `swap:${sv}:${dv}`;
+    if (action) liveDrop(action);
+    return;
+  }
+  const at = Number(sv);
+  if (dst.startsWith('s:')) {
+    const j = Number(dst.slice(2));
+    if (sk === 's' && j !== at) action = `place:${(g.squad[at] as Player).id}.${j}`;
+    if (sk === 'r') action = `place:${at}.${j}`;
+  } else if (dst.startsWith('res:')) {
+    if (sk === 's') action = `place:${dst.slice(4)}.${at}`;
+  } else if (dst === 'reserves') {
+    if (sk === 's') action = `bench:${at}`;
+  } else if (dst === 'pitch' && target) {
+    const rect = target.getBoundingClientRect();
+    const px = ((e.clientX - rect.left) / rect.width) * 100;
+    const py = ((e.clientY - rect.top) / rect.height) * 100;
+    // 화면의 위치(%)를 경기장 좌표로: 토큰을 그릴 때(x = 6 + v/68×88, y = 94 − u/80×88)의 거꾸로.
+    const v = ((px - 6) / 88) * 68;
+    const u = ((94 - py) / 88) * 80;
+    if (sk === 's') action = `move:${at}.${Math.round(u)}.${Math.round(v)}`;
+    if (sk === 'r') {
+      // 후보를 잔디에 놓으면 가장 가까운 자리에 세운다.
+      const slots = slotsFor(g);
+      let best = 0;
+      let bestD = Infinity;
+      slots.forEach((s2, k) => {
+        const dd = Math.hypot(s2.u - u, s2.v - v);
+        if (dd < bestD) {
+          bestD = dd;
+          best = k;
+        }
+      });
+      action = `place:${at}.${best}`;
+    }
+  }
+  if (!action) return;
+  notice = manage(g, action).msg;
+  squadPick = null;
+  store(SAVE_KEY, g);
+  const y = window.scrollY;
+  render();
+  window.scrollTo(0, y);
+}
+
 function onClick(e: Event): void {
+  if (justDragged) {
+    e.preventDefault();
+    return;
+  }
   const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act],[data-tab],[data-league],[data-bg],[data-country],[data-mtab],[data-todo],[data-lineup],[data-do],[data-live],[data-live-do],[data-step]');
   if (!el) return;
   if (el.dataset.step && el.dataset.for) {
@@ -684,7 +817,7 @@ function renderSquad(g: Game): string {
   const target = pickSlot >= 0 ? lineAt(g, pickSlot) : null;
 
   // 선발 열한 명을 대형의 자리대로 세로 경기장 위에 세운다. 누르면 고르고, 다른 자리나 후보를 누르면 맞바꾼다.
-  const slotsNow = SLOTS[shape];
+  const slotsNow = slotsFor(g, shape);
   const token = (p: Player, i: number): string => {
     const line = lineAt(g, i);
     const sl = slotsNow[i]!;
@@ -697,7 +830,7 @@ function renderSquad(g: Game): string {
       const rp = g.reserves.find((q) => q.id === pickRes);
       return rp ? `<span class="xi-tok__hint">${effOvr(rp, line) + rp.temp}</span>` : '';
     })() : '';
-    return `<button type="button" class="xi-tok${i === pickSlot ? ' is-picked' : ''}${pickSlot >= 0 && i !== pickSlot ? ' is-target' : ''}${pen ? ' is-off' : ''}${fl.length ? ' is-warn' : ''}" style="left:${x.toFixed(1)}%;top:${y.toFixed(1)}%" data-lineup="s:${i}"${busy ? ' disabled' : ''} aria-label="${esc(`${spotAt(g, i)} 자리 ${p.name} OVR ${v}${pen ? ` 포지션 밖 -${pen}` : ''}${fl.length ? ` ${fl.join(', ')}` : ''}`)}">
+    return `<button type="button" class="xi-tok${i === pickSlot ? ' is-picked' : ''}${pickSlot >= 0 && i !== pickSlot ? ' is-target' : ''}${pen ? ' is-off' : ''}${fl.length ? ' is-warn' : ''}" style="left:${x.toFixed(1)}%;top:${y.toFixed(1)}%" data-lineup="s:${i}"${busy ? ' disabled' : ` data-drag="s:${i}" data-drop="s:${i}"`} aria-label="${esc(`${spotAt(g, i)} 자리 ${p.name} OVR ${v}${pen ? ` 포지션 밖 -${pen}` : ''}${fl.length ? ` ${fl.join(', ')}` : ''}`)}">
       ${face(p.id, p.nat, 34, club.colors, p.name)}
       <span class="xi-tok__ovr">${v}</span>
       <span class="xi-tok__name">${esc(p.name.includes(' ') ? (p.nat === '일본' ? p.name.split(' ')[0] as string : p.name.split(' ').pop() as string) : p.name)}</span>
@@ -708,7 +841,8 @@ function renderSquad(g: Game): string {
   const resCard = (p: Player): string => {
     const canPlay = !p.loan || p.loan.dir === 'in';
     const there = target ? effOvr(p, target) + p.temp : null;
-    return `<button type="button" class="bench-card${p.id === pickRes ? ' is-picked' : ''}" data-lineup="r:${p.id}"${busy || !canPlay ? ' disabled' : ''}>
+    return `<button type="button" class="bench-card${p.id === pickRes ? ' is-picked' : ''}" data-lineup="r:${p.id}"${busy || !canPlay ? ' disabled' : ` data-drag="r:${p.id}" data-drop="res:${p.id}"`}>
+      ${busy || !canPlay ? '' : '<span class="drag-handle" aria-hidden="true">⠿</span>'}
       ${face(p.id, p.nat, 34, club.colors, p.name)}
       <span class="bench-card__who"><span class="bench-card__name">${esc(p.name)}</span><span class="bench-card__meta">${p.spot} · ${p.age}세 · ${PROMISES[p.contract?.promise ?? 'backup'].name}${flags(p).length ? ` · ${esc(flags(p).join(' · '))}` : ''}</span></span>
       <span class="bench-card__ovr">${there !== null ? `<small>${target}에서</small>${there}` : p.ovr + p.temp}</span>
@@ -730,15 +864,16 @@ function renderSquad(g: Game): string {
       ${items.length ? `<ul class="todo__list todo__list--open">${items.map(todoItem).join('')}</ul>` : '<p class="muted">지금 챙길 일이 없다.</p>'}
 
       <h3 class="section__sub">선발 11명 <span class="muted">${esc(SHAPES[shape].name)}</span></h3>
-      <p class="fine">${busy ? '경기 중에는 바꿀 수 없다.' : squadPick ? '바꿀 상대(다른 자리나 아래 후보)를 누른다. 같은 칸을 다시 누르면 취소.' : '자리를 누르고, 바꿀 선수(다른 자리나 후보)를 누르면 맞바꾼다. 자기 포지션이 아니면 OVR이 깎인다(빨간 숫자).'}</p>
+      <p class="fine">${busy ? '경기 중에는 바꿀 수 없다.' : squadPick ? '바꿀 상대(다른 자리나 아래 후보)를 누른다. 같은 칸을 다시 누르면 취소.' : '끌어다 놓기: 선수를 다른 선수 위에 놓으면 맞바꾸고, 빈 잔디에 놓으면 그 자리로 옮기며(앞뒤 위치에 따라 수비·미드필더·공격 줄이 바뀐다), 후보 칸에 놓으면 후보로 내린다. 후보는 ⠿를 잡고 경기장으로 끌어 올린다. 눌러서 고른 뒤 상대를 눌러도 된다.'}</p>
       <div class="xi-actions" role="group" aria-label="대형">
         ${SHAPE_IDS.map((id) => `<button type="button" class="chip${id === shape ? ' is-on' : ''}" data-todo="formation:${id}" aria-pressed="${id === shape}"${busy ? ' disabled' : ''}>${esc(SHAPES[id].name)}</button>`).join('')}
       </div>
       <div class="xi-actions">
         <button type="button" class="chip chip--primary" data-todo="auto"${busy ? ' disabled' : ''}>가장 강한 배치로</button>
+        ${g.tweaks?.[shape] ? `<button type="button" class="chip" data-todo="reset"${busy ? ' disabled' : ''}>자리 되돌리기</button>` : ''}
         ${squadPick ? '<button type="button" class="chip" data-lineup="clear">선택 취소</button>' : ''}
       </div>
-      <div class="xi-pitch" role="group" aria-label="선발 11명">
+      <div class="xi-pitch" role="group" aria-label="선발 11명"${busy ? '' : ' data-drop="pitch"'}>
         <svg class="xi-pitch__lines" viewBox="0 0 68 86" preserveAspectRatio="none" aria-hidden="true">
           <rect x="1" y="1" width="66" height="84" fill="none"/><line x1="1" y1="43" x2="67" y2="43"/><circle cx="34" cy="43" r="7"/>
           <rect x="14" y="1" width="40" height="13" fill="none"/><rect x="14" y="72" width="40" height="13" fill="none"/>
@@ -749,7 +884,7 @@ function renderSquad(g: Game): string {
 
       ${nation ? '' : `
       <h3 class="section__sub">후보 ${g.reserves.length}/${RESERVE_LIMIT}${q.reg !== null || q.pitch !== null ? ` <span class="muted">${quotaWord(g)} 등록 ${foreignCount(g, [...g.squad, ...g.reserves])}${q.reg !== null ? `/${q.reg}` : ''} · 선발 ${foreignCount(g, g.squad)}/${q.pitch ?? '-'}</span>` : ''}${inEngland(g) ? ` <span class="muted">비홈그로운 ${englandStatus(g).nonHg}/${NON_HG_LIMIT} · ESC ${englandStatus(g).esc}/${ESC_SLOTS}</span>` : ''}</h3>
-      ${g.reserves.length === 0 ? '<p class="muted">후보 명단이 비어 있다. 이적시장에서 백업이나 로테이션으로 영입하면 여기에 들어온다.</p>' : `<div class="bench-grid">${g.reserves.map(resCard).join('')}</div>`}
+      ${g.reserves.length === 0 ? '<p class="muted">후보 명단이 비어 있다. 이적시장에서 백업이나 로테이션으로 영입하면 여기에 들어온다.</p>' : `<div class="bench-grid"${busy ? '' : ' data-drop="reserves"'}>${g.reserves.map(resCard).join('')}</div>`}
       ${g.loaned.length ? `<p class="fine">임대 보낸 선수: ${g.loaned.map((p) => `${esc(p.name)}(${esc(p.loan!.club)}, ${p.loan!.until === 'winter' ? '겨울 복귀' : '시즌 끝 복귀'})`).join(', ')}</p>` : ''}
       <div class="xi-actions">${marketOpenNow(g) ? '<button type="button" class="chip" data-todo="market:mine">이적시장에서 판매 · 임대 · 해지</button><button type="button" class="chip" data-todo="market:sign">영입 후보 보기</button>' : '<span class="fine">영입, 판매, 임대, 재계약은 여름·겨울 이적시장에서 한다.</span>'}</div>`}
 

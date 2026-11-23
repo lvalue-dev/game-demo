@@ -83,6 +83,22 @@ export function slotSpot(s: Slot): Spot {
 
 const DEPTH: Partial<Record<Spot, number>> = { CDM: 0, CM: 1, CAM: 2 };
 
+/** 한 팀이 지금 쓰는 자리들. 우리 팀(0)은 손으로 옮긴 자리가 있으면 그것을 쓴다. */
+export const slotsOf = (L: LiveState, t: number, shape: ShapeId): Slot[] => (t === 0 ? (L.custom?.[shape] as Slot[] | undefined) : undefined) ?? SLOTS[shape];
+
+/**
+ * 손으로 옮긴 자리. 골키퍼 자리는 그대로 두고, 나머지는 앞뒤 위치(u)로 줄이 정해진다: 33 아래 수비, 64 아래 미드필더, 그 위 공격.
+ * 측면(v가 16 아래나 52 위)이면 측면 자리, 측면 수비는 풀백, 내려선 측면 미드필더는 윙백이다.
+ */
+export function movedSlot(base: Slot, u: number, v: number, keeper: boolean): Slot {
+  if (keeper) return base;
+  const cu = clamp(u, 12, 76);
+  const cv = clamp(v, 3, 65);
+  const line: Pos = cu < 33 ? 'DF' : cu < 64 ? 'MF' : 'FW';
+  const wide = cv < 16 || cv > 52;
+  return { line, u: cu, v: cv, wide, fb: line === 'DF' && wide, wb: (line === 'MF' && wide && cu < 46) || (line === base.line && base.wb && wide) };
+}
+
 /** 선수를 그 자리에 세웠을 때의 어색함. 0이면 제자리다. */
 function misfit(spot: Spot, slot: Slot): number {
   const want = slotSpot(slot);
@@ -139,9 +155,9 @@ function seat<T extends { spot: Spot; ovr: number; key: number }>(list: T[], slo
 }
 
 /** 주전 선수들을 세우고, 남은 자리는 그 자리에 맞는 후보로 채운다. 배열 순서가 곧 자리 순서다. */
-export function lineup(shape: ShapeId, keys: Entrant[], filler: (pos: Pos, spot: Spot) => Entrant): LivePlayer[] {
-  const slots = SLOTS[shape];
-  const seated = seat(keys.slice(0, 11), slots, slots.map((_, i) => i));
+export function lineup(shape: ShapeId, keys: Entrant[], filler: (pos: Pos, spot: Spot) => Entrant, slots: Slot[] = SLOTS[shape], fixed = false): LivePlayer[] {
+  // fixed면 감독이 세운 자리 그대로(keys의 순서가 자리 순서), 아니면 세부 포지션에 맞게 앉힌다.
+  const seated = fixed ? new Map(keys.slice(0, slots.length).map((k, i) => [i, k] as const)) : seat(keys.slice(0, 11), slots, slots.map((_, i) => i));
   const entrants = slots.map((slot, i) => seated.get(i) ?? filler(slot.line, slotSpot(slot)));
   // 정해진 등번호를 먼저 찜하고, 나머지는 관례 번호를 준다.
   const used = new Set<number>(entrants.map((e) => e.no ?? 0).filter((n) => n > 0));
@@ -156,8 +172,7 @@ export function lineup(shape: ShapeId, keys: Entrant[], filler: (pos: Pos, spot:
 }
 
 /** 대형을 바꾼다. 선수는 그대로 두고 자리만 다시 나눈다. 열 명이면 공격 쪽 자리 하나를 비운다. */
-export function reshape(team: LiveTeam, shape: ShapeId): void {
-  const slots = SLOTS[shape];
+export function reshape(team: LiveTeam, shape: ShapeId, slots: Slot[] = SLOTS[shape]): void {
   const on = team.players.filter((p) => !p.off);
   const free = slots.map((_, i) => i);
   while (on.length < free.length) {
@@ -169,11 +184,13 @@ export function reshape(team: LiveTeam, shape: ShapeId): void {
 }
 
 /** 킥오프를 하는 선수: 가장 앞에 선 선수. */
-function striker(team: LiveTeam, shape: ShapeId): number {
+function striker(L: LiveState, t: number, shape: ShapeId): number {
+  const team = L.teams[t] as LiveTeam;
+  const slots = slotsOf(L, t, shape);
   let best = 0;
   let u = -1;
   team.players.forEach((p, i) => {
-    const s = (SLOTS[shape] as Slot[])[p.slot] as Slot;
+    const s = slots[p.slot] as Slot;
     if (!p.off && s.u > u) {
       u = s.u;
       best = i;
@@ -281,7 +298,7 @@ function finishing(L: LiveState, env: LiveEnv, t: 0 | 1): number {
 const ux = (t: number, u: number): number => (t === 0 ? u : W - u);
 const vy = (t: number, v: number): number => (t === 0 ? v : H - v);
 
-const slotOf = (env: LiveEnv, t: number, p: LivePlayer): Slot => (SLOTS[(env.sides[t] as LiveSide).shape] as Slot[])[p.slot] as Slot;
+const slotOf = (L: LiveState, env: LiveEnv, t: number, p: LivePlayer): Slot => slotsOf(L, t, (env.sides[t] as LiveSide).shape)[p.slot] as Slot;
 const keeper = (team: LiveTeam): number => Math.max(0, team.players.findIndex((p) => p.line === 'GK' && !p.off));
 
 function holder(L: LiveState): 0 | 1 {
@@ -319,9 +336,10 @@ const emptyTeam = (players: LivePlayer[]): LiveTeam => ({ players, shots: 0, onT
 function kickoffSpots(L: LiveState, shapes: [ShapeId, ShapeId], kicker: 0 | 1): void {
   for (const t of [0, 1] as const) {
     const team = L.teams[t];
-    const last = striker(team, shapes[t]);
+    const last = striker(L, t, shapes[t]);
+    const slots = slotsOf(L, t, shapes[t]);
     team.players.forEach((p, i) => {
-      const s = (SLOTS[shapes[t]] as Slot[])[p.slot] as Slot;
+      const s = slots[p.slot] as Slot;
       let u = Math.min(s.u * 0.8, 49);
       let v = s.v;
       if (t === kicker && i === last) {
@@ -335,14 +353,14 @@ function kickoffSpots(L: LiveState, shapes: [ShapeId, ShapeId], kicker: 0 | 1): 
 }
 
 
-export function createLive(mine: LivePlayer[], theirs: LivePlayer[], shapes: [ShapeId, ShapeId]): LiveState {
+export function createLive(mine: LivePlayer[], theirs: LivePlayer[], shapes: [ShapeId, ShapeId], custom?: LiveState['custom']): LiveState {
   const L: LiveState = {
     tick: 0, teams: [emptyTeam(mine), emptyTeam(theirs)], ball: { x: W / 2, y: CY, px: W / 2, py: CY },
     owner: null, flight: null, held: 0, sinceWin: 99, winU: 50, wait: 3, restart: 'kick', next: null, set: 0, lastKind: 'pass',
-    calls: [], halfTimeDone: false, talked: false, confusedUntil: 0, over: false,
+    calls: [], halfTimeDone: false, talked: false, confusedUntil: 0, over: false, ...(custom ? { custom } : {}),
   };
   kickoffSpots(L, shapes, 0);
-  L.next = { team: 0, i: striker(L.teams[0], shapes[0]), x: W / 2, y: CY };
+  L.next = { team: 0, i: striker(L, 0, shapes[0]), x: W / 2, y: CY };
   return L;
 }
 
@@ -386,7 +404,7 @@ function desire(L: LiveState, env: LiveEnv, t: 0 | 1): (Aim | null)[] {
 
   return team.players.map((p, i): Aim | null => {
     if (p.off) return null;
-    const s = slotOf(env, t, p);
+    const s = slotOf(L, env, t, p);
     const role = side.roles[i] ?? 'base';
     const pace = side.tired ? 0.88 : 1;
     let u: number;
@@ -648,7 +666,7 @@ function pass(L: LiveState, env: LiveEnv, r: Rng, t: 0 | 1, i: number, pressed: 
     if (dist > 38) score -= st === 'direct' || fast || far ? 4 : 14;
     if (dist < 5) score -= 10;
     if (c.line === 'GK') score -= 8;
-    const s = slotOf(env, t, c);
+    const s = slotOf(L, env, t, c);
     if (st === 'wide' && s.wide) score += 6;
     const role = side.roles[j];
     if (role === 'maker') score += 3.5;
@@ -687,7 +705,7 @@ function pass(L: LiveState, env: LiveEnv, r: Rng, t: 0 | 1, i: number, pressed: 
   let toX = c.x;
   let toY = c.y;
   const space = W - offU;
-  const acting = slotOf(env, t, c).line;
+  const acting = slotOf(L, env, t, c).line;
   if ((acting === 'FW' || side.roles[best] === 'runner') && space > 16 && offU - cu < 8 && cu > u && side.roles[best] !== 'link') {
     const lead = Math.min(10, space * 0.4);
     toX = ux(t, Math.min(cu + lead, 99));
@@ -724,7 +742,7 @@ function act(L: LiveState, env: LiveEnv, r: Rng, events: LiveEvent[]): void {
   const foe = env.sides[other];
   const team = L.teams[t];
   const p = team.players[i] as LivePlayer;
-  const s = slotOf(env, t, p);
+  const s = slotOf(L, env, t, p);
   const u = ux(t, p.x);
   const v = vy(t, p.y);
   const dist = Math.hypot(W - u, CY - v);
@@ -802,7 +820,7 @@ function arrive(L: LiveState, env: LiveEnv, r: Rng, events: LiveEvent[]): void {
   L.ball.y = f.toY;
   if (f.result === 'goal') {
     events.push({ kind: 'goal', team: t, by: f.by, how: f.how });
-    stop(L, 'kick', other, striker(L.teams[other], env.sides[other].shape), W / 2, CY, 14, 0);
+    stop(L, 'kick', other, striker(L, other, env.sides[other].shape), W / 2, CY, 14, 0);
     return;
   }
   if (f.kind === 'shot' && f.result !== null) emit.push({ kind: 'shot', team: t, by: f.by, result: f.result as 'save' | 'corner' | 'off', xg: f.xg ?? 0 });
@@ -810,9 +828,9 @@ function arrive(L: LiveState, env: LiveEnv, r: Rng, events: LiveEvent[]): void {
     emit.push({ kind: 'corner', team: t });
     // 코너킥은 측면 미드필더가, 없으면 아무 미드필더나 찬다.
     const team = L.teams[t];
-    let taker = team.players.findIndex((p) => !p.off && p.line === 'MF' && slotOf(env, t, p).wide);
+    let taker = team.players.findIndex((p) => !p.off && p.line === 'MF' && slotOf(L, env, t, p).wide);
     if (taker < 0) taker = team.players.findIndex((p) => !p.off && p.line === 'MF');
-    if (taker < 0) taker = striker(team, env.sides[t].shape);
+    if (taker < 0) taker = striker(L, t, env.sides[t].shape);
     stop(L, 'corner', t, taker, ux(t, 104.5), vy(t, vy(t, f.toY) < CY ? 0.5 : 67.5), 6, 1);
     return;
   }
@@ -901,7 +919,7 @@ export function stepLive(L: LiveState, env: LiveEnv, r: Rng): LiveEvent[] {
     // 후반은 상대의 킥오프로 시작한다.
     kickoffSpots(L, [env.sides[0].shape, env.sides[1].shape], 1);
     L.flight = null;
-    stop(L, 'kick', 1, striker(L.teams[1], env.sides[1].shape), W / 2, CY, 3, 0);
+    stop(L, 'kick', 1, striker(L, 1, env.sides[1].shape), W / 2, CY, 3, 0);
     L.ball.px = L.ball.x;
     L.ball.py = L.ball.y;
   } else if (L.tick >= TICKS && !shot) {

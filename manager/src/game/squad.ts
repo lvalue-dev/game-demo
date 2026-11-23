@@ -1,7 +1,8 @@
 // 선수단: 선발 열한 명과 그 밖의 선수층. 선수는 나이에 따라 크고 지며, 너무 잘하면 큰 구단이 데려간다.
 import { ko } from './josa.ts';
 import { LEAGUES, TRAIT_IDS, foreignName, koreanName, won } from './data.ts';
-import { SLOTS, slotSpot } from './live.ts';
+import { SLOTS, movedSlot, slotSpot } from './live.ts';
+import type { Slot } from './live.ts';
 import { COUNTRIES, FOREIGN_POOL, countryOf, foreignShare, nativeName } from './countries.ts';
 import { chance, int, pick, rand, spread } from './rng.ts';
 import { makeDetail, posPenalty } from './player.ts';
@@ -67,12 +68,24 @@ function makeRaw(g: Game, pos: Pos, ovr: number, age: number, where: string, loc
 /** 선발 대형. 예전 저장에는 없어서 4-4-2로 본다. */
 export const formationOf = (g: Game): ShapeId => g.formation ?? '442';
 
-/** 선발 열한 자리의 줄. g.squad의 순서가 곧 자리다(대형의 자리 순서: 골키퍼, 수비, 미드필더, 공격). */
-export const linesOf = (g: Game): Pos[] => SLOTS[formationOf(g)].map((s) => s.line);
+/** 대형의 자리들. 손으로 옮긴 자리가 있으면 그 자리(줄도 위치에 따라 바뀐다). */
+export function slotsFor(g: Game, shape: ShapeId = formationOf(g)): Slot[] {
+  const tweak = g.tweaks?.[shape];
+  return SLOTS[shape].map((s, i) => (tweak?.[i] ? movedSlot(s, tweak[i]!.u, tweak[i]!.v, i === 0) : s));
+}
+
+/** 경기에 넘길 손으로 옮긴 자리들(대형별). */
+export function customSlots(g: Game): Partial<Record<ShapeId, Slot[]>> | undefined {
+  if (!g.tweaks) return undefined;
+  return Object.fromEntries(Object.keys(g.tweaks).map((k) => [k, slotsFor(g, k as ShapeId)]));
+}
+
+/** 선발 열한 자리의 줄. g.squad의 순서가 곧 자리다. */
+export const linesOf = (g: Game): Pos[] => slotsFor(g).map((s) => s.line);
 
 /** i번 자리의 줄과 세부 자리(LB, CDM 같은). */
 export const lineAt = (g: Game, i: number): Pos => linesOf(g)[i] ?? 'MF';
-export const spotAt = (g: Game, i: number): Spot => slotSpot(SLOTS[formationOf(g)][i] ?? SLOTS[formationOf(g)][0]!);
+export const spotAt = (g: Game, i: number): Spot => slotSpot(slotsFor(g)[i] ?? SLOTS[formationOf(g)][0]!);
 
 /** 구단의 전력에 맞는 선발 열한 명을 대형의 자리대로 만든다. */
 export function generateSquad(g: Game, club: Club, where: string): Player[] {

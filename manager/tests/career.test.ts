@@ -938,3 +938,37 @@ test('선발은 열한 명이고 대형을 따른다. 예전(8) 저장의 선발
   const ids = [...old.squad, ...old.reserves].map((p) => p.id);
   assert.equal(new Set(ids).size, ids.length, '같은 선수가 두 번 들어가지 않는다');
 });
+
+test('자유 배치: 선발 자리를 잔디의 다른 곳으로 옮기면 줄이 바뀌고, 경기에서도 그 자리에 선다. 후보로 내리기와 되돌리기', async () => {
+  const { manage } = await import('../src/game/manage.ts');
+  const { lineAt, linesOf, slotsFor } = await import('../src/game/squad.ts');
+  const g = toMarket(7373, false);
+  manage(g, 'formation:442');
+  const i = linesOf(g).findIndex((l) => l === 'MF');
+  // 미드필더 자리를 공격 쪽(u 70)으로 옮긴다.
+  manage(g, `move:${i}.70.34`);
+  assert.equal(lineAt(g, i), 'FW', '앞으로 옮기면 공격 줄');
+  assert.equal(slotsFor(g)[i]!.u, 70);
+  assert.equal(linesOf(g).filter((l) => l === 'FW').length, 3);
+  // 골키퍼 자리는 옮기지 않는다.
+  manage(g, 'move:0.40.34');
+  assert.equal(lineAt(g, 0), 'GK');
+  // 후보로 내리면 그 줄에 맞는 후보가 올라온다.
+  const out = g.squad[i]!;
+  manage(g, `bench:${i}`);
+  assert.ok(g.reserves.includes(out) && !g.squad.includes(out));
+  assert.equal(g.squad.length, 11);
+  // 되돌리기
+  manage(g, 'reset');
+  assert.equal(lineAt(g, i), 'MF');
+  // 손으로 옮긴 자리는 경기에 그대로 간다.
+  manage(g, `move:${i}.70.34`);
+  act(g, 'done');
+  while (g.phase !== 'match' || g.match!.step !== 'shape') act(g, firstChoice(g));
+  act(g, '442');
+  act(g, g.season.style);
+  act(g, 'live');
+  const L = g.match!.live!;
+  assert.equal(L.custom?.['442']?.[i]?.u, 70, '경기에 손으로 옮긴 자리가 넘어간다');
+  assert.equal(L.teams[0].players[i]!.pid, g.squad[i]!.id, '감독이 세운 자리 그대로 선다');
+});

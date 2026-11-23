@@ -8,7 +8,8 @@ import { ko } from './josa.ts';
 import { LEAGUES, won } from './data.ts';
 import { COUNTRIES, EU, ITALY_NON_EU_SIGNINGS, countryOf, quotaOf } from './countries.ts';
 import type { Quota } from './countries.ts';
-import { fillSlot, lineAt, myClub, stage, valueOf } from './squad.ts';
+import { fillSlot, lineAt, makePlayer, myClub, stage, valueOf } from './squad.ts';
+import { int, spread } from './rng.ts';
 import type { ClubLeagueId, Contract, Deal, Game, Player, PromiseId, Spot, Terms } from './types.ts';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
@@ -309,6 +310,7 @@ export const foreignCount = (g: Game, list: Player[]): number => list.filter((p)
 export function enforceQuota(g: Game): string[] {
   const limit = quota(g).pitch;
   const lines: string[] = [];
+  let guard = 0;
   while (limit !== null && foreignCount(g, g.squad) > limit) {
     const at = g.squad.map((p, i) => ({ p, i })).filter((x) => isForeign(g, x.p)).sort((a, b) => a.p.ovr - b.p.ovr)[0]!;
     const line = lineAt(g, at.i);
@@ -317,11 +319,17 @@ export function enforceQuota(g: Game): string[] {
       placeAt(g, sub.id, at.i);
       lines.push(ko`${quotaWord(g)} 선발 한도(${limit}명) 때문에 ${at.p.name} 대신 ${sub.name}이 선발로 나선다.`);
     } else {
+      // 맞는 국내 후보가 없으면 국내 선수(2군 수준)를 올린다. 외국인 후보를 올리면 다시 넘쳐 끝나지 않는다.
       const { level, where } = stage(g);
-      lines.push(ko`${quotaWord(g)} 선발 한도(${limit}명) 때문에 ${at.p.name}이 빠졌다. ${fillSlot(g, at.p, level - 2, where)}`);
+      const fill = makePlayer(g, line, level - 2 + spread(g, -2, 1), int(g, 19, 25), where, true);
+      fill.contract = { wage: 0, years: int(g, 1, 3), promise: 'rotation', clause: null, sellOn: 0, since: g.year };
+      assignNumber(g, fill);
+      g.squad = g.squad.map((q, k) => (k === at.i ? fill : q));
       if (!g.reserves.includes(at.p)) g.reserves.push(at.p);
+      lines.push(ko`${quotaWord(g)} 선발 한도(${limit}명) 때문에 ${at.p.name}이 빠지고 2군의 ${fill.name}(${fill.spot}, OVR ${fill.ovr})이 선발로 올라왔다.`);
       settle(g);
     }
+    if (++guard > 22) break;
   }
   return lines;
 }

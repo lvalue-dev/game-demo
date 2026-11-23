@@ -289,6 +289,20 @@ export function onLiveClick(el: HTMLElement): boolean {
   return false;
 }
 
+/** 끌어다 놓기로 한 교체(app.ts가 부른다). */
+export function liveDrop(cmd: string): void {
+  const g = game;
+  if (!g || !cmd.startsWith('swap:')) return;
+  const [, i] = cmd.split(':');
+  benchPick = -1;
+  selected = Number(i);
+  liveCommand(g, cmd);
+  host?.save();
+  updateHud(true);
+  updatePanel();
+  draw(0, true);
+}
+
 const halftime = (g: Game): boolean => {
   const L = g.match?.live;
   return !!L && L.halfTimeDone && !L.talked;
@@ -487,8 +501,9 @@ function squadPanel(g: Game, m: MatchState, L: LiveState): string {
       const roles = pl && p.key >= 0 && g.squad.some((q) => q.id === pl.id) ? ROLES[pl.pos].map((x) => chip(`role:${pl.id}:${x.id}`, x.name, role === x.id, p.off)).join('') : '';
       const st = pl ? statsOf(pl) : null;
       const labels = pl ? statNames(pl.spot).short : [];
-      return `<li class="lsq__row${open ? ' is-picked' : ''}${p.off ? ' is-off' : ''}">
+      return `<li class="lsq__row${open ? ' is-picked' : ''}${p.off ? ' is-off' : ''}"${p.off ? '' : ` data-drop="lp:${i}" data-drag="lp:${i}"`}>
         <button type="button" class="lsq__main" data-live-do="pick:${i}" aria-pressed="${open}"${p.off ? ' disabled' : ''}>
+          ${p.off ? '' : '<span class="drag-handle" aria-hidden="true">⠿</span>'}
           ${faceOf(p, 0, 34)}
           <span class="lsq__no" style="--kit:${kit[0].body};--ink:${light(kit[0].body) ? '#111' : '#fff'}">${p.n}</span>
           <span class="lsq__who"><span class="lsq__name">${esc(p.name)} ${marks}</span><span class="lsq__meta">${at}${pl && pl.spot !== at ? ` · 본래 ${pl.spot}` : ''} · OVR ${Math.round(p.ovr)}${pl ? ` · ${FOOT_NAME[pl.foot]}` : ''}</span>
@@ -508,8 +523,9 @@ function squadPanel(g: Game, m: MatchState, L: LiveState): string {
     const line = sel ? (slots[sel.slot] as { line: Pos }).line : p.pos;
     const pen = sel ? posPenalty(p.spot, line) : 0;
     const on = p.id === benchPick;
-    return `<li class="lsq__row lsq__row--bench${on ? ' is-picked' : ''}">
+    return `<li class="lsq__row lsq__row--bench${on ? ' is-picked' : ''}" data-drag="lb:${p.id}" data-drop="lb:${p.id}">
       <button type="button" class="lsq__main" data-live-do="bench:${p.id}" aria-pressed="${on}">
+        <span class="drag-handle" aria-hidden="true">⠿</span>
         ${face(p.id, p.nat, 34, [kit[0].body, kit[0].trim], p.name)}
         <span class="lsq__no lsq__no--bench">${p.no}</span>
         <span class="lsq__who"><span class="lsq__name">${esc(p.name)}${(L.youth ?? []).includes(p) ? ' <span class="lsq__mark">2군</span>' : ''}</span><span class="lsq__meta">${p.spot} · ${p.age}세 · OVR ${p.ovr + p.temp}${sel ? (pen ? ` · ${line} 자리면 -${pen}` : ` · ${line} 자리에 맞다`) : ''}</span></span>
@@ -521,7 +537,7 @@ function squadPanel(g: Game, m: MatchState, L: LiveState): string {
 
   return `
     ${confirm}
-    <p class="live__label">경기장 <span class="muted">${team.players.filter((p) => !p.off).length}명 · 선수를 누르면 역할과 능력치가 펼쳐지고 경기장에 표시된다</span></p>
+    <p class="live__label">경기장 <span class="muted">${team.players.filter((p) => !p.off).length}명 · 누르면 역할과 능력치가 펼쳐진다. 벤치 선수를 ⠿로 끌어 경기장 선수 위에 놓으면 교체한다</span></p>
     <ul class="lsq">${onPitch}</ul>
     <p class="live__label">벤치 <span class="muted">${benchList.length}명 · 교체 카드 ${m.subs}장</span></p>
     <ul class="lsq">${benchRows}</ul>

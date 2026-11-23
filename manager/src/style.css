@@ -2848,3 +2848,75 @@ button.mcard__main:focus-visible {
   font-weight: 700;
   font-size: 0.75rem;
 }
+
+/* ---------- 끌어다 놓기 ---------- */
+
+.xi-tok {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.drag-handle {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  align-self: stretch;
+  margin: -4px 0 -4px -4px;
+  color: var(--muted);
+  font-size: 1rem;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+[data-drag] {
+  -webkit-touch-callout: none;
+}
+
+.drag-ghost {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0.92;
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.35));
+}
+
+.drag-ghost.xi-tok {
+  transform-origin: center;
+}
+
+.is-dragging {
+  opacity: 0.35;
+}
+
+body.is-dragging-any,
+body.is-dragging-any * {
+  cursor: grabbing !important;
+}
+
+.xi-pitch.is-over {
+  box-shadow: inset 0 0 0 3px #ffe14a;
+}
+
+.xi-tok.is-over .face {
+  box-shadow: 0 0 0 3px #ffe14a, 0 0 0 7px rgba(255, 225, 74, 0.4);
+}
+
+.bench-card.is-over,
+.lsq__row.is-over {
+  border-color: #ffe14a;
+  box-shadow: 0 0 0 3px rgba(255, 225, 74, 0.55);
+}
+
+.bench-grid.is-over {
+  outline: 3px dashed #ffe14a;
+  outline-offset: 4px;
+  border-radius: 10px;
+}
+
+.lsq__row .drag-handle {
+  margin: 0;
+}

@@ -2,7 +2,9 @@
 // 그리고 이적시장에서만 할 수 있는 일(재계약, 판매, 들어온 제안)로 곧장 가기.
 // 할 일 목록(agenda.ts)의 버튼이 여기 있는 동작을 부른다.
 import { ko } from './josa.ts';
-import { effOvr, lineAt, linesOf } from './squad.ts';
+import { effOvr, formationOf, lineAt, linesOf, slotsFor } from './squad.ts';
+import { SLOTS, slotSpot } from './live.ts';
+import { posPenalty } from './player.ts';
 import { enforceQuota, isForeign, placeAt, promiseKept, quota } from './contract.ts';
 import { windowScene } from './transfer.ts';
 import { SHAPES, SHAPE_IDS } from './tactics.ts';
@@ -135,6 +137,37 @@ export function manage(g: Game, id: string): ManageResult {
     case 'market': {
       const why = openMarket(g);
       return why ? { msg: why, go: false } : { msg: null, go: true, tab: arg || undefined };
+    }
+    case 'move': {
+      // move:자리.u.v — 선발 한 자리를 경기장의 다른 곳으로 옮긴다(손으로 짜는 대형). 골키퍼 자리는 옮기지 않는다.
+      const [i, u, v] = arg.split('.').map(Number) as [number, number, number];
+      if (g.phase === 'match' || !(i > 0 && i < g.squad.length) || !Number.isFinite(u) || !Number.isFinite(v)) return { msg: null, go: false };
+      const shape = formationOf(g);
+      const tweak = (g.tweaks ??= {})[shape] ?? SLOTS[shape].map((x) => ({ u: x.u, v: x.v }));
+      const before = slotsFor(g)[i]!.line;
+      tweak[i] = { u: Math.round(Math.max(12, Math.min(76, u))), v: Math.round(Math.max(3, Math.min(65, v))) };
+      g.tweaks[shape] = tweak;
+      const after = slotsFor(g)[i]!;
+      refresh(g);
+      const p = g.squad[i]!;
+      return { msg: ko`${p.name}의 자리를 옮겼다: ${slotSpot(after)}${after.line !== before ? `(${before}에서 ${after.line} 줄로)` : ''}.${posPenalty(p.spot, after.line) ? ` 포지션 밖이라 OVR -${posPenalty(p.spot, after.line)}.` : ''}`, go: false };
+    }
+    case 'reset': {
+      if (g.tweaks) delete g.tweaks[formationOf(g)];
+      refresh(g);
+      return { msg: `${SHAPES[formationOf(g)].name} 기본 자리로 되돌렸다.`, go: false };
+    }
+    case 'bench': {
+      // bench:자리 — 선발을 후보로 내리고, 그 줄에 가장 잘 맞는 후보를 올린다.
+      const i = Number(arg);
+      const out = g.squad[i];
+      if (!out || g.phase === 'match') return { msg: null, go: false };
+      const line = lineAt(g, i);
+      const best = g.reserves.filter((p) => !p.loan || p.loan.dir === 'in').sort((a, b) => effOvr(b, line) - effOvr(a, line))[0];
+      if (!best) return { msg: '올릴 후보가 없다.', go: false };
+      const why = placeAt(g, best.id, i);
+      refresh(g);
+      return { msg: why ?? ko`${out.name}을 후보로 내리고 ${best.name}을 ${line} 자리에 세웠다.`, go: false };
     }
     case 'place': {
       // place:선수:자리 — 탭으로 고른 두 자리를 맞바꾼다.

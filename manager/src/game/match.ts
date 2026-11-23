@@ -3,13 +3,13 @@
 // 규칙의 근거는 TACTICS.md에 있다.
 import { ko } from './josa.ts';
 import { STYLES, STYLE_IDS } from './data.ts';
-import { HALF, PER_MIN, SLOTS, TICKS, createLive, lineup, reshape, stepLive } from './live.ts';
+import { HALF, PER_MIN, TICKS, createLive, lineup, reshape, slotsOf, stepLive } from './live.ts';
 import type { Entrant, LiveEnv, LiveEvent } from './live.ts';
 import { LINE_SPOT, makeDetail } from './player.ts';
 import { foreignCount, isForeign, quota } from './contract.ts';
 import { baseSide, drilled, skill } from './power.ts';
 import { chance, int, pick, poisson, rand, spread } from './rng.ts';
-import { effOvr, lineAt, makePlayer, myClub, nameFor, randomNat, stage } from './squad.ts';
+import { customSlots, effOvr, formationOf, lineAt, makePlayer, myClub, nameFor, randomNat, slotsFor, stage } from './squad.ts';
 import { BASE, ROLES, SHAPES, SHAPE_IDS, advantage, bestCounter, dialEdge, fits, matchup, roleEdge, shapeEdge, tempoCost, usualShape, why } from './tactics.ts';
 import type { Block, Choice, Club, Dials, Game, Pos, LeagueId, LiveHow, LivePlayer, LiveState, LogLine, MatchState, Player, RoleId, ShapeId, StyleId, Tone, WeatherId } from './types.ts';
 
@@ -635,7 +635,7 @@ function startLive(g: Game, m: MatchState): void {
     const d = makeDetail(g, pos, spot);
     const nat = club.nation ? '대한민국' : randomNat(g, where);
     return { name: nameFor(g, nat), nat, pos, ovr: Math.round(depth + spread(g, -2, 2)), key: -1, ...d };
-  });
+  }, slotsFor(g, m.me.shape), m.me.shape === formationOf(g) && keys.length === 11);
   // 상대 선수 이름: 대표팀은 그 나라 이름, 구단은 그 구단 리그의 국적 비율대로. 이름만 빌린 대륙 대회 상대는 우리 리그 기준.
   const opp = g.clubs[m.oppId] as Club | undefined;
   const oppNat = (): string => (opp?.nation ? opp.name : randomNat(g, opp && !opp.nation ? opp.league : where));
@@ -645,7 +645,7 @@ function startLive(g: Game, m: MatchState): void {
     const nat = oppNat();
     return { name: nameFor(g, nat), nat, pos, ovr: Math.round(base + spread(g, -4, 4)), key: -1, ...d };
   });
-  m.live = createLive(mine, theirs, [m.me.shape, m.opp.shape]);
+  m.live = createLive(mine, theirs, [m.me.shape, m.opp.shape], customSlots(g));
   callYouth(g, m.live);
 }
 
@@ -697,7 +697,7 @@ function bench(g: Game, L: LiveState, pos: Pos, fallback: string): string {
   const m = g.match as MatchState;
   const r = benchPlayers(g, L).filter((p) => p.pos === pos).sort((a, b) => b.ovr - a.ovr)[0];
   if (!r) return `2군 ${fallback}`;
-  const slots = SLOTS[m.me.shape];
+  const slots = slotsOf(L, 0, m.me.shape);
   const cands = L.teams[0].players.map((p, i) => ({ p, i })).filter(({ p }) => !p.off && (slots[p.slot] as { line: Pos }).line === pos);
   const pick = cands.sort((a, b) => a.p.ovr - b.p.ovr)[0];
   if (!pick) {
@@ -888,7 +888,7 @@ export function liveCommand(g: Game, cmd: string): void {
       if (!SHAPE_IDS.includes(a as ShapeId) || a === m.me.shape || m.subs < 1) return;
       m.me.shape = a as ShapeId;
       m.subs--;
-      reshape(L.teams[0], m.me.shape);
+      reshape(L.teams[0], m.me.shape, slotsOf(L, 0, m.me.shape));
       confuse(8);
       say(m, minute, ko`교체 카드를 써서 대형을 ${SHAPES[m.me.shape].name}으로 바꿨다.`, 'plain');
       return;
@@ -921,7 +921,7 @@ export function liveCommand(g: Game, cmd: string): void {
       const lp = L.teams[0].players[i];
       const r = benchPlayers(g, L).find((p) => p.id === Number(b));
       if (!lp || lp.off || !r || m.subs < 1) return;
-      const line = (SLOTS[m.me.shape][lp.slot] as { line: Pos }).line;
+      const line = (slotsOf(L, 0, m.me.shape)[lp.slot] as { line: Pos }).line;
       const fresh = clamp((100 - m.me.stamina) / 30, 0.25, 1) * (minute >= 70 ? 0.7 : 1);
       const diff = effOvr(r, line) - lp.ovr;
       m.subs--;

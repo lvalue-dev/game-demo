@@ -394,6 +394,16 @@ export interface LivePlayer {
   rec?: { goals: number; shots: number; onTarget: number; steals: number; fouls: number };
 }
 
+/** 대형의 한 자리(live.ts의 Slot과 같은 모양). */
+export interface SlotLike {
+  line: Pos;
+  u: number;
+  v: number;
+  wide: boolean;
+  fb: boolean;
+  wb: boolean;
+}
+
 export interface LiveTeam {
   players: LivePlayer[];
   shots: number;
@@ -453,6 +463,8 @@ export interface LiveState {
   calls: { tick: number; text: string; tone: Tone }[];
   /** 이미 교체로 들어간 후보들의 이름. */
   subbed?: string[];
+  /** 우리 팀이 손으로 옮긴 대형 자리(대형별). 없으면 기본 자리. */
+  custom?: Partial<Record<ShapeId, SlotLike[]>>;
   /** 이 경기만 벤치에 앉힌 2군 선수들. 후보가 모자라도 벤치가 일곱 자리가 되게 한다. */
   youth?: Player[];
   halfTimeDone: boolean;
@@ -631,6 +643,8 @@ export interface Game {
   loaned: Player[];
   /** 선발 열한 명의 대형. 자리마다의 줄(GK, DF, MF, FW)이 여기서 나온다. 예전 저장에는 없다. */
   formation?: ShapeId;
+  /** 대형별로 손으로 옮긴 자리 좌표(u: 자기 골문에서 앞으로, v: 왼쪽에서). 없으면 대형의 기본 자리. */
+  tweaks?: Partial<Record<ShapeId, { u: number; v: number }[]>>;
   /** 주전 열한 명을 뺀 나머지 선수층의 수준. */
   depth: number;
   morale: number;
