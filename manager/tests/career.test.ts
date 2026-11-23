@@ -1676,6 +1676,67 @@ test('통산 이정표: 골 먼저·큰 경계 먼저로 세 줄까지, 남으�
   assert.deepEqual(bankCareer(g, false), [`${b.name}, 구단 통산 100경기`]);
 });
 
+test('통산: 결산 직후(기록 0) 같은 결산을 한 번 더 처리해도 통산·우승 횟수·이정표가 변하지 않는다', async () => {
+  const { bankCareer } = await import('../src/game/squad.ts');
+  const { g } = careerSetup(4646);
+  const mine = [...g.squad, ...g.reserves];
+  for (const p of mine) p.apps = 0;
+  const [a, b] = mine as [Player, Player];
+  a.career.goals = 24; a.goals = 1; a.apps = 3;
+  b.career.apps = 49; b.apps = 1;
+  assert.equal(bankCareer(g, true).length, 2);
+  const after = mine.map((p) => ({ ...p.career }));
+  assert.equal(a.career.titles, 1);
+  assert.deepEqual(bankCareer(g, true), []);
+  mine.forEach((p, i) => assert.deepEqual(p.career, after[i], p.name));
+});
+
+test('통산 이정표: 세 명까지는 "외"가 없고, 네 명이면 세 번째 줄에만 " 외 1명"이 붙고, 없으면 빈 목록이다', async () => {
+  const { bankCareer } = await import('../src/game/squad.ts');
+  const run = (seed: number, goalHits: number, appHits: number): string[] => {
+    const { g } = careerSetup(seed);
+    const mine = [...g.squad, ...g.reserves];
+    for (const p of mine) {
+      p.apps = 0;
+      p.goals = 0;
+    }
+    assert.ok(mine.length >= goalHits + appHits);
+    for (let i = 0; i < goalHits; i++) {
+      mine[i]!.career.goals = 24;
+      mine[i]!.goals = 1;
+    }
+    for (let i = goalHits; i < goalHits + appHits; i++) {
+      mine[i]!.career.apps = 49;
+      mine[i]!.apps = 1;
+    }
+    return bankCareer(g, false);
+  };
+  const three = run(4747, 2, 1);
+  assert.equal(three.length, 3);
+  assert.ok(three.every((l) => !l.includes(' 외 ')), three.join('|'));
+  assert.ok(three[0]!.endsWith('25골') && three[1]!.endsWith('25골') && three[2]!.endsWith('50경기'));
+  const four = run(4848, 2, 2);
+  assert.equal(four.length, 3);
+  assert.ok(!four[0]!.includes(' 외 ') && !four[1]!.includes(' 외 '));
+  assert.ok(four[2]!.endsWith('50경기 외 1명'), four[2]);
+  assert.deepEqual(run(4949, 0, 0), []);
+});
+
+test('통산 이정표: 이미 100골을 넘은 선수는 더 쌓아도 이정표가 나오지 않고 기록은 계속 쌓인다', async () => {
+  const { bankCareer } = await import('../src/game/squad.ts');
+  const { g } = careerSetup(5050);
+  const mine = [...g.squad, ...g.reserves];
+  for (const p of mine) {
+    p.apps = 0;
+    p.goals = 0;
+  }
+  const a = mine[0]!;
+  a.career.goals = 100;
+  a.goals = 30;
+  assert.deepEqual(bankCareer(g, false), []);
+  assert.equal(a.career.goals, 130);
+});
+
 test('통산: 겨울에 임대 보냈다가 시즌 끝에 돌아온 선수는 전반기 기록이 통산에 들어가지 않고, 결산 뒤 기록은 0이다', () => {
   let lent: Player | null = null;
   const { g } = seasonToEnd(75, false, {
