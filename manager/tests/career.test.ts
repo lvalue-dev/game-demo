@@ -1183,3 +1183,91 @@ test('버전 9 저장을 불러오면 버전 10이 되고 rivalry는 비어 있�
   while (old.phase === 'match') act(old, old.match!.step === 'shape' ? 'auto' : 'next');
   assert.equal(old.job!.rivalry, null, '전적은 다음 시즌 라이벌부터 센다');
 });
+
+/** 첫 라이벌전을 맡기고 정산한 뒤, 전반기 결산 화면(half1)까지 간다. */
+function toHalf1AfterRival(seed: number): Game {
+  const g = toRivalMatch(seed);
+  act(g, 'auto');
+  act(g, 'next');
+  for (let guard = 0; g.phase !== 'half1'; guard++) {
+    assert.ok(guard < 200, '전반기 결산에 닿지 않는다');
+    act(g, g.phase === 'match' && g.match!.step === 'shape' ? 'auto' : firstChoice(g));
+  }
+  return g;
+}
+
+test('라이벌전 뒤 전반기 결산에서 시즌 중 경질되어도 전적은 남고 결산 보너스는 없으며, 재취업하면 전적이 0에서 시작한다', () => {
+  for (const seed of [2024, 2025]) {
+    const g = toHalf1AfterRival(seed);
+    const job = g.job!;
+    const rivalry = job.rivalry!;
+    assert.equal(rivalry.w + rivalry.d + rivalry.l, 1, '라이벌전 한 경기가 이미 기록돼 있다');
+    const record = { ...rivalry };
+    job.confidence = 9; // 기준(10) 바로 아래
+    act(g, 'next');
+    assert.equal(g.sacked, true, '시즌 중 경질');
+    assert.equal(job.confidence, 9, '경질 결산에는 신뢰 보너스가 붙지 않는다');
+    assert.deepEqual(job.rivalry, record, '그때까지의 전적은 그대로');
+    // 경질 → 무직 → 새 부임. 같은 구단이어도 전적은 0부터다.
+    for (let guard = 0; g.job !== null; guard++) {
+      assert.ok(guard < 100, '경질 뒤 무직 상태에 닿지 않는다');
+      act(g, firstChoice(g));
+    }
+    for (let guard = 0; g.job === null; guard++) {
+      assert.ok(guard < 600, '재취업하지 못한다');
+      assert.notEqual(g.phase, 'retired', '은퇴했다');
+      act(g, firstChoice(g));
+    }
+    assert.deepEqual(g.job!.rivalry, { club: g.season.rival, w: 0, d: 0, l: 0, last: null });
+  }
+});
+
+test('라이벌전 정산 입력을 같은 상태에서 두 번 보내도 전적은 한 번만 늘어난다', () => {
+  const g = toRivalMatch(2024);
+  act(g, 'auto');
+  assert.equal(g.match!.step, 'done');
+  const [gf, ga] = g.match!.score;
+  g.job!.confidence = 50;
+  act(g, 'next');
+  act(g, 'next'); // 더블클릭
+  const r = g.job!.rivalry!;
+  assert.equal(r.w + r.d + r.l, 1);
+  assert.deepEqual(r.last, [gf, ga]);
+  assert.equal(g.season.lines.filter((l) => l.opp === g.clubs[r.club]!.name).length, 1, '경기 기록도 한 줄');
+});
+
+test('라이벌전 중 저장하고 불러와도 한 번만 집계되고 last는 튜플로 남으며, intro가 없는 예전 경기도 오류 없이 끝난다', () => {
+  for (const dropIntro of [false, true]) {
+    const g = toRivalMatch(3030);
+    assert.equal(g.match!.step, 'shape');
+    assert.equal(g.job!.rivalry!.last, null, '첫 경기 전에는 last가 null');
+    const loaded = JSON.parse(JSON.stringify(g)) as Game;
+    if (dropIntro) delete (loaded.match as unknown as Record<string, unknown>).intro;
+    else assert.equal(loaded.match!.intro, '첫 맞대결');
+    act(loaded, 'auto');
+    const [gf, ga] = loaded.match!.score;
+    act(loaded, 'next');
+    const r = loaded.job!.rivalry!;
+    assert.equal(r.w + r.d + r.l, 1);
+    assert.ok(Array.isArray(r.last), 'last는 JSON을 거쳐도 배열');
+    assert.deepEqual(r.last, [gf, ga]);
+    const again = JSON.parse(JSON.stringify(loaded)) as Game;
+    assert.deepEqual(again.job!.rivalry, r, '정산 뒤 저장해도 같다');
+  }
+});
+
+test('라이벌 선정: 어느 리그에서 시작해도 자기 구단은 라이벌이 되지 않고, 같은 리그 근접 1위로 정해진다', async () => {
+  const { beginSeason } = await import('../src/game/career.ts');
+  for (const league of CLUB_LEAGUES) {
+    const g = createGame(777, '선정', 'pro', league);
+    act(g, 'take0');
+    const job = g.job!;
+    const me = g.clubs[job.club]!;
+    job.rivalry = { club: me.id, w: 4, d: 0, l: 0, last: [1, 0] }; // 자기 자신이 라이벌로 남아 있는 비정상 상태
+    beginSeason(g);
+    assert.notEqual(g.season.rival, me.id, `${league}: 자기 자신이 라이벌`);
+    assert.equal(g.clubs[g.season.rival]!.league, me.league, `${league}: 같은 리그`);
+    assert.equal(g.season.rival, nearOf(g)[0]);
+    assert.deepEqual(job.rivalry, { club: g.season.rival, w: 0, d: 0, l: 0, last: null });
+  }
+});
