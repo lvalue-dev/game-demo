@@ -58,7 +58,7 @@ function makeRaw(g: Game, pos: Pos, ovr: number, age: number, where: string, loc
   const value = Math.round(ovr);
   return {
     id: g.nextId++, name, pos, age, ovr: value, pot: Math.min(99, value + room),
-    trait: chance(g, 0.35) ? pick(g, TRAIT_IDS) : null, years: 0, goals: 0, temp: 0, homegrown: false,
+    trait: chance(g, 0.35) ? pick(g, TRAIT_IDS) : null, years: 0, goals: 0, apps: 0, temp: 0, homegrown: false,
     ...makeDetail(g, pos, spot), no: 0, contract: null, unhappy: false, loan: null,
     nat,
     hg: false, esc: false,

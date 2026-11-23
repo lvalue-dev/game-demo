@@ -908,6 +908,8 @@ function swapIn(L: LiveState, i: number, r: Player, slotLine: Pos): LivePlayer {
   const lp = L.teams[0].players[i] as LivePlayer;
   (L.subbed ??= []).push(lp.name, r.name);
   call(L, `교체: ${lp.n}번 ${lp.name} 아웃, ${r.no}번 ${r.name} 인`, 'plain');
+  // 나가는 선수의 출전과 골은 경기장 자리를 덮어쓰기 전에 남겨 둔다.
+  (L.gone ??= []).push({ pid: lp.pid ?? -1, goals: lp.rec?.goals ?? 0 });
   const out = { ...lp };
   Object.assign(lp, {
     n: r.no, name: r.name, line: r.pos, key: -1, pid: r.id, nat: r.nat, ovr: effOvr(r, slotLine), spot: r.spot, foot: r.foot, dev: r.dev, on: L.tick,
