@@ -603,7 +603,7 @@ test('잘못된 값의 팀 지시는 받지 않고 상태가 그대로다', () =
 // ---------- 저장 ----------
 
 test('버전 10 저장을 불러오면 버전 11이 되고, 진행 중인 경기의 팀 지시에 새 지시들이 보통으로 채워진다', () => {
-  assert.equal(SAVE_VERSION, 11);
+  assert.equal(SAVE_VERSION, 12);
   const { g } = liveGame(31337);
   liveCommand(g, 'line:1');
   liveCommand(g, 'overlap:1');

@@ -971,7 +971,7 @@ function renderSquad(g: Game): string {
     ...(nation ? [] : [`계약|${contractText(g, p.contract)}`, `시장가|${won(valueOf(p, level, money))}`]),
     `성장|${potentialText(g, p)}`,
     ...(inEngland(g) ? [`잉글랜드 규정|${p.nat} · ${englandText(g, p)}`] : p.nat !== localNat(g) ? [`국적|${p.nat}${isForeign(g, p) ? ' · 쿼터에 든다' : ''}`] : []),
-    `이번 시즌|${p.goals}골 · 팀에서 ${p.years + 1}번째 시즌${p.homegrown ? ' · 유스 출신' : ''}`,
+    `이번 시즌|리그 ${p.apps}경기 ${p.goals}골 · 팀에서 ${p.years + 1}번째 시즌${p.homegrown ? ' · 유스 출신' : ''}`,
   ];
   const flags = (p: Player): string[] => [p.unhappy ? '불만' : '', p.contract && p.contract.years <= 1 && !p.loan ? '만료 임박' : '', p.loan?.dir === 'in' ? '임대' : '', isForeign(g, p) ? quotaWord(g) : '', !promiseKept(g, p) ? '약속 위반' : ''].filter(Boolean);
   const q = quota(g);

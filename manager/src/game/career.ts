@@ -43,11 +43,11 @@ const EURO_CLUBS = ['벤피카', '포르투', '스포르팅', '아약스', 'PSV'
 function blankSeason(): SeasonState {
   return {
     half: 1, rival: -1, pending: null, halfStart: 0, style: 'possess', focus: 'attack', plan: 'steady', lines: [], cup: null, conti: null, nationYear: null, finals: null,
-    groupPassed: false, half1Pos: 0, notes: [], attMod: 0, defMod: 0, depthMod: 0,
+    groupPassed: false, half1Pos: 0, notes: [], attMod: 0, defMod: 0, depthMod: 0, liveGoals: 0,
   };
 }
 
-export const SAVE_VERSION = 11;
+export const SAVE_VERSION = 12;
 
 /**
  * 새 커리어. 감독은 출신에 따라 자격증을 가지고(없을 수도 있다) 구직부터 시작한다.
@@ -368,6 +368,12 @@ export function migrate(g: Game): boolean {
     g.version = 11;
     if (g.match) g.match.dials = { ...NEUTRAL, ...g.match.dials };
   }
+  if (g.version === 11) {
+    // 리그 출전 수와 실시간 경기 득점 집계가 생겼다. 시즌 도중이면 출전은 0부터 세고, 이미 치른 경기의 골은 결산 분배에 맡긴다.
+    g.version = 12;
+    for (const p of [...g.squad, ...g.reserves, ...g.loaned, ...(g.window?.list.map((d) => d.player) ?? [])]) p.apps = p.apps ?? 0;
+    g.season.liveGoals = g.season.liveGoals ?? 0;
+  }
   // 구단 유니폼 색이 새로 생기거나 바뀌었으면 저장된 구단에도 입힌다.
   const seeds = new Map(CLUB_LEAGUES.flatMap((l) => CLUB_SEEDS[l] ?? []).filter((x) => x.colors).map((x) => [x.name, x]));
   for (const c of g.clubs) {
@@ -491,7 +497,11 @@ function startHalf(g: Game, half: 1 | 2): void {
       const fixture = club.nation ? undefined : mine(league, r);
       if (fixture) s.pending = { league, round: r, home: fixture[0] === club.id, opp: s.rival };
       const line = playRound(g, league, r, club.nation ? -1 : club.id, (opp) => autoSide(g, opp, opp.style, half, false), false, s.rival);
-      if (line) s.lines.push(line);
+      if (line) {
+        s.lines.push(line);
+        // 자동으로 치른 우리 리그 경기: 지금 선발 열한 명이 출전한 것으로 센다. 골은 결산에서 나눈다.
+        for (const p of g.squad) p.apps++;
+      }
     }
   }
   if (club.nation) {
@@ -578,6 +588,34 @@ function advance(g: Game): void {
   else finishClubSeason(g, false);
 }
 
+/**
+ * 직접 지휘한 클럽 리그 경기의 출전과 골을 선수 기록에 더한다.
+ * 실시간 경기면 경기장에 선 선수(교체로 나간 선수 포함)마다 출전 1과 그 경기 골을 준다. 2군처럼 등록 명단에 없는 선수의 골은 아무에게도 가지 않지만 liveGoals에는 들어간다.
+ * 실시간이 아니면 득점자를 모르므로 선발 열한 명에게 출전만 주고 골은 결산 분배에 맡긴다.
+ */
+function countLeagueMatch(g: Game, m: MatchState): void {
+  const L = m.live;
+  if (!L) {
+    for (const p of g.squad) p.apps++;
+    return;
+  }
+  const byPid = new Map<number, number>();
+  let total = 0;
+  const add = (pid: number, goals: number): void => {
+    byPid.set(pid, (byPid.get(pid) ?? 0) + goals);
+    total += goals;
+  };
+  for (const lp of L.teams[0].players) add(lp.pid ?? -1, lp.rec?.goals ?? 0);
+  for (const x of L.gone ?? []) add(x.pid, x.goals);
+  for (const p of [...g.squad, ...g.reserves]) {
+    const goals = byPid.get(p.id);
+    if (goals === undefined) continue;
+    p.apps++;
+    p.goals += goals;
+  }
+  g.season.liveGoals += Math.min(total, m.score[0]);
+}
+
 /** 직접 지휘한 경기의 결과를 순위표나 토너먼트에 반영한다. */
 function settleMatch(g: Game): void {
   const m = g.match as MatchState;
@@ -599,6 +637,7 @@ function settleMatch(g: Game): void {
       rivalry.last = [gf, ga];
       g.job!.confidence = clamp(g.job!.confidence + (gf > ga ? 2 : gf < ga ? -2 : 0), 0, 100);
     }
+    if (!club.nation) countLeagueMatch(g, m);
   } else {
     const ko = (m.ko === 'cup' ? g.season.cup : m.ko === 'conti' ? g.season.conti : g.season.finals) as Knockout;
     settleKnockout(ko, m.oppName, gf, ga, m.pens ? m.pens === 'won' : gf > ga, !!m.pens, m.auto ? undefined : '직접 지휘');
@@ -735,8 +774,10 @@ function finishClubSeason(g: Game, midSack: boolean): void {
     repBonus = -5;
   }
   bumpRep(g, meta.rep + ((size - pos) / (size - 1)) * 16 - 4, repBonus);
-  shareGoals(g, row.gf);
-  const scorer = [...g.squad].sort((a, b) => b.goals - a.goals)[0] as Player;
+  // 실시간으로 지휘한 리그 경기의 골은 이미 득점자에게 갔다. 나머지 골만 무작위로 나눈다.
+  shareGoals(g, Math.max(0, row.gf - s.liveGoals));
+  // 골 수가 같으면 출전이 적은 선수가 앞선다.
+  const scorer = [...g.squad].sort((a, b) => b.goals - a.goals || a.apps - b.apps)[0] as Player;
 
   const outcome = title ? 'title' : g.sacked ? 'sacked' : promoted ? 'up' : relegated ? 'down' : 'plain';
   const mood: Mood = g.sacked ? 'sacked' : title ? 'title' : promoted ? 'promoted' : relegated ? 'relegated' : rel >= 2 ? 'over' : rel >= -1 ? 'par' : 'under';
@@ -789,7 +830,10 @@ function finishClubSeason(g: Game, midSack: boolean): void {
     }
     job.budget = round1((job.budget + moves.income) * 0.5);
     g.depth += (nextLevel - 2 + club.wealth * 0.8 - g.depth) * 0.3;
-    for (const p of g.squad) p.goals = 0;
+    for (const p of [...g.squad, ...g.reserves]) {
+      p.goals = 0;
+      p.apps = 0;
+    }
   }
   g.history.push({
     year: g.year, age: g.manager.age, club: club.name, league: meta.short, pos, size,

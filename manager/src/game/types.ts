@@ -33,7 +33,10 @@ export interface Player {
   trait: TraitId | null;
   /** 이 팀에서 보낸 시즌 수. */
   years: number;
+  /** 이번 시즌 리그 득점. 직접 지휘한 리그 경기는 실제 득점자, 나머지는 결산에서 무작위로 나눈다. */
   goals: number;
+  /** 이번 시즌 리그 출전 수(경기장에 한 번이라도 선 경기). 클럽 감독일 때만 센다. */
+  apps: number;
   /** 이번 시즌 동안만 적용되는 실력 보정(불화, 부상 여파 등). */
   temp: number;
   homegrown: boolean;
@@ -252,6 +255,8 @@ export interface SeasonState {
   attMod: number;
   defMod: number;
   depthMod: number;
+  /** 실시간으로 지휘한 리그 경기에서 득점자가 정해진 우리 팀 골 수. 결산의 무작위 분배에서 뺀다. */
+  liveGoals: number;
 }
 
 export interface Trophy {
@@ -504,6 +509,8 @@ export interface LiveState {
   calls: { tick: number; text: string; tone: Tone }[];
   /** 이미 교체로 들어간 후보들의 이름. */
   subbed?: string[];
+  /** 교체로 나간 우리 선수의 선수 번호와 그 경기 골. 리그 출전과 득점 집계에 쓴다(pid가 없으면 -1). */
+  gone?: { pid: number; goals: number }[];
   /** 우리 팀이 손으로 옮긴 대형 자리(대형별). 없으면 기본 자리. */
   custom?: Partial<Record<ShapeId, SlotLike[]>>;
   /** 이 경기만 벤치에 앉힌 2군 선수들. 후보가 모자라도 벤치가 일곱 자리가 되게 한다. */
