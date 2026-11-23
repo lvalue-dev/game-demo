@@ -1401,7 +1401,9 @@ function seasonToEnd(seed: number, sack: boolean): { g: Game; always: Set<number
       }
       act(g, firstChoice(g));
     }
-    if (g.job && g.phase !== 'career' && g.phase !== 'end') {
+    // 루프 조건 때문에 TS가 g.phase에서 'end'를 뺀다(act가 g.phase를 바꾸는 것을 모른다). 다시 넓혀서 읽는다.
+    const phase = g.phase as Game['phase'];
+    if (g.job && phase !== 'career' && phase !== 'end') {
       const now = new Set(g.squad.map((p) => p.id));
       always = new Set([...(always ?? now)].filter((id) => now.has(id)));
     }

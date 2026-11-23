@@ -631,7 +631,7 @@ test('버전 10 저장을 불러오면 버전 11이 되고, 진행 중인 경기
   const saved = JSON.parse(JSON.stringify(idle)) as Game;
   saved.version = 10;
   assert.equal(migrate(saved), true);
-  assert.equal(saved.version, 11);
+  assert.equal(saved.version, SAVE_VERSION);
   assert.equal(saved.match, null);
   toMatch(saved);
   manage(saved, 'dial:pass.1');
