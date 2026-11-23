@@ -1434,6 +1434,143 @@ test('리그 집계: 결산 뒤에는 선발과 후보의 골과 출전이 0으�
   for (const p of [...g.squad, ...g.reserves]) assert.deepEqual([p.goals, p.apps], [0, 0], p.name);
 });
 
+/** 실시간 경기를 300틱 진행한 뒤, 경기장의 등록 선수 자리(골키퍼 제외)와 벤치의 등록 후보 둘을 고른다. */
+async function liveSwapSetup(seed: number) {
+  const base = await liveGame(seed);
+  const { benchPlayers } = await import('../src/game/match.ts');
+  for (let i = 0; i < 300; i++) base.liveTick(base.g);
+  const L = base.g.match!.live!;
+  const at = L.teams[0].players.findIndex((p) => !p.off && p.line !== 'GK' && base.g.squad.some((q) => q.id === p.pid));
+  assert.ok(at >= 0);
+  const regs = benchPlayers(base.g, L).filter((p) => base.g.reserves.includes(p));
+  assert.ok(regs.length >= 2, '등록 후보가 둘 이상 벤치에 있다');
+  return { ...base, L, at, r1: regs[0]!, r2: regs[1]! };
+}
+
+test('리그 집계: 같은 자리에서 두 번 교체해도 나간 선수 둘과 마지막 선수의 출전이 각각 한 번씩만 세어진다', async () => {
+  const { g, L, at, r1, r2, liveCommand } = await liveSwapSetup(4545);
+  const lp = L.teams[0].players[at]!;
+  const a = g.squad.find((q) => q.id === lp.pid)!;
+  lp.rec = { ...BLANK_REC, goals: 1 };
+  liveCommand(g, `swap:${at}:${r1.id}`);
+  L.teams[0].players[at]!.rec = { ...BLANK_REC, goals: 1 };
+  liveCommand(g, `swap:${at}:${r2.id}`);
+  assert.deepEqual(L.gone, [{ pid: a.id, goals: 1 }, { pid: r1.id, goals: 1 }]);
+  act(g, 'skip');
+  assert.equal(g.match!.step, 'done');
+  assert.equal(L.gone!.length, 2, '경기가 끝날 때까지 더 교체하지 않았다');
+  // 이후 골은 결정적으로 맞춘다: 경기장에서는 마지막 선수 C의 골만 0으로 둔다.
+  for (const p of L.teams[0].players) p.rec = { ...BLANK_REC };
+  g.match!.score = [5, 0];
+  const base = new Map([a, r1, r2].map((p) => [p.id, { apps: p.apps, goals: p.goals }]));
+  const live = g.season.liveGoals;
+  act(g, 'next');
+  assert.deepEqual([a.apps - base.get(a.id)!.apps, a.goals - base.get(a.id)!.goals], [1, 1]);
+  assert.deepEqual([r1.apps - base.get(r1.id)!.apps, r1.goals - base.get(r1.id)!.goals], [1, 1]);
+  assert.deepEqual([r2.apps - base.get(r2.id)!.apps, r2.goals - base.get(r2.id)!.goals], [1, 0]);
+  assert.equal(g.season.liveGoals, live + 2);
+});
+
+test('리그 집계: 기록된 골이 경기 스코어보다 많으면 liveGoals는 스코어까지만 오르고 선수에게는 기록 그대로 간다', async () => {
+  const { g } = await liveGame(31337);
+  act(g, 'skip');
+  const m = g.match!;
+  const L = m.live!;
+  for (const lp of L.teams[0].players) lp.rec = { ...BLANK_REC };
+  L.gone = [];
+  const [x, y] = L.teams[0].players.filter((p) => g.squad.some((q) => q.id === p.pid));
+  x!.rec = { ...BLANK_REC, goals: 2 };
+  y!.rec = { ...BLANK_REC, goals: 1 };
+  const px = g.squad.find((q) => q.id === x!.pid)!;
+  const py = g.squad.find((q) => q.id === y!.pid)!;
+  m.score = [2, 0];
+  const before = { px: px.goals, py: py.goals, live: g.season.liveGoals };
+  act(g, 'next');
+  assert.equal(g.season.liveGoals, before.live + 2, '스코어(2)로 잘린다');
+  assert.equal(px.goals - before.px + (py.goals - before.py), 3, '선수에게는 기록 3골이 그대로 들어간다');
+});
+
+test('리그 집계: 등록 명단에 없는 선수나 pid가 없는 선수는 기록을 받지 못하고, 이름이 같아도 pid로만 맞춘다', async () => {
+  const { g } = await liveGame(31337);
+  act(g, 'skip');
+  const m = g.match!;
+  const L = m.live!;
+  for (const lp of L.teams[0].players) lp.rec = { ...BLANK_REC };
+  const reserve = g.reserves[0]!;
+  const slot = L.teams[0].players.find((p) => g.squad.some((q) => q.id === p.pid))!;
+  const owner = g.squad.find((q) => q.id === slot.pid)!;
+  // 경기장의 한 자리를 "pid 없음 + 후보와 같은 이름 + 1골"로 만든다.
+  delete (slot as unknown as Record<string, unknown>).pid;
+  slot.name = reserve.name;
+  slot.rec = { ...BLANK_REC, goals: 1 };
+  L.gone = [{ pid: -1, goals: 2 }, { pid: 987654, goals: 1 }, { pid: undefined as unknown as number, goals: 1 }];
+  m.score = [10, 0];
+  const all = [...g.squad, ...g.reserves].map((p) => ({ p, apps: p.apps, goals: p.goals }));
+  const live = g.season.liveGoals;
+  act(g, 'next');
+  assert.equal(g.match, null, '예외 없이 정산된다');
+  assert.equal(g.season.liveGoals, live + 5, '등록되지 않은 선수의 골도 liveGoals에는 들어간다');
+  for (const x of all) {
+    const skipped = x.p === owner || x.p === reserve;
+    assert.deepEqual([x.p.apps, x.p.goals], [x.apps + (skipped || !g.squad.includes(x.p) ? 0 : 1), x.goals], x.p.name);
+  }
+});
+
+test('리그 집계: 경기 도중 저장해도 나간 선수의 기록이 이어지고, 버전 11 저장처럼 gone이 없어도 정산된다', async () => {
+  const { g, L, at, r1, r2, liveCommand } = await liveSwapSetup(4545);
+  const lp = L.teams[0].players[at]!;
+  const aId = lp.pid!;
+  lp.rec = { ...BLANK_REC, goals: 1 };
+  liveCommand(g, `swap:${at}:${r1.id}`);
+  const copy = JSON.parse(JSON.stringify(g)) as Game;
+  const L2 = copy.match!.live!;
+  assert.deepEqual(L2.gone, [{ pid: aId, goals: 1 }], '저장에 gone이 들어 있다');
+  liveCommand(copy, `swap:${at}:${r2.id}`);
+  assert.equal(L2.gone!.length, 2);
+  act(copy, 'skip');
+  for (const p of L2.teams[0].players) p.rec = { ...BLANK_REC };
+  copy.match!.score = [5, 0];
+  const a = copy.squad.find((q) => q.id === aId)!;
+  const before = { apps: a.apps, goals: a.goals };
+  act(copy, 'next');
+  assert.deepEqual([a.apps - before.apps, a.goals - before.goals], [1, 1], '불러온 뒤에도 먼저 나간 선수가 반영된다');
+
+  // 버전 11 저장에서 진행 중이던 경기: gone이 없다.
+  const old = JSON.parse(JSON.stringify(g)) as Game;
+  act(old, 'skip');
+  delete (old.match!.live as unknown as Record<string, unknown>).gone;
+  for (const p of old.match!.live!.teams[0].players) p.rec = { ...BLANK_REC };
+  old.match!.score = [5, 0];
+  const outA = old.squad.find((q) => q.id === aId)!;
+  const inB = old.reserves.find((q) => q.id === r1.id)!;
+  const b = { a: outA.apps, ag: outA.goals, b: inB.apps };
+  act(old, 'next');
+  assert.equal(old.match, null, '예외 없이 정산된다');
+  assert.deepEqual([outA.apps, outA.goals], [b.a, b.ag], '명세가 인정한 한계: gone이 없으면 이미 나간 선수는 빠진다');
+  assert.equal(inB.apps, b.b + 1, '경기장에 선 선수는 센다');
+});
+
+test('버전 11 저장의 이적 창 후보와 임대 선수도 migrate 뒤 출전이 숫자다', async () => {
+  const { migrate } = await import('../src/game/career.ts');
+  const g = toRivalMatch(2025);
+  const old = JSON.parse(JSON.stringify(g)) as Game;
+  old.version = 11;
+  const cand = JSON.parse(JSON.stringify(old.squad[0])) as Record<string, unknown>;
+  delete cand.apps;
+  (old as unknown as { window: unknown }).window = { list: [{ player: cand }] };
+  assert.equal(migrate(old), true);
+  assert.equal(cand.apps, 0);
+});
+
+test('리그 집계: 새 시즌을 시작하면 liveGoals가 0으로 돌아간다', async () => {
+  const { beginSeason } = await import('../src/game/career.ts');
+  const g = createGame(55, '이월', 'pro', 'kr5');
+  act(g, 'take0');
+  g.season.liveGoals = 7;
+  beginSeason(g);
+  assert.equal(g.season.liveGoals, 0);
+});
+
 test('버전 11 저장을 불러오면 버전 12가 되고 출전과 liveGoals가 0에서 시작한다', async () => {
   const { migrate, SAVE_VERSION } = await import('../src/game/career.ts');
   assert.equal(SAVE_VERSION, 12);
