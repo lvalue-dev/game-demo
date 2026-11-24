@@ -717,6 +717,8 @@ export function actMatch(g: Game, id: string): boolean {
         autoplay(g, m);
         break;
       }
+      // 대형이 아닌 입력(공언 단계에서 두 번 누른 'vow' 등)은 무시한다.
+      if (!SHAPE_IDS.includes(id as ShapeId)) return false;
       m.me.shape = id as ShapeId;
       m.step = 'plan';
       break;
