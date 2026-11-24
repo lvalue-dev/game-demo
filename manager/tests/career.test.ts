@@ -215,11 +215,12 @@ test('전술 상성: 맞춤 전술은 실제로 유리하고, 유불리는 서�
   assert.ok(matchup('possess', 'press', 3).att > 0);
 });
 
-/** 첫 직접 지휘 경기를 실시간 모드로 시작한다. */
+/** 첫 직접 지휘 경기를 실시간 모드로 시작한다. 라이벌전의 공언 단계는 말을 아끼고 넘긴다(예전과 같은 ±2 규칙). */
 async function liveGame(seed: number) {
   const { liveTick, liveCommand } = await import('../src/game/match.ts');
   const g = createGame(seed, '실시간', 'analyst', 'kr5');
   while (g.phase !== 'match') act(g, firstChoice(g));
+  if (g.match!.step === 'vow') act(g, 'quiet');
   act(g, '433');
   act(g, g.season.style);
   assert.equal(g.match!.step, 'mode');
