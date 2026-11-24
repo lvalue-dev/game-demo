@@ -292,6 +292,8 @@ button {
   line-height: 1.25;
   text-wrap: balance;
   margin-top: -8px;
+  /* 팀 이름 뒤 조사("와의")가 따로 떨어지지 않게 낱말 단위로 줄을 바꾼다. */
+  word-break: keep-all;
 }
 
 .section__title {
@@ -557,7 +559,9 @@ button {
   font-size: 0.9375rem;
   line-height: 1.3;
   min-width: 0;
-  overflow-wrap: anywhere;
+  /* 팀 이름이 "티드"만 남기고 끊기지 않게 낱말 단위로 줄을 바꾼다. */
+  word-break: keep-all;
+  overflow-wrap: break-word;
   opacity: 0.8;
 }
 

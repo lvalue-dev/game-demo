@@ -68,8 +68,8 @@ function makeRaw(g: Game, pos: Pos, ovr: number, age: number, where: string, loc
 /** 선발 대형. 예전 저장에는 없어서 4-4-2로 본다. */
 export const formationOf = (g: Game): ShapeId => g.formation ?? '442';
 
-/** 선발을 손댈 수 없는 때: 킥오프한 뒤. 경기 전 준비 화면(대형, 전술, 지휘 방식 고르기)에서는 아직 바꿀 수 있다. */
-export const lineupLocked = (g: Game): boolean => g.phase === 'match' && !(g.match && (g.match.step === 'shape' || g.match.step === 'plan' || g.match.step === 'mode'));
+/** 선발을 손댈 수 없는 때: 킥오프한 뒤. 경기 전 준비 화면(라이벌전 공언, 대형, 전술, 지휘 방식 고르기)에서는 아직 바꿀 수 있다. */
+export const lineupLocked = (g: Game): boolean => g.phase === 'match' && !(g.match && (g.match.step === 'vow' || g.match.step === 'shape' || g.match.step === 'plan' || g.match.step === 'mode'));
 
 /** 대형의 자리들. 손으로 옮긴 자리가 있으면 그 자리(줄도 위치에 따라 바뀐다). */
 export function slotsFor(g: Game, shape: ShapeId = formationOf(g)): Slot[] {

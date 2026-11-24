@@ -194,6 +194,7 @@ test('직접 지휘한 라이벌전도 순위표에 반영되어 모든 팀의 �
 test('수석 코치에게 맡기면 선택 없이 경기가 끝난다', () => {
   const g = createGame(4242, '위임', 'pro', 'kr5');
   while (g.phase !== 'match') act(g, firstChoice(g));
+  if (g.match!.step === 'vow') act(g, 'quiet');
   act(g, 'auto');
   assert.equal(g.match!.step, 'done');
   assert.equal(g.match!.seg, 6);
@@ -1025,12 +1026,20 @@ test('라이벌: 근접 4위 이하로 밀리거나 다른 리그로 가면 다�
   assert.deepEqual(job.rivalry, { club: g.season.rival, w: 0, d: 0, l: 0, last: null });
 });
 
-/** 첫 라이벌전 경기 시작 화면까지 간다. */
-function toRivalMatch(seed: number): Game {
+/** 첫 라이벌전의 공언 단계(vow)까지 간다. */
+function toRivalVow(seed: number): Game {
   const g = createGame(seed, '맞대결', 'pro', 'kr5');
   while (g.phase !== 'match') act(g, firstChoice(g));
   assert.equal(g.match!.kind, 'league');
   assert.equal(g.match!.oppId, g.job!.rivalry!.club, '전반기 첫 직접 지휘 경기는 라이벌전');
+  assert.equal(g.match!.step, 'vow');
+  return g;
+}
+
+/** 첫 라이벌전 경기 시작 화면까지 간다. 공언 단계에서는 말을 아낀다(예전과 같은 ±2 규칙). */
+function toRivalMatch(seed: number): Game {
+  const g = toRivalVow(seed);
+  act(g, 'quiet');
   return g;
 }
 
@@ -1131,6 +1140,146 @@ test('라이벌 결산 보너스: 한 경기 이상 치러 모두 이겼을 때�
   assert.equal(rivalSweepBonus([line('W'), line('W'), line('W')]), 2);
   assert.equal(rivalSweepBonus([line('W'), line('D')]), 0);
   assert.equal(rivalSweepBonus([line('L'), line('W')]), 0);
+});
+
+// ---------- 라이벌전 승리 공언 ----------
+
+/** 지금 경기(g.match)와 같은 상대로 경기를 새로 시작할 때의 설정. */
+function setupOf(g: Game, extra: { rival?: boolean; kind?: 'league' | 'knockout' } = {}) {
+  const m = g.match!;
+  const opp = g.clubs[m.oppId]!;
+  const knockout = extra.kind === 'knockout';
+  return {
+    kind: extra.kind ?? 'league', ko: knockout ? 'cup' as const : null, league: knockout ? null : m.league, round: m.round, label: m.label,
+    opp: { id: opp.id, name: opp.name, att: opp.att, def: opp.def, style: opp.style, shape: opp.shape },
+    venue: m.venue, intro: m.intro, ...(extra.rival ? { rival: true } : {}),
+  };
+}
+
+test('공언 점수: 공언하면 +5·−1·−5, 말을 아끼면 +2·0·−2', async () => {
+  const { rivalTrustDelta } = await import('../src/game/career.ts');
+  assert.equal(rivalTrustDelta(true, 2, 1), 5);
+  assert.equal(rivalTrustDelta(true, 1, 1), -1);
+  assert.equal(rivalTrustDelta(true, 0, 2), -5);
+  assert.equal(rivalTrustDelta(false, 3, 0), 2);
+  assert.equal(rivalTrustDelta(false, 0, 0), 0);
+  assert.equal(rivalTrustDelta(false, 1, 2), -2);
+});
+
+test('공언 단계: 클럽 라이벌 리그전만 vow로 시작하고, 첫 선택지는 말을 아낀다, 둘째는 공언이다', async () => {
+  const { beginMatch } = await import('../src/game/match.ts');
+  const { lineupLocked } = await import('../src/game/squad.ts');
+  for (const pick of ['quiet', 'vow'] as const) {
+    const g = toRivalVow(2024);
+    const name = g.clubs[g.match!.oppId]!.name;
+    assert.ok([`${name}와의 더비를 앞두고`, `${name}과의 더비를 앞두고`].includes(g.scene.title), g.scene.title);
+    assert.ok(g.scene.blocks.some((b) => b.kind === 'note' && b.text === g.match!.intro), '통산 전적 문구를 note로 보여 준다');
+    assert.deepEqual(g.scene.choices.map((c) => c.id), ['quiet', 'vow']);
+    assert.equal(lineupLocked(g), false, '공언 단계에서는 선발을 아직 고칠 수 있다');
+    act(g, pick);
+    assert.equal(g.match!.step, 'shape');
+    assert.equal(g.match!.vow, pick === 'vow');
+    act(g, '433'); // 다음 단계로 넘어가면 공언 단계로 돌아오지 않는다
+    assert.equal(g.match!.step, 'plan');
+    assert.equal(g.match!.vow, pick === 'vow', '한 번 고르면 되돌릴 수 없다');
+  }
+  // 같은 상대라도 라이벌 표시가 없는 리그전과 컵 경기는 대형 선택부터 시작한다.
+  const g = toRivalVow(2025);
+  beginMatch(g, setupOf(g));
+  assert.equal(g.match!.step, 'shape', '비라이벌 리그전');
+  beginMatch(g, setupOf(g, { kind: 'knockout', rival: false }));
+  assert.equal(g.match!.step, 'shape', '컵 경기');
+  beginMatch(g, setupOf(g, { rival: true }));
+  assert.equal(g.match!.step, 'vow');
+});
+
+test('공언 단계: 대표팀 경기에는 없다', async () => {
+  const { beginSeason } = await import('../src/game/career.ts');
+  const g = createGame(8082, '대표', 'pro', 'kr5');
+  act(g, 'take0');
+  const korea = g.clubs.find((c) => c.nation && c.name === '대한민국') ?? g.clubs.find((c) => c.nation)!;
+  g.job!.kind = 'nation';
+  g.job!.club = korea.id;
+  beginSeason(g);
+  let matches = 0;
+  for (let guard = 0; guard < 1500 && g.phase !== 'end'; guard++) {
+    if (g.phase === 'match' && g.match!.step !== 'done') {
+      assert.equal(g.match!.step, 'shape', '대표팀 경기는 대형 선택부터');
+      matches++;
+      act(g, 'auto');
+      continue;
+    }
+    act(g, firstChoice(g));
+  }
+  assert.ok(matches > 0);
+});
+
+test('공언 단계: 신뢰 27 미만이면 공언 선택지에 경질 위험을 적고, 막지는 않는다', async () => {
+  const { beginMatch } = await import('../src/game/match.ts');
+  const g = toRivalVow(3030);
+  for (const [trust, risky] of [[26, true], [27, false], [64, false], [0, true]] as const) {
+    g.job!.confidence = trust;
+    beginMatch(g, setupOf(g, { rival: true }));
+    const vow = g.scene.choices.find((c) => c.id === 'vow')!;
+    assert.equal(vow.detail!.includes('경질 위험'), risky, `신뢰 ${trust}`);
+    assert.ok(vow.detail!.startsWith('이기면 +5, 비기면 −1, 지면 −5'));
+    assert.ok(!vow.disabled);
+    assert.equal(g.scene.choices[0]!.detail, '이기면 신뢰 +2, 지면 −2');
+  }
+});
+
+test('공언하고 수석 코치에게 맡긴 라이벌전도 공언 규칙으로 정산되고, 끝난 화면에 결과 한 줄이 붙는다', async () => {
+  const { rivalTrustDelta } = await import('../src/game/career.ts');
+  const lines = { good: '공언대로 이겼다. 팬들이 경기장 밖까지 노래를 이어 불렀다.', plain: '공언은 지키지 못했다. 이사회가 말없이 고개를 저었다.', bad: '공언하고 졌다. 다음 날 신문 1면이 감독을 겨눴다.' };
+  for (const seed of [2024, 2025, 2026, 3030, 3031, 3032]) {
+    const g = toRivalVow(seed);
+    act(g, 'vow');
+    act(g, 'auto');
+    assert.equal(g.match!.step, 'done');
+    const [a, b] = g.match!.score;
+    const tone = a > b ? 'good' : a < b ? 'bad' : 'plain';
+    const notes = g.scene.blocks.filter((x) => x.kind === 'note');
+    assert.deepEqual(notes.map((x) => x.kind === 'note' && x.text).slice(0, 2), ['수석 코치가 지휘했다.', lines[tone]]);
+    assert.ok(notes.some((x) => x.kind === 'note' && x.tone === tone));
+    const { gf, ga, delta } = settleRival(g);
+    assert.equal(delta, rivalTrustDelta(true, gf, ga), `seed ${seed}: ${gf}:${ga}`);
+  }
+  // 말을 아낀 경기에는 공언 문구가 없다.
+  const q = toRivalMatch(2024);
+  act(q, 'auto');
+  assert.ok(!q.scene.blocks.some((x) => x.kind === 'note' && Object.values(lines).includes(x.text)));
+});
+
+test('공언 신뢰 변화도 0~100 안에서 멈춘다', () => {
+  const g = toRivalVow(4040);
+  act(g, 'vow');
+  act(g, 'auto');
+  const [gf, ga] = g.match!.score;
+  g.job!.confidence = gf > ga ? 98 : gf < ga ? 3 : 0;
+  const plain = JSON.parse(JSON.stringify(g)) as Game;
+  plain.job!.rivalry = null;
+  // 라이벌 몫(+5, −5, −1)이 범위를 넘으면 잘려서 끝에 닿는다. 그 뒤 결산은 두 쪽이 같은 끝에서 출발한다.
+  plain.job!.confidence = gf > ga ? 100 : 0;
+  act(g, 'next');
+  act(plain, 'next');
+  assert.equal(g.job!.confidence, plain.job!.confidence);
+});
+
+test('공언 기록이 없는 예전 저장은 말을 아낀 것으로 정산하고, 공언 단계 저장은 불러와도 그대로다', () => {
+  for (const seed of [2024, 3031]) {
+    const g = toRivalVow(seed);
+    const loaded = JSON.parse(JSON.stringify(g)) as Game;
+    assert.equal(loaded.match!.step, 'vow');
+    assert.deepEqual(loaded.scene.choices, g.scene.choices);
+    act(loaded, 'vow');
+    assert.equal(loaded.match!.vow, true);
+    // 공언한 뒤 저장했는데 vow 필드가 빠진 경우(예전 저장과 같다)
+    const old = JSON.parse(JSON.stringify(loaded)) as Game;
+    delete (old.match as unknown as Record<string, unknown>).vow;
+    act(old, 'auto');
+    const { gf, ga, delta } = settleRival(old);
+    assert.equal(delta, gf > ga ? 2 : gf < ga ? -2 : 0);
+  }
 });
 
 test('라이벌 두 경기는 전반기와 후반기에 한 번씩: 홈앤드어웨이 일정은 절반에서 정확히 나뉜다', () => {
