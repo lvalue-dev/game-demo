@@ -1283,6 +1283,116 @@ test('공언 기록이 없는 예전 저장은 말을 아낀 것으로 정산하
   }
 });
 
+test('공언 단계: 알 수 없는 선택은 무시하고, 같은 선택을 연달아 보내도 첫 선택이 유지된다', async () => {
+  const { actMatch } = await import('../src/game/match.ts');
+  const g = toRivalVow(2024);
+  const choices = JSON.stringify(g.scene.choices);
+  for (const id of ['auto', '433', '', 'VOW', ' vow', 'next', 'skip']) {
+    assert.equal(actMatch(g, id), false, `actMatch(${JSON.stringify(id)})`);
+    assert.equal(g.match!.step, 'vow');
+    assert.equal(g.match!.vow, undefined, '공언 단계를 건너뛰어 정산되는 길이 없다');
+    act(g, id);
+    assert.equal(g.match!.step, 'vow', `act(${JSON.stringify(id)})`);
+    assert.equal(g.match!.vow, undefined);
+  }
+  assert.equal(JSON.stringify(g.scene.choices), choices);
+  const shape = g.match!.me.shape;
+  act(g, 'vow');
+  act(g, 'vow'); // 더블클릭: 이미 대형 단계라 선택지에 없으므로 무시된다
+  act(g, 'quiet'); // 공언을 덮어쓰지 못한다
+  assert.equal(g.match!.step, 'shape');
+  assert.equal(g.match!.vow, true);
+  assert.equal(g.match!.me.shape, shape, '대형도 바뀌지 않는다');
+  // 대형 단계에서 알 수 없는 id가 actMatch로 곧바로 들어와도 vow는 건드리지 않는다.
+  actMatch(g, 'quiet');
+  assert.equal(g.match!.vow, true);
+});
+
+test('공언 정산 경계: 비기면 −1(말을 아끼면 0), 0에서는 음수가 되지 않는다', () => {
+  const play = (seed: number, vow: boolean, score: [number, number]): Game => {
+    const g = toRivalVow(seed);
+    act(g, vow ? 'vow' : 'quiet');
+    act(g, 'auto');
+    g.match!.score = score;
+    return g;
+  };
+  const cases: [boolean, [number, number], number][] = [
+    [true, [1, 1], -1], [true, [0, 0], -1], [true, [3, 2], 5], [true, [0, 1], -5],
+    [false, [1, 1], 0], [false, [2, 0], 2], [false, [0, 2], -2],
+  ];
+  for (const [vow, score, want] of cases) {
+    const g = play(2024, vow, score);
+    const { delta } = settleRival(g);
+    assert.equal(delta, want, `vow=${vow} ${score.join(':')}`);
+  }
+  // 신뢰 0에서 공언하고 비기거나 지면 0에 머문다. 공언하지 않고 비기면 그대로다.
+  for (const [vow, score] of [[true, [1, 1]], [true, [0, 3]], [false, [0, 3]]] as [boolean, [number, number]][]) {
+    const g = play(3030, vow, score);
+    g.job!.confidence = 0;
+    const plain = JSON.parse(JSON.stringify(g)) as Game;
+    plain.job!.rivalry = null;
+    act(g, 'next');
+    act(plain, 'next');
+    assert.equal(g.job?.confidence ?? 0, plain.job?.confidence ?? 0, `vow=${vow} ${score.join(':')}`);
+    assert.ok((g.job?.confidence ?? 0) >= 0);
+  }
+});
+
+test('공언 단계 제목: 상대 이름의 받침에 맞게 와/과가 정확히 붙는다', async () => {
+  const { beginMatch } = await import('../src/game/match.ts');
+  const g = toRivalVow(2025);
+  const names: [string, string][] = [
+    ['관악 벽산', '과'], ['용산 건융', '과'], ['서울', '과'], ['성동 투게더', '와'], ['레알 마드리드', '와'],
+    ['한빛 FC', '와'], ['양천 TNT', '와'], ['구단 2', '와'], ['구단 3', '과'],
+  ];
+  for (const [name, josa] of names) {
+    const setup = setupOf(g, { rival: true });
+    beginMatch(g, { ...setup, opp: { ...setup.opp, name } });
+    assert.equal(g.scene.title, `${name}${josa}의 더비를 앞두고`);
+  }
+});
+
+test('공언하고 실시간으로 끝까지 지휘해도 공언 규칙으로 정산되고, 다음 경기로 공언이 새지 않는다', async () => {
+  const { rivalTrustDelta } = await import('../src/game/career.ts');
+  for (const seed of [2024, 3031]) {
+    const g = toRivalVow(seed);
+    const rival = g.job!.rivalry!.club;
+    act(g, 'vow');
+    act(g, '433');
+    act(g, g.season.style);
+    act(g, 'live');
+    assert.equal(g.match!.step, 'live');
+    assert.equal(g.match!.vow, true);
+    act(g, 'skip');
+    assert.equal(g.match!.step, 'done');
+    assert.equal(g.match!.auto, false);
+    const [a, b] = g.match!.score;
+    const tone = a > b ? '공언대로 이겼다' : a < b ? '공언하고 졌다' : '공언은 지키지 못했다';
+    assert.ok(g.scene.blocks.some((x) => x.kind === 'note' && x.text.startsWith(tone)), tone);
+    const { gf, ga, delta } = settleRival(g);
+    assert.equal(delta, rivalTrustDelta(true, gf, ga), `seed ${seed}`);
+    // 이어지는 경기들: 새 MatchState에는 이전 공언이 없고, 후반기 라이벌전은 다시 공언 단계부터 시작한다.
+    let secondRival = false;
+    for (let guard = 0; guard < 3000 && g.phase !== 'end' && !secondRival; guard++) {
+      g.job!.confidence = Math.max(g.job!.confidence, 40); // 시즌 도중 경질을 피한다
+      if (g.phase === 'match') {
+        const m = g.match!;
+        assert.equal(m.vow, undefined, '이전 경기의 공언이 새지 않는다');
+        if (m.step === 'vow') {
+          assert.equal(m.oppId, rival);
+          secondRival = true;
+          break;
+        }
+        assert.equal(m.step, 'shape');
+        act(g, 'auto');
+        continue;
+      }
+      act(g, firstChoice(g));
+    }
+    assert.ok(secondRival, '후반기 라이벌전이 공언 단계로 시작한다');
+  }
+});
+
 test('라이벌 두 경기는 전반기와 후반기에 한 번씩: 홈앤드어웨이 일정은 절반에서 정확히 나뉜다', () => {
   for (const n of [8, 10, 12, 17, 18, 20]) {
     const ids = Array.from({ length: n }, (_, i) => i);
