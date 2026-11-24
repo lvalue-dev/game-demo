@@ -572,7 +572,10 @@ export interface MatchState {
   oppIq: number;
   venue: 'home' | 'away' | 'neutral';
   weather: WeatherId;
-  step: 'shape' | 'plan' | 'mode' | 'live' | 'm30' | 'talk' | 'ht' | 'm60' | 'm75' | 'done';
+  /** vow는 클럽 라이벌 리그전의 경기 전 공언 단계. */
+  step: 'vow' | 'shape' | 'plan' | 'mode' | 'live' | 'm30' | 'talk' | 'ht' | 'm60' | 'm75' | 'done';
+  /** 라이벌전에서 승리를 공언했는지. 예전 저장에는 없다(말을 아낀 것으로 본다). */
+  vow?: boolean;
   /** 지금까지 치른 토막 수(0~6). */
   seg: number;
   score: [number, number];

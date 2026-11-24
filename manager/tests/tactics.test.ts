@@ -21,9 +21,10 @@ function firstChoice(g: Game): string {
   return (open.find((c) => c.id.startsWith('take')) ?? open[0]!).id;
 }
 
-/** 다음 직접 지휘 경기의 대형 선택 화면까지 간다. */
+/** 다음 직접 지휘 경기의 대형 선택 화면까지 간다. 라이벌전의 공언 단계는 말을 아끼고 넘긴다. */
 function toMatch(g: Game): Game {
   while (g.phase !== 'match') act(g, firstChoice(g));
+  if (g.match!.step === 'vow') act(g, 'quiet');
   assert.equal(g.match!.step, 'shape');
   return g;
 }

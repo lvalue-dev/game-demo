@@ -1,7 +1,7 @@
 // 직접 지휘하는 한 경기. 15분 여섯 토막으로 나눠 진행하고, 토막 사이에 감독이 결정한다.
 // 경기 전(대형, 전술) → 30분(전술) → 하프타임(대화, 전술) → 60분(교체) → 75분(태세) → 종료
 // 규칙의 근거는 TACTICS.md에 있다.
-import { ko } from './josa.ts';
+import { attach, ko } from './josa.ts';
 import { STYLES, STYLE_IDS } from './data.ts';
 import { HALF, PER_MIN, TICKS, createLive, lineup, movedSlot, reshape, slotSpot, slotsOf, stepLive } from './live.ts';
 import type { Entrant, LiveEnv, LiveEvent, Slot } from './live.ts';
@@ -16,6 +16,9 @@ import type { Block, Choice, Club, Dials, Game, Pos, LeagueId, LiveHow, LivePlay
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 
+/** 이사회 신뢰가 이보다 낮으면 라이벌전 공언 선택지에 경질 위험을 알린다. 막지는 않는다. */
+export const VOW_RISK = 27;
+
 export interface MatchSetup {
   kind: 'league' | 'knockout';
   ko: 'cup' | 'conti' | 'finals' | null;
@@ -26,6 +29,8 @@ export interface MatchSetup {
   venue: 'home' | 'away' | 'neutral';
   /** 경기 소개에 덧붙이는 한 줄. */
   intro?: string;
+  /** 클럽 라이벌 리그전이면 true. 경기 전에 승리 공언 단계(vow)를 둔다. */
+  rival?: boolean;
 }
 
 export const WEATHER: Record<WeatherId, { name: string; note: string }> = {
@@ -455,7 +460,7 @@ export function beginMatch(g: Game, setup: MatchSetup): void {
   g.match = {
     kind: setup.kind, ko: setup.ko, league: setup.league, round: setup.round, label: setup.label,
     oppId: setup.opp.id, oppName: setup.opp.name, oppAtt: setup.opp.att, oppDef: setup.opp.def, oppUsual: setup.opp.style, oppIq: iq,
-    venue: setup.venue, weather, step: 'shape', seg: 0, score: [0, 0],
+    venue: setup.venue, weather, step: setup.rival ? 'vow' : 'shape', seg: 0, score: [0, 0],
     me: { style: g.season.style, shape: usualShape(g.season.style, 0), stamina: 100, push: 0, red: false },
     opp: { style, shape: surprise ? usualShape(style, int(g, 0, 5)) : setup.opp.shape, stamina: 100, push: 0, red: false },
     read: false, subs: 3, talk: 0, confusion: 0, subAtt: 0, subDef: 0, log: [], logStart: 0, pens: null, auto: false,
@@ -532,7 +537,19 @@ function scene(g: Game): void {
   const m = g.match as MatchState;
   const eyebrow = m.label;
   const recent: Block[] = m.log.length > m.logStart ? [{ kind: 'log', items: m.log.slice(m.logStart) }] : [];
-  if (m.step === 'shape') {
+  if (m.step === 'vow') {
+    // 라이벌전 승리 공언. 경기력은 그대로이고, 이사회 신뢰를 얼마나 걸지만 고른다(정산은 career.ts의 rivalTrustDelta).
+    const risky = (g.job?.confidence ?? 100) < VOW_RISK;
+    g.scene = {
+      // ko 글틀은 조사 뒤에 "의"가 붙으면 바꾸지 않으므로 조사만 따로 맞춘다.
+      eyebrow, title: `${m.oppName}${attach(m.oppName, '과')}의 더비를 앞두고`,
+      blocks: m.intro ? [{ kind: 'note', text: m.intro, tone: 'plain' }] : [],
+      choices: [
+        { id: 'quiet', label: '말을 아낀다', detail: '이기면 신뢰 +2, 지면 −2' },
+        { id: 'vow', label: '승리를 공언한다', detail: `이기면 +5, 비기면 −1, 지면 −5${risky ? ' · 지면 경질 위험' : ''}` },
+      ],
+    };
+  } else if (m.step === 'shape') {
     const where = m.venue === 'home' ? '홈 경기' : m.venue === 'away' ? '원정 경기' : '중립 구장';
     const weather = WEATHER[m.weather];
     g.scene = {
@@ -625,6 +642,13 @@ function scene(g: Game): void {
     const verdict = m.pens ? (m.pens === 'won' ? '승부차기 끝에 이겼다' : '승부차기에서 졌다') : a > b ? '이겼다' : a < b ? '졌다' : '비겼다';
     const blocks: Block[] = [scoreBlock(g, m)];
     if (m.auto) blocks.push({ kind: 'note', text: '수석 코치가 지휘했다.', tone: 'plain' });
+    if (m.vow) {
+      blocks.push(a > b
+        ? { kind: 'note', text: '공언대로 이겼다. 팬들이 경기장 밖까지 노래를 이어 불렀다.', tone: 'good' }
+        : a === b
+          ? { kind: 'note', text: '공언은 지키지 못했다. 이사회가 말없이 고개를 저었다.', tone: 'plain' }
+          : { kind: 'note', text: '공언하고 졌다. 다음 날 신문 1면이 감독을 겨눴다.', tone: 'bad' });
+    }
     // 끝난 뒤에는 경기 전체를 처음부터 돌아본다.
     blocks.push({ kind: 'log', items: m.log });
     if (m.pens) blocks.push({ kind: 'note', text: m.pens === 'won' ? '120분으로도 가리지 못했다. 승부차기에서 골키퍼가 두 개를 막았다.' : '120분으로도 가리지 못했다. 승부차기 다섯 번째 키커의 공이 골대를 넘어갔다.', tone: m.pens === 'won' ? 'good' : 'bad' });
@@ -682,11 +706,19 @@ export function actMatch(g: Game, id: string): boolean {
   const m = g.match as MatchState;
   m.logStart = m.log.length;
   switch (m.step) {
+    case 'vow':
+      // 한 번 고르면 되돌릴 수 없다.
+      if (id !== 'quiet' && id !== 'vow') return false;
+      m.vow = id === 'vow';
+      m.step = 'shape';
+      break;
     case 'shape':
       if (id === 'auto') {
         autoplay(g, m);
         break;
       }
+      // 대형이 아닌 입력(공언 단계에서 두 번 누른 'vow' 등)은 무시한다.
+      if (!SHAPE_IDS.includes(id as ShapeId)) return false;
       m.me.shape = id as ShapeId;
       m.step = 'plan';
       break;

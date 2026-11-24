@@ -81,6 +81,8 @@ function choose(g: Game, dice: { rng: number }): string {
     case 'match': {
       // 상대 전술이 읽히면 '유리'라고 적힌 전술로 바꾸고, 아니면 그대로 간다.
       const m = g.match!;
+      // 라이벌전 공언은 첫 선택지(말을 아낀다). 이전과 같은 ±2 규칙이라 지표가 바뀌지 않는다.
+      if (m.step === 'vow') return 'quiet';
       if (m.step === 'shape') return '433';
       if (m.step === 'plan') return open.find((c) => c.detail?.includes('유리'))?.id ?? g.season.style;
       if (m.step === 'mode') return view;

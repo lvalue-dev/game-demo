@@ -479,6 +479,12 @@ export function rivalSweepBonus(lines: MatchLine[]): number {
   return lines.length > 0 && lines.every((l) => l.result === 'W') ? 2 : 0;
 }
 
+/** 라이벌전 한 경기가 이사회 신뢰에 더하는 값. 승리를 공언했으면 +5/−1/−5, 말을 아꼈으면 +2/0/−2. */
+export function rivalTrustDelta(vow: boolean, gf: number, ga: number): number {
+  if (vow) return gf > ga ? 5 : gf < ga ? -5 : -1;
+  return gf > ga ? 2 : gf < ga ? -2 : 0;
+}
+
 /**
  * 전반기 또는 후반기를 시작한다. 리그 경기를 자동으로 돌리되, 라이벌전 한 경기는 빼 두었다가
  * 감독이 직접 지휘한다. 이어서 토너먼트를 치르고, 다 끝나면 결산으로 넘어간다.
@@ -562,7 +568,7 @@ function advance(g: Game): void {
       label: club.nation ? `${seasonLabel(g)} · ${p.round + 1}차전` : `${seasonLabel(g)} · ${p.round + 1}R 라이벌전`,
       opp: { id: opp.id, name: opp.name, att: opp.att, def: opp.def, style: opp.style, shape: opp.shape },
       venue: neutral ? 'neutral' : p.home ? 'home' : 'away',
-      ...(rivalry && rivalry.club === opp.id ? { intro: rivalryLine(rivalry) } : {}),
+      ...(rivalry && rivalry.club === opp.id ? { intro: rivalryLine(rivalry), rival: true } : {}),
     });
     return;
   }
@@ -633,14 +639,15 @@ function settleMatch(g: Game): void {
       label: club.nation ? `${m.round + 1}차전` : `${m.round + 1}R`, opp: m.oppName, home: m.venue !== 'away', gf, ga,
       result: gf > ga ? 'W' : gf === ga ? 'D' : 'L', note: m.auto ? '라이벌전' : '직접 지휘',
     });
-    // 라이벌전은 직접 지휘했든 수석 코치에게 맡겼든 똑같이 전적에 쌓이고, 이사회 신뢰가 조금 움직인다.
+    // 라이벌전은 직접 지휘했든 수석 코치에게 맡겼든 똑같이 전적에 쌓이고, 이사회 신뢰가 움직인다.
+    // 경기 전에 승리를 공언했으면 더 크게 움직인다(예전 저장처럼 기록이 없으면 말을 아낀 것으로 본다).
     const rivalry = g.job!.rivalry;
     if (!club.nation && rivalry && m.oppId === rivalry.club) {
       if (gf > ga) rivalry.w++;
       else if (gf === ga) rivalry.d++;
       else rivalry.l++;
       rivalry.last = [gf, ga];
-      g.job!.confidence = clamp(g.job!.confidence + (gf > ga ? 2 : gf < ga ? -2 : 0), 0, 100);
+      g.job!.confidence = clamp(g.job!.confidence + rivalTrustDelta(!!m.vow, gf, ga), 0, 100);
     }
     if (!club.nation) countLeagueMatch(g, m);
   } else {
